@@ -20,15 +20,13 @@ import Testing
 @Suite("PolishPipeline – substituteDictatedPunctuation")
 struct DictatedPunctuationTests {
 
-    // --"comma and period" --
-    @Test("comma and period")
-    func commaAndPeriod() {
+    // --"comma" --
+    @Test("comma")
+    func comma() {
         let result = PolishPipeline.substituteDictatedPunctuation(
-            "pick up milk comma bread comma eggs period")
+            "pick up milk comma bread comma and eggs")
         #expect(result.contains(","))
-        #expect(result.contains("."))
         #expect(!result.lowercased().contains(" comma"))
-        #expect(!result.lowercased().contains(" period"))
         #expect(result.contains("milk"))
         #expect(result.contains("bread"))
         #expect(result.contains("eggs"))
@@ -66,8 +64,8 @@ struct DictatedPunctuationTests {
         #expect(result.contains("first"))
         #expect(result.contains("second"))
         #expect(result.first?.isUppercase == true)
-        // Should contain pilcrow placeholder in keep tag.
-        #expect(result.contains("<keep>\u{00b6}</keep>"))
+        // Should contain paragraph placeholder in keep tag.
+        #expect(result.contains("<keep>[PAR]</keep>"))
     }
 
     // --"hyphen" --
@@ -106,7 +104,7 @@ struct DictatedPunctuationTests {
     @Test("at sign")
     func atSign() {
         let result = PolishPipeline.substituteDictatedPunctuation(
-            "send it to jane at sign example period com")
+            "send it to jane at sign example dot com")
         #expect(result.contains("<keep>@</keep>"))
         #expect(!result.lowercased().contains("at sign"))
         #expect(result.contains("jane"))
@@ -186,10 +184,14 @@ struct DictatedPunctuationTests {
 
     // -- Additional regex behavior tests --
 
-    @Test("period and full stop produce dot")
-    func periodAndFullStop() {
-        #expect(PolishPipeline.substituteDictatedPunctuation("hello period") == "Hello.")
-        #expect(PolishPipeline.substituteDictatedPunctuation("hello full stop") == "Hello.")
+    @Test("period and full stop are not deterministic rules")
+    func periodAndFullStopPassThrough() {
+        // "period" and "full stop" are handled by the model, not
+        // deterministically — they collide with nouns.
+        let r1 = PolishPipeline.substituteDictatedPunctuation("hello period")
+        #expect(r1.lowercased().contains("period"))
+        let r2 = PolishPipeline.substituteDictatedPunctuation("hello full stop")
+        #expect(r2.lowercased().contains("full stop"))
     }
 
     @Test("colon and semicolon")
@@ -233,43 +235,47 @@ struct DictatedPunctuationTests {
     @Test("newline (single word)")
     func newlineSingleWord() {
         let result = PolishPipeline.substituteDictatedPunctuation("first newline second")
-        #expect(result.contains("<keep>\u{21b5}</keep>"))
+        #expect(result.contains("<keep>[NL]</keep>"))
         #expect(!result.lowercased().contains("newline"))
     }
 
     @Test("new line (two words)")
     func newLineTwoWords() {
         let result = PolishPipeline.substituteDictatedPunctuation("first new line second")
-        #expect(result.contains("<keep>\u{21b5}</keep>"))
+        #expect(result.contains("<keep>[NL]</keep>"))
         #expect(!result.lowercased().contains("new line"))
     }
 
     @Test("whitespace cleanup removes space before punctuation")
     func whitespaceCleanup() {
-        let result = PolishPipeline.substituteDictatedPunctuation("hello period")
-        #expect(!result.contains(" ."))
-        #expect(result.hasSuffix("."))
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "hello question mark")
+        #expect(!result.contains(" ?"))
+        #expect(result.hasSuffix("?"))
     }
 
     @Test("capitalize first letter")
     func capitalizeFirst() {
-        let result = PolishPipeline.substituteDictatedPunctuation("hello period")
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "hello comma world")
         #expect(result.first?.isUppercase == true)
     }
 
     @Test("capitalize after sentence-ending punctuation")
     func capitalizeAfterPunctuation() {
-        let result = PolishPipeline.substituteDictatedPunctuation("first period second")
-        // "first." + " " + "second" → "First. Second"
-        #expect(result.contains(". S"))
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "first exclamation point second")
+        #expect(result.contains("! S"))
     }
 
     @Test("case insensitive matching")
     func caseInsensitive() {
-        #expect(PolishPipeline.substituteDictatedPunctuation("hello PERIOD").contains("."))
-        #expect(PolishPipeline.substituteDictatedPunctuation("hello Period").contains("."))
+        #expect(PolishPipeline.substituteDictatedPunctuation("hello COMMA world")
+            .contains(","))
+        #expect(PolishPipeline.substituteDictatedPunctuation("hello Comma world")
+            .contains(","))
         #expect(PolishPipeline.substituteDictatedPunctuation("NEW PARAGRAPH test")
-            .contains("<keep>\u{00b6}</keep>"))
+            .contains("<keep>[PAR]</keep>"))
     }
 
     @Test("exclamation mark variant")
@@ -292,11 +298,11 @@ struct DictatedPunctuationTests {
         #expect(result == "Hey team, new commit is live.")
     }
 
-    @Test("dictated period adjacent to STT comma collapses to period")
-    func commaThenPeriodCollapses() {
+    @Test("dictated exclamation adjacent to STT comma collapses")
+    func commaThenExclamationCollapses() {
         let result = PolishPipeline.substituteDictatedPunctuation(
-            "Let me know if anything breaks, period.")
-        #expect(result == "Let me know if anything breaks.")
+            "Let me know if anything breaks, exclamation point")
+        #expect(result == "Let me know if anything breaks!")
     }
 
     @Test("three dictated commas in a row collapse to one")
@@ -306,19 +312,17 @@ struct DictatedPunctuationTests {
         #expect(result == "Hey team, new commit")
     }
 
-    @Test("period then comma collapses to period")
-    func periodThenCommaCollapses() {
+    @Test("exclamation then comma collapses to exclamation")
+    func exclamationThenCommaCollapses() {
         let result = PolishPipeline.substituteDictatedPunctuation(
-            "Ship it period, and celebrate.")
-        // The "period" → "." followed by "," collapses to ".", and the
-        // post-collapse capitalization pass promotes "and" to "And".
-        #expect(result == "Ship it. And celebrate.")
+            "Ship it exclamation point, and celebrate.")
+        #expect(result == "Ship it! And celebrate.")
     }
 
-    @Test("question mark beats period in a collision")
-    func questionBeatsPeriod() {
+    @Test("question mark beats comma in a collision")
+    func questionBeatsComma() {
         let result = PolishPipeline.substituteDictatedPunctuation(
-            "Is this working. question mark")
+            "Is this working, question mark")
         #expect(result == "Is this working?")
     }
 
@@ -447,6 +451,84 @@ struct StripKeepTagsTests {
         #expect(stripped.contains("second"))
     }
 
+    // -- Break punctuation insertion --
+
+    @Test("break after plain text inserts period")
+    func breakAfterPlainText() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "the deadline was moved new paragraph please update")
+        // Should get: "...moved.<keep>[PAR]</keep> Please update"
+        #expect(result.contains("moved.<keep>[PAR]</keep>"))
+    }
+
+    @Test("break after question mark does not add period")
+    func breakAfterQuestionMark() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "is this done question mark new paragraph next topic")
+        #expect(result.contains("?"))
+        #expect(result.contains("<keep>[PAR]</keep>"))
+        #expect(!result.contains(".<keep>[PAR]</keep>"))
+    }
+
+    @Test("break after exclamation does not add period")
+    func breakAfterExclamation() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "amazing exclamation point new line moving on")
+        #expect(result.contains("!"))
+        #expect(result.contains("<keep>[NL]</keep>"))
+        #expect(!result.contains(".<keep>[NL]</keep>"))
+    }
+
+    @Test("break after comma upgrades to period")
+    func breakAfterComma() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "after the meeting comma new line send the notes")
+        #expect(result.contains("meeting.<keep>[NL]</keep>"))
+        #expect(!result.contains(",<keep>"))
+    }
+
+    @Test("break after semicolon upgrades to period")
+    func breakAfterSemicolon() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "first item semicolon new paragraph second item")
+        #expect(result.contains("item.<keep>[PAR]</keep>"))
+        #expect(!result.contains(";<keep>"))
+    }
+
+    @Test("new line break inserts period")
+    func newLineBreakInsertsPeriod() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "see the summary new line details below")
+        #expect(result.contains("summary.<keep>[NL]</keep>"))
+    }
+
+    @Test("multiple breaks each get period")
+    func multipleBreaks() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "point one new line point two new line point three")
+        let stripped = PolishPipeline.stripKeepTags(result)
+        // Each line should end with a period (from the break cleanup).
+        let lines = stripped.split(separator: "\n")
+        #expect(lines.count == 3)
+        for line in lines.dropLast() {
+            #expect(line.hasSuffix("."),
+                "Line should end with period: \(line)")
+        }
+    }
+
+    @Test("round-trip: break produces correct paragraphs")
+    func roundTripBreakParagraphs() {
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            "the deadline was moved new paragraph please update")
+        let stripped = PolishPipeline.stripKeepTags(substituted)
+        #expect(stripped.contains("\n\n"))
+        // First paragraph ends with period, second starts capitalized.
+        let parts = stripped.components(separatedBy: "\n\n")
+        #expect(parts.count == 2)
+        #expect(parts[0].hasSuffix("."))
+        #expect(parts[1].first?.isUppercase == true)
+    }
+
     @Test("round-trip: ellipsis")
     func roundTripEllipsis() {
         let substituted = PolishPipeline.substituteDictatedPunctuation(
@@ -459,7 +541,7 @@ struct StripKeepTagsTests {
     @Test("round-trip: at sign in email-like context")
     func roundTripAtSign() {
         let substituted = PolishPipeline.substituteDictatedPunctuation(
-            "send it to jane at sign example period com")
+            "send it to jane at sign example dot com")
         let stripped = PolishPipeline.stripKeepTags(substituted)
         #expect(stripped.contains("@"))
         #expect(!stripped.lowercased().contains("at sign"))

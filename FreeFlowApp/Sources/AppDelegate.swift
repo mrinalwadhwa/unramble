@@ -98,9 +98,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Decide what to show on launch based on stored config.
     ///
-    /// If the Keychain has an OpenAI API key, skip straight to permissions
-    /// and hotkey registration. Otherwise show the onboarding window so
-    /// the user can enter one.
+    /// Local mode on Apple Silicon needs no API key, so skip straight to
+    /// permissions. Cloud mode requires a key — if one is stored, proceed;
+    /// otherwise show onboarding.
     private func determineLaunchFlow() {
         if Settings.shared.dictationMode == .local && DictationMode.isLocalAvailable {
             Log.debug("[AppDelegate] Local mode, checking permissions")
@@ -280,48 +280,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if Settings.shared.dictationMode == .local {
             // Local mode: Parakeet STT + fine-tuned MLX LLM polish.
+            #if arch(arm64)
             Log.debug("[AppDelegate] Using local models (Parakeet + MLX)")
             let modelManager = LocalModelManager()
             let sttEngine = ParakeetEngine(modelManager: modelManager)
-            #if arch(arm64)
             let llmEngine = MLXLLMEngine(
                 name: "Qwen3 0.6B Polish",
                 modelID: "mlx-community/Qwen3-0.6B-4bit",
                 adapterPath: adapterPath)
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
-            #else
-            let polisher: any PolishChatClient = OpenAIChatClient(
-                apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            #endif
             dictationProvider = LocalModelDictationProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             streamingProvider = LocalModelStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil
+            #else
+            fatalError("Local mode requires Apple Silicon")
+            #endif
         } else {
-            // Cloud mode: OpenAI STT + cloud polish, with local
-            // fine-tuned MLX as fallback when cloud is slow.
+            // Cloud mode: OpenAI STT + cloud polish.
             let polishClient = OpenAIChatClient(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            let localPolisher: (any PolishChatClient)?
-            #if arch(arm64)
-            let llmEngine = MLXLLMEngine(
-                name: "Qwen3 0.6B Polish",
-                modelID: "mlx-community/Qwen3-0.6B-4bit",
-                adapterPath: adapterPath)
-            localPolisher = MLXPolishClient(engine: llmEngine)
-            #else
-            localPolisher = nil
-            #endif
             dictationProvider = OpenAIDictationProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
-                polishChatClient: polishClient,
-                localPolishClient: localPolisher)
+                polishChatClient: polishClient)
             streamingProvider = OpenAIRealtimeProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
-                polishChatClient: polishClient,
-                localPolishClient: localPolisher)
+                polishChatClient: polishClient)
             onSessionExpired = { [weak self] in
                 Task { @MainActor in self?.resetAPIKey() }
             }

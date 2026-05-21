@@ -83,28 +83,35 @@ public struct SpeechAnalyzerDictationProvider: DictationProviding {
     private func polish(
         _ raw: String, context: AppContext
     ) async -> String {
-        let substituted = PolishPipeline.substituteDictatedPunctuation(raw)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            raw, casual: casual,
+            precedingText: context.focusedFieldContent)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
 
         guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
 
-        // Send the tag-stripped text to the local model. The on-device
-        // 3B model does not understand <keep> tags and may strip or
-        // mangle protected symbols. The cloud prompt has tag instructions
-        // but the local prompt omits them to save tokens.
+        let systemPrompt = PolishPipeline.buildQwenSystemPrompt(
+            context: context)
+
         do {
             let polished = try await polishChatClient.complete(
                 model: polishModel,
-                systemPrompt: PolishPipeline.systemPromptLocal,
+                systemPrompt: systemPrompt,
                 userPrompt: stripped)
             if polished.isEmpty {
-                return PolishPipeline.normalizeFormatting(stripped)
+                return PolishPipeline.normalizeFormatting(
+                    stripped, casual: casual)
             }
-            return PolishPipeline.normalizeFormatting(polished)
+            return PolishPipeline.normalizeFormatting(
+                polished, casual: casual)
         } catch {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
     }
 

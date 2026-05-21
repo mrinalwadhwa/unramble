@@ -438,4 +438,127 @@ struct NoiseSoundsStillStrippedTests {
     }
 }
 
+// MARK: - Punctuation commands must not match content words
+
+@Suite("Punctuation – content words not converted to symbols")
+struct PunctuationFalsePositiveTests {
+
+    private func pp(_ input: String) -> String {
+        PolishPipeline.substituteDictatedPunctuation(input)
+    }
+
+    // "star" as noun — must not become *
+    @Test("star as noun")
+    func starAsNoun() {
+        let result = pp("she's a star player on the team")
+        #expect(result.contains("star"), "star replaced: \(result)")
+    }
+
+    @Test("five star review")
+    func fiveStarReview() {
+        let result = pp("it got a five star review")
+        #expect(result.contains("star"), "star replaced: \(result)")
+    }
+
+    // "slash" as verb — must not become /
+    @Test("slash as verb")
+    func slashAsVerb() {
+        let result = pp("they had to slash the budget")
+        #expect(result.contains("slash"), "slash replaced: \(result)")
+    }
+
+    // "dash" as noun/verb — must not become –
+    @Test("dash as noun")
+    func dashAsNoun() {
+        let result = pp("add a dash of salt to the recipe")
+        #expect(result.contains("dash"), "dash replaced: \(result)")
+    }
+
+    @Test("dash as verb")
+    func dashAsVerb() {
+        let result = pp("I need to dash to the store")
+        #expect(result.contains("dash"), "dash replaced: \(result)")
+    }
+
+    // "mention" as verb — must not become @
+    @Test("mention as verb")
+    func mentionAsVerb() {
+        let result = pp("don't mention it to the client")
+        #expect(result.contains("mention"), "mention replaced: \(result)")
+    }
+
+    // "ping" as verb — must not become @
+    @Test("ping as verb")
+    func pingAsVerb() {
+        let result = pp("ping the server to check if it's up")
+        #expect(result.lowercased().contains("ping"), "ping replaced: \(result)")
+    }
+
+    // "less than" as comparison — must not become <
+    @Test("less than as comparison")
+    func lessThanComparison() {
+        let result = pp("the result was less than ideal")
+        #expect(result.contains("less than"), "less than replaced: \(result)")
+    }
+
+    // "greater than" as comparison — must not become >
+    @Test("greater than as comparison")
+    func greaterThanComparison() {
+        let result = pp("the turnout was greater than expected")
+        #expect(result.contains("greater than"), "greater than replaced: \(result)")
+    }
+
+    // "trademark" as noun — must not become ™
+    @Test("trademark as noun")
+    func trademarkAsNoun() {
+        let result = pp("we need to protect our trademark")
+        #expect(result.contains("trademark"), "trademark replaced: \(result)")
+    }
+
+    // "copyright" as noun — must not become ©
+    @Test("copyright as noun")
+    func copyrightAsNoun() {
+        let result = pp("copyright law is complex")
+        #expect(result.lowercased().contains("copyright"), "copyright replaced: \(result)")
+    }
+
+    // "negative" as adjective — must not become -
+    @Test("negative as adjective")
+    func negativeAsAdjective() {
+        let result = pp("the negative impact was significant")
+        #expect(result.contains("negative"), "negative replaced: \(result)")
+    }
+
+    // Safe commands that SHOULD still work
+    @Test("forward slash still works")
+    func forwardSlash() {
+        let result = pp("the path is input forward slash output")
+        #expect(result.contains("/"), "forward slash not converted: \(result)")
+    }
+
+    @Test("em dash still works")
+    func emDash() {
+        let result = pp("the project em dash which started in January em dash is done")
+        #expect(result.contains("\u{2014}"), "em dash not converted: \(result)")
+    }
+
+    @Test("at sign still works")
+    func atSign() {
+        let result = pp("send it to john at sign example dot com")
+        #expect(result.contains("@"), "at sign not converted: \(result)")
+    }
+
+    @Test("asterisk still works")
+    func asteriskCommand() {
+        let result = pp("wrap it in asterisk tags asterisk")
+        #expect(result.contains("*"), "asterisk not converted: \(result)")
+    }
+
+    @Test("angle bracket still works")
+    func angleBracket() {
+        let result = pp("use angle bracket div close angle bracket")
+        #expect(result.contains("<"), "angle bracket not converted: \(result)")
+    }
+}
+
 // swiftlint:enable line_length

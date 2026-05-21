@@ -41,12 +41,12 @@ public enum PolishPipeline {
     // partial matches.
     private static let punctuationRules: [PunctuationRule] = [
         // Paragraph and line breaks.
-        PunctuationRule(#"\bnew paragraph\b"#, "\u{00b6}", protect: true),
-        PunctuationRule(#"\bnew line\b"#, "\u{21b5}", protect: true),
-        PunctuationRule(#"\bnewline\b"#, "\u{21b5}", protect: true),
-        // Sentence-ending punctuation.
-        PunctuationRule(#"\bperiod\b"#, "."),
-        PunctuationRule(#"\bfull stop\b"#, "."),
+        PunctuationRule(#"\bnew paragraph\b"#, "[PAR]", protect: true),
+        PunctuationRule(#"\bnew line\b"#, "[NL]", protect: true),
+        PunctuationRule(#"\bnewline\b"#, "[NL]", protect: true),
+        // "period" and "full stop" are handled by the model, not
+        // deterministically — they collide with nouns ("billing period",
+        // "came to a full stop").
         PunctuationRule(#"\bquestion mark\b"#, "?"),
         PunctuationRule(#"\bexclamation point\b"#, "!"),
         PunctuationRule(#"\bexclamation mark\b"#, "!"),
@@ -54,38 +54,59 @@ public enum PolishPipeline {
         PunctuationRule(#"\bcomma\b"#, ","),
         PunctuationRule(#"\bcolon\b"#, ":"),
         PunctuationRule(#"\bsemicolon\b"#, ";"),
-        // Brackets and quotes. "parent" is a common STT misrecognition
-        // for "paren" because "paren" isn't a standalone English word,
-        // so we accept it as an alias.
+        // Dashes.
+        PunctuationRule(#"\bem dash\b"#, "\u{2014}", protect: true),
+        PunctuationRule(#"\ben dash\b"#, "\u{2013}", protect: true),
+        PunctuationRule(#"\bhyphen\b"#, "-", protect: true),
+        PunctuationRule(#"\bminus\s+(?:sign|symbol)\b"#, "-", protect: true),
+        // Brackets, quotes, and parens. "parent" is a common STT
+        // misrecognition for "paren" because "paren" isn't a standalone
+        // English word, so we accept it as an alias.
         PunctuationRule(#"\bopen paren(?:t|thesis)?\b"#, "("),
         PunctuationRule(#"\bclose paren(?:t|thesis)?\b"#, ")"),
         PunctuationRule(#"\bopen quote\b"#, "\u{201c}"),
         PunctuationRule(#"\b(?:close|end) quote\b"#, "\u{201d}"),
         PunctuationRule(#"\bunquote\b"#, "\u{201d}"),
+        PunctuationRule(#"\b(?:apostrophe|single quote)\b"#, "'"),
         PunctuationRule(#"\bopen bracket\b"#, "["),
         PunctuationRule(#"\bclose bracket\b"#, "]"),
+        PunctuationRule(#"\b(?:open )?angle bracket\b"#, "<", protect: true),
+        PunctuationRule(#"\bless[- ]than sign\b"#, "<", protect: true),
+        PunctuationRule(#"\bclose angle bracket\b"#, ">", protect: true),
+        PunctuationRule(#"\bgreater[- ]than sign\b"#, ">", protect: true),
         // Symbols (protected — the LLM might reinterpret these).
         PunctuationRule(#"\bdot dot dot\b"#, "\u{2026}", protect: true),
         PunctuationRule(#"\bellipsis\b"#, "\u{2026}", protect: true),
-        PunctuationRule(#"\bhyphen\b"#, "-", protect: true),
-        PunctuationRule(#"\bampersand\b"#, "&", protect: true),
-        PunctuationRule(#"\bat sign\b"#, "@", protect: true),
+        PunctuationRule(#"\b(?:ampersand|and sign|and symbol)\b"#, "&", protect: true),
+        PunctuationRule(#"\b(?:at sign|at symbol)\b"#, "@", protect: true),
         PunctuationRule(#"\bhashtag\b"#, "#", protect: true),
+        PunctuationRule(#"\b(?:back ?slash|slash en)\b"#, "\\", protect: true),
         PunctuationRule(#"\bforward slash\b"#, "/", protect: true),
-        PunctuationRule(#"\bbackslash\b"#, "\\", protect: true),
-        PunctuationRule(#"\basterisk\b"#, "*", protect: true),
+        PunctuationRule(#"\b(?:asterisk|asterisk sign)\b"#, "*", protect: true),
         PunctuationRule(#"\bunderscore\b"#, "_", protect: true),
-        PunctuationRule(#"\bpercent sign\b"#, "%", protect: true),
+        PunctuationRule(#"\b(?:percent sign|per cent|percentage symbol)\b"#, "%", protect: true),
         PunctuationRule(#"\bdollar sign\b"#, "$", protect: true),
-        PunctuationRule(#"\bequals sign\b"#, "=", protect: true),
-        PunctuationRule(#"\bplus sign\b"#, "+", protect: true),
+        PunctuationRule(#"\b(?:equals sign|equals symbol)\b"#, "=", protect: true),
+        PunctuationRule(#"\b(?:plus sign|plus symbol)\b"#, "+", protect: true),
+        // Special symbols.
+        PunctuationRule(#"\btrademark sign\b"#, "\u{2122}", protect: true),
+        PunctuationRule(#"\btm\b"#, "\u{2122}", protect: true),
+        PunctuationRule(#"\bcopyright sign\b"#, "\u{00a9}", protect: true),
+        PunctuationRule(#"\bcopyright symbol\b"#, "\u{00a9}", protect: true),
+        PunctuationRule(#"\bdegrees?\s+fahrenheit\b"#, "\u{00b0}F", protect: true),
+        PunctuationRule(#"\bdegrees?\s+f\b"#, "\u{00b0}F", protect: true),
+        PunctuationRule(#"\bdegrees?\s+celsius\b"#, "\u{00b0}C", protect: true),
+        PunctuationRule(#"\bdegrees?\s+centigrade\b"#, "\u{00b0}C", protect: true),
+        PunctuationRule(#"\b(?:degree sign|degree symbol)\b"#, "\u{00b0}", protect: true),
     ]
 
     /// Replace spoken punctuation commands with actual symbols.
     ///
     /// Protected symbols are wrapped in `<keep>` tags so the LLM
     /// preserves them verbatim.
-    public static func substituteDictatedPunctuation(_ text: String) -> String {
+    public static func substituteDictatedPunctuation(
+        _ text: String, casual: Bool = false, precedingText: String? = nil
+    ) -> String {
         var result = text
 
         for rule in punctuationRules {
@@ -113,6 +134,10 @@ public enum PolishPipeline {
             output += result[lastEnd...]
             result = output
         }
+
+        // Convert literal "..." to Unicode ellipsis.
+        result = result.replacingOccurrences(
+            of: "...", with: "<keep>\u{2026}</keep>")
 
         // Clean up whitespace around punctuation introduced by substitution.
         // Remove spaces before punctuation that attaches to preceding word.
@@ -142,18 +167,36 @@ public enum PolishPipeline {
         // becomes "breaks.".
         result = collapseAdjacentPunctuation(result)
 
+        // Ensure sentence-ending punctuation before paragraph/line
+        // break tags. Replace weak punctuation (comma, semicolon)
+        // with a period; insert a period if none present.
+        result = result.replacingOccurrences(
+            of: #"[,;]\s*(<keep>\[(?:PAR|NL)\]</keep>)"#,
+            with: ".$1",
+            options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: #"([^.!?\s])\s*(<keep>\[(?:PAR|NL)\]</keep>)"#,
+            with: "$1.$2",
+            options: .regularExpression)
+
         // Trim whitespace around line breaks.
         result = result.replacingOccurrences(
             of: " *\n *",
             with: "\n",
             options: .regularExpression)
 
-        // Capitalize first letter after sentence-ending punctuation + space.
-        result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
+        if !casual {
+            // Capitalize first letter after sentence-ending punctuation + space.
+            result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
 
-        // Capitalize very first character.
-        if let first = result.first, first.isLetter {
-            result = first.uppercased() + result.dropFirst()
+            // Capitalize very first character — unless we're continuing
+            // mid-sentence from preceding text.
+            let midSentence = precedingText.map {
+                !$0.isEmpty && !endsAtSentenceBoundary($0)
+            } ?? false
+            if !midSentence, let first = result.first, first.isLetter {
+                result = first.uppercased() + result.dropFirst()
+            }
         }
 
         // Remove spurious commas from Apple STT artifacts.
@@ -318,163 +361,38 @@ public enum PolishPipeline {
         return result.trimmingCharacters(in: .whitespaces)
     }
 
-    // MARK: - Polish Race
+    // MARK: - Cloud System Prompt
 
-    /// Which polish path produced the result.
-    public enum PolishSource: String, Sendable {
-        /// Cloud LLM (OpenAI) finished within the timeout.
-        case cloud
-        /// Cloud timed out or failed; on-device model provided the result.
-        case local
-        /// Both cloud and local failed; deterministic formatting used.
-        case fallback
-    }
-
-    /// Result of the polish race, including the polished text and which
-    /// path produced it.
-    public struct PolishResult: Sendable {
-        public let text: String
-        public let source: PolishSource
-    }
-
-    /// Race cloud and local polish clients, returning the first good
-    /// result within the timeout.
+    /// Build a dynamic system prompt for cloud polish models.
     ///
-    /// Fire the cloud client immediately. On macOS 26+, fire the local
-    /// client in parallel. If the cloud client finishes within the
-    /// timeout, use its result. Otherwise use the local result. If both
-    /// fail or no local client is available and the cloud times out,
-    /// return the deterministic-polished text.
-    ///
-    /// - Parameters:
-    ///   - substituted: Text after dictated punctuation substitution
-    ///     (with `<keep>` tags). Used to build the LLM prompt.
-    ///   - stripped: Text after tag stripping. Used as fallback and for
-    ///     the `[Polish] CHANGED` diagnostic log.
-    ///   - context: App context for prompt construction.
-    ///   - language: Language code for prompt selection.
-    ///   - cloudClient: The cloud LLM client (OpenAI).
-    ///   - localClient: The on-device LLM client, or nil on macOS < 26.
-    ///   - model: Model identifier for the cloud client.
-    ///   - timeout: Maximum time to wait for the cloud client.
-    public static func racePolish(
-        substituted: String,
-        stripped: String,
-        context: AppContext,
-        language: String?,
-        cloudClient: any PolishChatClient,
-        localClient: (any PolishChatClient)?,
-        model: String = polishModel,
-        timeout: TimeInterval? = nil
-    ) async -> PolishResult {
-        let prompt = systemPrompt(forLanguage: language)
-        let userPrompt = buildUserPrompt(
-            substituted, context: .empty, language: language)
+    /// Start with the language-appropriate cloud prompt and append
+    /// optional context lines for casual mode and preceding text.
+    /// Cloud models (GPT) follow instructions natively — no training
+    /// needed, just clear instructions.
+    public static func buildCloudSystemPrompt(
+        context: AppContext, language: String?
+    ) -> String {
+        let isCasual = toneLabel(for: context.bundleID) == "casual"
+        var prompt = isCasual
+            ? systemPromptCasual
+            : systemPrompt(forLanguage: language)
 
-        // Scale the cloud timeout with input length. Short dictations
-        // get a tight 1.5s window; longer inputs get proportionally
-        // more time so the cloud LLM can finish without being cut off.
-        let wordCount = stripped.split(separator: " ").count
-        let effectiveTimeout: TimeInterval
-        if let timeout {
-            effectiveTimeout = timeout
-        } else {
-            effectiveTimeout = max(2.0, 1.5 + Double(wordCount) * 0.03)
-        }
-
-        // Compute the polish cap early so we can log it.
-        let polishCap = max(8.0, 5.0 + Double(wordCount) * 0.05)
-        Log.debug(
-            String(format: "[Polish] race: %d words, timeout=%.1fs, cap=%.1fs, local=%@",
-                   wordCount, effectiveTimeout, polishCap,
-                   localClient != nil ? "yes" : "no"))
-
-        // Start both clients in parallel.
-        let cloudTask = Task {
-            try await cloudClient.complete(
-                model: model, systemPrompt: prompt, userPrompt: userPrompt)
-        }
-        let localTask: Task<String, any Error>? = localClient.map { client in
-            Task {
-                try await client.complete(
-                    model: model, systemPrompt: prompt, userPrompt: userPrompt)
+        if let content = context.focusedFieldContent,
+           !content.isEmpty
+        {
+            let suffix: String
+            if content.count > 80 {
+                suffix = String(content.suffix(80))
+            } else {
+                suffix = content
+            }
+            let sanitized = sanitizeContextField(suffix)
+            if !sanitized.isEmpty {
+                prompt += "\nPreceding text: \(sanitized)"
             }
         }
 
-        // Race cloud, local, and timeouts using detached tasks with a
-        // single checked continuation. Structured concurrency (TaskGroup)
-        // waits for ALL children before the scope exits, even after
-        // cancelAll(). Unstructured Task.value blocks until the task
-        // completes regardless of the caller's cancellation. Detached
-        // tasks + a continuation avoid both: the continuation resumes
-        // as soon as any path delivers a result.
-        //
-        // Priority order:
-        //   1. Cloud finishes (any time) → use cloud
-        //   2. After effectiveTimeout: local finishes → use local
-        //   3. After polishCap: give up → deterministic fallback
-        let winner: (String, PolishSource)? = await withCheckedContinuation { continuation in
-            let lock = NSLock()
-            var resumed = false
-
-            func tryResume(_ value: (String, PolishSource)?) {
-                let alreadyResumed = lock.withLock {
-                    let was = resumed
-                    if !was { resumed = true }
-                    return was
-                }
-                if !alreadyResumed {
-                    cloudTask.cancel()
-                    localTask?.cancel()
-                    continuation.resume(returning: value)
-                }
-            }
-
-            // Cloud: accepted any time (highest priority).
-            Task.detached {
-                if let r = try? await cloudTask.value,
-                    !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                { tryResume((r, .cloud)) }
-            }
-
-            // Local (macOS 26+): wait for cloud preference window,
-            // then accept the first local result.
-            if let localTask {
-                Task.detached {
-                    try? await Task.sleep(
-                        nanoseconds: UInt64(effectiveTimeout * 1_000_000_000))
-                    if let r = try? await localTask.value,
-                        !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    { tryResume((r, .local)) }
-                }
-            }
-
-            // Hard cap: give up after polishCap seconds. On macOS < 26
-            // (no local client) this also serves as the cloud timeout.
-            let capTimeout = localTask != nil
-                ? polishCap
-                : effectiveTimeout
-            Task.detached {
-                try? await Task.sleep(
-                    nanoseconds: UInt64(capTimeout * 1_000_000_000))
-                tryResume(nil)
-            }
-        }
-
-        if let (text, source) = winner {
-            if source == .local {
-                Log.debug("[Polish] Cloud timed out, using local result")
-            }
-            return PolishResult(
-                text: normalizeFormatting(stripKeepTags(text)),
-                source: source)
-        }
-
-        // Both failed — deterministic fallback.
-        Log.debug("[Polish] Both cloud and local failed, using raw text")
-        return PolishResult(
-            text: normalizeFormatting(stripped),
-            source: .fallback)
+        return prompt
     }
 
     // MARK: - Keep Tag Processing
@@ -484,9 +402,11 @@ public enum PolishPipeline {
 
     /// Remove `<keep>` tags, leaving their content in place.
     ///
-    /// Expand `¶` and `↵` placeholders to real line breaks. Clean up
-    /// whitespace around revealed symbols.
-    public static func stripKeepTags(_ text: String) -> String {
+    /// Expand `[PAR]` and `[NL]` placeholders to real line breaks.
+    /// Clean up whitespace around revealed symbols.
+    public static func stripKeepTags(
+        _ text: String, casual: Bool = false
+    ) -> String {
         var result = text
 
         // Strip tags, keep content.
@@ -496,38 +416,49 @@ public enum PolishPipeline {
             withTemplate: "$1")
 
         // Expand break placeholders to real newlines.
-        // Expand pilcrow placeholder to double newline.
+        result = result.replacingOccurrences(
+            of: " *\\[PAR\\] *", with: "\n\n", options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: " *\\[NL\\] *", with: "\n", options: .regularExpression)
+        // Legacy placeholders (pilcrow / return arrow).
         result = result.replacingOccurrences(
             of: " *\u{00b6} *", with: "\n\n", options: .regularExpression)
-        // Expand return arrow placeholder to single newline.
         result = result.replacingOccurrences(
             of: " *\u{21b5} *", with: "\n", options: .regularExpression)
 
         // Clean up whitespace around symbols that were inside tags.
         // Punctuation that attaches to preceding word.
         result = result.replacingOccurrences(
-            of: " +([.,;:?!)\\]\u{201d}\u{2026}%])",
+            of: " +([.,;:?!)\\]>\u{201d}\u{2026}%\u{2122}\u{00a9}\u{00b0}])",
             with: "$1",
             options: .regularExpression)
 
         // Symbols that attach to following word.
         result = result.replacingOccurrences(
-            of: "([(\\[\u{201c}#$]) +",
+            of: "([(\\[\u{201c}#$<]) +",
             with: "$1",
             options: .regularExpression)
 
         // Symbols that attach on both sides.
         result = result.replacingOccurrences(
-            of: " *([-@/\\\\]) +",
+            of: " *([-@/\\\\_'\u{2013}\u{2014}]) +",
             with: "$1",
             options: .regularExpression)
+
+        // Asterisks: collapse internal spaces in asterisk groups.
+        // "* really *" → "*really*", "* * * *" → "****"
+        // Matches a run starting and ending with * (with optional
+        // content between), collapses all spaces within the run.
+        result = collapseAsteriskGroups(result)
 
         // Collapse multiple spaces.
         result = result.replacingOccurrences(
             of: " {2,}", with: " ", options: .regularExpression)
 
-        // Capitalize first letter after paragraph/line breaks.
-        result = capitalizeAfterPattern(result, pattern: "(\\n)(\\w)")
+        if !casual {
+            // Capitalize first letter after paragraph/line breaks.
+            result = capitalizeAfterPattern(result, pattern: "(\\n)(\\w)")
+        }
 
         return result
     }
@@ -535,14 +466,18 @@ public enum PolishPipeline {
     // MARK: - Normalize Formatting
 
     /// Fix common LLM formatting inconsistencies.
-    public static func normalizeFormatting(_ text: String) -> String {
+    public static func normalizeFormatting(
+        _ text: String, casual: Bool = false
+    ) -> String {
         var result = text
 
         // Safety net for leaked placeholders.
-        // Expand pilcrow placeholder to double newline.
+        result = result.replacingOccurrences(
+            of: " *\\[PAR\\] *", with: "\n\n", options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: " *\\[NL\\] *", with: "\n", options: .regularExpression)
         result = result.replacingOccurrences(
             of: " *\u{00b6} *", with: "\n\n", options: .regularExpression)
-        // Expand return arrow placeholder to single newline.
         result = result.replacingOccurrences(
             of: " *\u{21b5} *", with: "\n", options: .regularExpression)
 
@@ -569,7 +504,8 @@ public enum PolishPipeline {
             of: #"\bp\.m\.(?=$|\n)"#, with: "PM.", options: .regularExpression)
 
         // Process line by line.
-        // Strip trailing whitespace and normalize bullet items per line.
+        // Strip trailing whitespace, normalize bullets, and strip
+        // trailing periods from list items for consistent style.
         let lines = result.split(
             separator: "\n", omittingEmptySubsequences: false)
         var output: [String] = []
@@ -584,14 +520,23 @@ public enum PolishPipeline {
                 of: "^(\\s*)-(\\S)",
                 with: "$1- $2",
                 options: .regularExpression)
+            // Strip trailing period from list items (bullet or numbered).
+            if l.hasSuffix("."),
+               l.range(of: #"^\s*(?:-|\d+\.)\s+"#,
+                       options: .regularExpression) != nil
+            {
+                l = String(l.dropLast())
+            }
             output.append(l)
         }
         result = output.joined(separator: "\n")
 
-        // Fix capitalization of known tech terms. These are product
-        // names that should always be capitalized the same way. This
-        // is additive only — never removes or transforms content.
-        result = capitalizeKnownTerms(result)
+        if !casual {
+            // Fix capitalization of known tech terms. These are product
+            // names that should always be capitalized the same way. This
+            // is additive only — never removes or transforms content.
+            result = capitalizeKnownTerms(result)
+        }
 
         return result
     }
@@ -674,6 +619,8 @@ public enum PolishPipeline {
             ("zoom", "Zoom"),
             ("figma", "Figma"),
             ("linear", "Linear"),
+            // Abbreviations
+            ("lgtm", "LGTM"),
             // Products
             ("macos", "macOS"),
             ("ios", "iOS"),
@@ -702,6 +649,75 @@ public enum PolishPipeline {
                 withTemplate: replacement)
         }
         return result
+    }
+
+    // MARK: - Local System Prompt
+
+    /// Build a dynamic system prompt for the fine-tuned Qwen model.
+    ///
+    /// Starts with the base `systemPromptQwen` and appends optional
+    /// context lines. The model was trained with these lines present
+    /// or absent, so it adapts its behavior accordingly.
+    ///
+    /// - Parameters:
+    ///   - context: App context for tone detection and preceding text.
+    /// - Returns: The system prompt string.
+    public static func buildQwenSystemPrompt(
+        context: AppContext
+    ) -> String {
+        var prompt = systemPromptQwen
+
+        if let tone = toneLabel(for: context.bundleID) {
+            prompt += "\nStyle: \(tone)"
+        }
+
+        if let content = context.focusedFieldContent,
+           !content.isEmpty
+        {
+            // Take the last ~80 characters as preceding text context.
+            let suffix: String
+            if content.count > 80 {
+                suffix = String(content.suffix(80))
+            } else {
+                suffix = content
+            }
+            let sanitized = sanitizeContextField(suffix)
+            if !sanitized.isEmpty {
+                prompt += "\nPreceding text: \(sanitized)"
+            }
+        }
+
+        return prompt
+    }
+
+    // MARK: - Tone Mapping
+
+    /// Known casual app bundle IDs — chat and messaging apps where
+    /// users expect informal tone: lowercase starts, no trailing
+    /// periods, contractions preserved.
+    private static let casualBundleIDs: Set<String> = [
+        // Apple
+        "com.apple.MobileSMS",          // Messages
+        // Slack
+        "com.tinyspeck.slackmacgap",
+        // Discord
+        "com.hnc.Discord",
+        // Telegram
+        "ru.keepcoder.Telegram",
+        // WhatsApp
+        "net.whatsapp.WhatsApp",
+        // Signal
+        "org.whispersystems.signal-desktop",
+        // Microsoft Teams (chat context)
+        "com.microsoft.teams2",
+    ]
+
+    /// Return the tone label for a given bundle ID.
+    ///
+    /// Returns `"casual"` for chat/messaging apps, `nil` for everything
+    /// else (which uses the default formal behavior).
+    public static func toneLabel(for bundleID: String) -> String? {
+        casualBundleIDs.contains(bundleID) ? "casual" : nil
     }
 
     // MARK: - Context Formatting
@@ -820,6 +836,32 @@ public enum PolishPipeline {
     }
 
     // swiftlint:enable line_length
+
+    // MARK: - Asterisk Grouping
+
+    /// Collapse spaces inside asterisk groups.
+    ///
+    /// Finds runs that start and end with `*` (like `* really *` or
+    /// `* * * *`) and removes all spaces within the run.
+    /// "is * really * important" → "is *really* important"
+    /// "password is * * * *" → "password is ****"
+    private static func collapseAsteriskGroups(_ text: String) -> String {
+        // Match: asterisk, then any mix of spaces/words/asterisks, ending
+        // with an asterisk. The whole group's internal spaces collapse.
+        guard let regex = try? NSRegularExpression(
+            pattern: #"\*[\w* ]*\*"#) else { return text }
+        var result = text
+        let matches = regex.matches(
+            in: result, range: NSRange(result.startIndex..., in: result))
+        // Process from end to preserve indices.
+        for match in matches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            let group = String(result[range])
+            let collapsed = group.replacingOccurrences(of: " ", with: "")
+            result.replaceSubrange(range, with: collapsed)
+        }
+        return result
+    }
 
     // MARK: - Helpers
 

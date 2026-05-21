@@ -34,7 +34,6 @@ public final class OpenAIRealtimeProvider: StreamingDictationProviding, @uncheck
     private let realtimeModel: String
     private let sttModel: String
     private let polishChatClient: (any PolishChatClient)?
-    private let localPolishClient: (any PolishChatClient)?
     private let polishModel: String
     private let chunkingStrategy: ChunkingStrategy
 
@@ -114,7 +113,6 @@ public final class OpenAIRealtimeProvider: StreamingDictationProviding, @uncheck
             case pending
             case skip = "skip"
             case llmOK = "llm-ok"
-            case llmLocalFallback = "llm-local"
             case llmFailed = "llm-failed"
             case llmEmpty = "llm-empty"
             case noChatClient = "no-llm"
@@ -180,15 +178,13 @@ public final class OpenAIRealtimeProvider: StreamingDictationProviding, @uncheck
         realtimeModel: String = "gpt-4o-realtime-preview",
         sttModel: String = "gpt-4o-mini-transcribe",
         polishChatClient: (any PolishChatClient)?,
-        localPolishClient: (any PolishChatClient)? = nil,
-        polishModel: String = "gpt-4.1-nano",
+        polishModel: String = PolishPipeline.polishModel,
         chunkingStrategy: ChunkingStrategy = TimeAndSilenceChunkingStrategy()
     ) {
         self.apiKeyProvider = apiKey
         self.realtimeModel = realtimeModel
         self.sttModel = sttModel
         self.polishChatClient = polishChatClient
-        self.localPolishClient = localPolishClient
         self.polishModel = polishModel
         self.chunkingStrategy = chunkingStrategy
     }
@@ -1171,8 +1167,16 @@ public final class OpenAIRealtimeProvider: StreamingDictationProviding, @uncheck
             }
         }
 
-        let substituted = PolishPipeline.substituteDictatedPunctuation(raw)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+        let (context, language): (AppContext, String?) = lock.withLock {
+            (self.currentContext, self.currentLanguage)
+        }
+
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            raw, casual: casual,
+            precedingText: context.focusedFieldContent)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
 
         guard let polishChatClient else {
             if updateTiming {
@@ -1181,38 +1185,54 @@ public final class OpenAIRealtimeProvider: StreamingDictationProviding, @uncheck
                     self.currentTiming?.polishFinishedAt = Date()
                 }
             }
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
 
-        let (context, language): (AppContext, String?) = lock.withLock {
-            (self.currentContext, self.currentLanguage)
-        }
+        let systemPrompt = PolishPipeline.buildCloudSystemPrompt(
+            context: context, language: language)
+        let userPrompt = PolishPipeline.buildUserPrompt(
+            substituted, context: context, language: language)
 
-        let polishResult = await PolishPipeline.racePolish(
-            substituted: substituted,
-            stripped: stripped,
-            context: context,
-            language: language,
-            cloudClient: polishChatClient,
-            localClient: localPolishClient,
-            model: polishModel
-        )
-
-        if updateTiming {
-            let kind: SessionTiming.PolishKind = switch polishResult.source {
-            case .cloud: .llmOK
-            case .local: .llmLocalFallback
-            case .fallback: .llmFailed
+        do {
+            let polished = try await polishChatClient.complete(
+                model: polishModel,
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt)
+            if polished.isEmpty {
+                if updateTiming {
+                    lock.withLock {
+                        self.currentTiming?.polishKind = .llmEmpty
+                        self.currentTiming?.polishFinishedAt = Date()
+                    }
+                }
+                return PolishPipeline.normalizeFormatting(
+                    stripped, casual: casual)
             }
-            lock.withLock {
-                self.currentTiming?.polishKind = kind
-                self.currentTiming?.polishFinishedAt = Date()
+            if updateTiming {
+                lock.withLock {
+                    self.currentTiming?.polishKind = .llmOK
+                    self.currentTiming?.polishFinishedAt = Date()
+                }
             }
+            let untagged = PolishPipeline.stripKeepTags(
+                polished, casual: casual)
+            let result = PolishPipeline.normalizeFormatting(
+                untagged, casual: casual)
+            if stripped != result {
+                Log.debug("[Polish] CHANGED: \"\(stripped)\" → \"\(result)\"")
+            }
+            return result
+        } catch {
+            if updateTiming {
+                lock.withLock {
+                    self.currentTiming?.polishKind = .llmFailed
+                    self.currentTiming?.polishFinishedAt = Date()
+                }
+            }
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
-        if stripped != polishResult.text {
-            Log.debug("[Polish] CHANGED (\(polishResult.source.rawValue)): \"\(stripped)\" → \"\(polishResult.text)\"")
-        }
-        return polishResult.text
     }
 
     // MARK: - WAV helpers

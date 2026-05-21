@@ -10,49 +10,86 @@ import Foundation
 //   touch /tmp/freeflow-test-mlx-17    # Qwen3 1.7B
 //   touch /tmp/freeflow-test-mlx-gemma # Gemma 3 1B
 //
-// Run: cd FreeFlowKit && xcodebuild test -scheme FreeFlowKit \
+// Run:
+//   cd FreeFlowKit && xcodebuild test -scheme FreeFlowKit \
 //        -destination 'platform=macOS' \
-//        -only-testing:FreeFlowKitTests/PolishScenarioDumpMLX
+//        -only-testing:FreeFlowKitTests/PolishScenarioDumpMLX \
+//        SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) FREEFLOW_MLX_TESTS'
+//
+// Output goes to /tmp/freeflow-mlx-eval.log (tail -f to watch live).
 
-// Disabled for swift test — MLX requires Metal shaders only available
-// via xcodebuild. Enable this block when running via xcodebuild.
 #if FREEFLOW_MLX_TESTS
 
-private func runMLXDump(name: String, modelID: String) async throws {
-    let engine = MLXLLMEngine(name: name, modelID: modelID)
+/// Write evaluation output to a log file so it is visible even when
+/// xcodebuild swallows test stdout.
+private final class EvalLogger {
+    let handle: FileHandle
+
+    init(path: String) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+        handle = FileHandle(forWritingAtPath: path)!
+    }
+
+    func log(_ line: String) {
+        handle.write(Data((line + "\n").utf8))
+        handle.synchronizeFile()
+    }
+
+    deinit { try? handle.close() }
+}
+
+private func runMLXDump(
+    name: String,
+    modelID: String,
+    adapterPath: String? = nil,
+    scenarios: [PolishScenario]? = nil,
+    logPath: String = "/tmp/freeflow-mlx-eval.log"
+) async throws {
+    let log = EvalLogger(path: logPath)
+    let engine: MLXLLMEngine
+    if let adapterPath {
+        engine = MLXLLMEngine(
+            name: name, modelID: modelID, adapterPath: adapterPath)
+    } else {
+        engine = MLXLLMEngine(name: name, modelID: modelID)
+    }
     let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
-    print("\n=== \(name) (systemPromptQwen + MLX) ===\n")
+    let evalScenarios = scenarios ?? allScenarios
+    log.log("=== \(name) ===")
+    log.log("")
     var matches = 0
-    for s in allScenarios {
-        let substituted = PolishPipeline.substituteDictatedPunctuation(s.input)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+    for s in evalScenarios {
+        let casual = s.style == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            s.input, casual: casual, precedingText: s.precedingText)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
         do {
-            // Send tag-stripped text to local model (matches
-            // real provider behavior — local models don't
-            // understand <keep> tags).
             let raw = try await client.complete(
                 model: "",
-                systemPrompt: PolishPipeline.systemPromptQwen,
+                systemPrompt: s.systemPrompt(),
                 userPrompt: stripped)
             let result = PolishPipeline.normalizeFormatting(
                 raw.isEmpty ? stripped : raw)
             let isMatch = s.matches(result)
             if isMatch { matches += 1 }
             let tag = isMatch ? "MATCH" : "DIFF"
-            print("[\(s.category)] \(tag)")
-            print("  Input:    \(s.input)")
-            print("  Output:   \(result)")
+            log.log("[\(s.category)] \(tag)")
+            log.log("  Input:    \(s.input)")
+            log.log("  Output:   \(result)")
             if !isMatch {
-                print("  Expected: \(s.accepted[0])")
+                log.log("  Expected: \(s.accepted[0])")
             }
-            print()
+            log.log("")
         } catch {
-            print("[\(s.category)] ERROR: \(error)")
-            print("  Input: \(s.input)\n")
+            log.log("[\(s.category)] ERROR: \(error)")
+            log.log("  Input: \(s.input)")
+            log.log("")
         }
     }
-    print("Score: \(matches)/\(allScenarios.count)\n")
+    log.log("Score: \(matches)/\(evalScenarios.count)")
+    log.log("")
     await engine.unload()
 }
 
@@ -65,7 +102,8 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Qwen3 0.6B",
-            modelID: "mlx-community/Qwen3-0.6B-4bit")
+            modelID: "mlx-community/Qwen3-0.6B-4bit",
+            logPath: "/tmp/freeflow-mlx-eval-base.log")
     }
 
     @Test("Qwen3 1.7B")
@@ -74,7 +112,8 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Qwen3 1.7B",
-            modelID: "mlx-community/Qwen3-1.7B-4bit")
+            modelID: "mlx-community/Qwen3-1.7B-4bit",
+            logPath: "/tmp/freeflow-mlx-eval-17.log")
     }
 
     @Test("Gemma 3 1B")
@@ -83,13 +122,30 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Gemma 3 1B",
-            modelID: "mlx-community/gemma-3-1b-it-qat-4bit")
+            modelID: "mlx-community/gemma-3-1b-it-qat-4bit",
+            logPath: "/tmp/freeflow-mlx-eval-gemma.log")
+    }
+
+    @Test("Qwen3 0.6B Fine-tuned (training set)")
+    func qwen06FinetunedTraining() async throws {
+        let flagPath = "/tmp/freeflow-test-mlx-adapter-path"
+        guard FileManager.default.fileExists(atPath: "/tmp/freeflow-test-mlx-training"),
+              FileManager.default.fileExists(atPath: flagPath),
+              let adapterPath = try? String(
+                contentsOfFile: flagPath, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !adapterPath.isEmpty
+        else { return }
+        try await runMLXDump(
+            name: "Qwen3 0.6B Fine-tuned (training)",
+            modelID: "mlx-community/Qwen3-0.6B-4bit",
+            adapterPath: adapterPath,
+            scenarios: allTrainingScenarios,
+            logPath: "/tmp/freeflow-mlx-eval-training.log")
     }
 
     @Test("Qwen3 0.6B Fine-tuned")
     func qwen06Finetuned() async throws {
-        // Adapter path file contains the absolute path to the LoRA
-        // adapter directory (adapter_config.json + adapters.safetensors).
         let flagPath = "/tmp/freeflow-test-mlx-adapter-path"
         guard FileManager.default.fileExists(atPath: flagPath),
               let adapterPath = try? String(
@@ -97,41 +153,11 @@ struct PolishScenarioDumpMLX {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !adapterPath.isEmpty
         else { return }
-        let engine = MLXLLMEngine(
+        try await runMLXDump(
             name: "Qwen3 0.6B Fine-tuned",
             modelID: "mlx-community/Qwen3-0.6B-4bit",
-            adapterPath: adapterPath)
-        let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
-
-        print("\n=== Qwen3 0.6B Fine-tuned (systemPromptQwen + LoRA) ===\n")
-        var matches = 0
-        for s in allScenarios {
-            let substituted = PolishPipeline.substituteDictatedPunctuation(s.input)
-            let stripped = PolishPipeline.stripKeepTags(substituted)
-            do {
-                let raw = try await client.complete(
-                    model: "",
-                    systemPrompt: PolishPipeline.systemPromptQwen,
-                    userPrompt: stripped)
-                let result = PolishPipeline.normalizeFormatting(
-                    raw.isEmpty ? stripped : raw)
-                let isMatch = s.matches(result)
-                if isMatch { matches += 1 }
-                let tag = isMatch ? "MATCH" : "DIFF"
-                print("[\(s.category)] \(tag)")
-                print("  Input:    \(s.input)")
-                print("  Output:   \(result)")
-                if !isMatch {
-                    print("  Expected: \(s.accepted[0])")
-                }
-                print()
-            } catch {
-                print("[\(s.category)] ERROR: \(error)")
-                print("  Input: \(s.input)\n")
-            }
-        }
-        print("Score: \(matches)/\(allScenarios.count)\n")
-        await engine.unload()
+            adapterPath: adapterPath,
+            logPath: "/tmp/freeflow-mlx-eval.log")
     }
 }
 

@@ -8,23 +8,34 @@ import Foundation
 // Test data lives in PolishScenarioData.swift (allScenarios).
 // Uses multi-accepted matching from the shared PolishScenario struct.
 
-private func runPipeline(
-    input: String,
-    context: AppContext,
-    systemPrompt: String,
+private func runCloudPipeline(
+    scenario: PolishScenario,
     client: any PolishChatClient
 ) async -> String {
-    let substituted = PolishPipeline.substituteDictatedPunctuation(input)
-    let stripped = PolishPipeline.stripKeepTags(substituted)
+    let casual = scenario.style == "casual"
+    let substituted = PolishPipeline.substituteDictatedPunctuation(
+        scenario.input, casual: casual,
+        precedingText: scenario.precedingText)
+    let stripped = PolishPipeline.stripKeepTags(
+        substituted, casual: casual)
+
+    let context = scenario.context
+    let systemPrompt = PolishPipeline.buildCloudSystemPrompt(
+        context: context, language: nil)
+    let userPrompt = PolishPipeline.buildUserPrompt(
+        substituted, context: context)
+
     do {
         let raw = try await client.complete(
             model: PolishPipeline.polishModel,
             systemPrompt: systemPrompt,
-            userPrompt: PolishPipeline.buildUserPrompt(
-                substituted, context: context))
-        if raw.isEmpty { return "[empty] \(PolishPipeline.normalizeFormatting(stripped))" }
+            userPrompt: userPrompt)
+        if raw.isEmpty {
+            return "[empty] \(PolishPipeline.normalizeFormatting(stripped, casual: casual))"
+        }
+        let untagged = PolishPipeline.stripKeepTags(raw, casual: casual)
         return PolishPipeline.normalizeFormatting(
-            PolishPipeline.stripKeepTags(raw))
+            untagged, casual: casual)
     } catch {
         return "[error] \(error)"
     }
@@ -43,16 +54,20 @@ struct PolishScenarioDumpCloud {
         else { return }
         let client = OpenAIChatClient(apiKey: apiKey)
 
-        print("\n=== CLOUD LLM (systemPromptEnglish + gpt-4.1-nano) ===\n")
+        print("\n=== CLOUD LLM (buildCloudSystemPrompt + \(PolishPipeline.polishModel)) ===\n")
         var matches = 0
+        var categoryStats: [String: (match: Int, total: Int)] = [:]
         for s in allScenarios {
-            let result = await runPipeline(
-                input: s.input,
-                context: s.context,
-                systemPrompt: PolishPipeline.systemPromptEnglish,
-                client: client)
+            let result = await runCloudPipeline(
+                scenario: s, client: client)
             let isMatch = s.matches(result)
             if isMatch { matches += 1 }
+
+            var stats = categoryStats[s.category, default: (0, 0)]
+            stats.total += 1
+            if isMatch { stats.match += 1 }
+            categoryStats[s.category] = stats
+
             let tag = isMatch ? "MATCH" : "DIFF"
             print("[\(s.category)] \(tag)")
             print("  Input:    \(s.input)")
@@ -62,7 +77,13 @@ struct PolishScenarioDumpCloud {
             }
             print()
         }
-        print("Score: \(matches)/\(allScenarios.count)\n")
+        print("Score: \(matches)/\(allScenarios.count)")
+        print("\n--- Category breakdown ---")
+        for cat in categoryStats.keys.sorted() {
+            let s = categoryStats[cat]!
+            print("  \(cat): \(s.match)/\(s.total)")
+        }
+        print()
     }
 }
 

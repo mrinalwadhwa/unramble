@@ -35,30 +35,41 @@ public struct LocalModelDictationProvider: DictationProviding {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "" }
 
-        return await polish(trimmed)
+        return await polish(trimmed, context: context)
     }
 
     // MARK: - Polishing
 
-    private func polish(_ raw: String) async -> String {
-        let substituted = PolishPipeline.substituteDictatedPunctuation(raw)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+    private func polish(_ raw: String, context: AppContext) async -> String {
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            raw, casual: casual,
+            precedingText: context.focusedFieldContent)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
 
         guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
+
+        let systemPrompt = PolishPipeline.buildQwenSystemPrompt(
+            context: context)
 
         do {
             let polished = try await polishChatClient.complete(
                 model: polishModel,
-                systemPrompt: PolishPipeline.systemPromptLocal,
+                systemPrompt: systemPrompt,
                 userPrompt: stripped)
             if polished.isEmpty {
-                return PolishPipeline.normalizeFormatting(stripped)
+                return PolishPipeline.normalizeFormatting(
+                    stripped, casual: casual)
             }
-            return PolishPipeline.normalizeFormatting(polished)
+            return PolishPipeline.normalizeFormatting(
+                polished, casual: casual)
         } catch {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
     }
 }

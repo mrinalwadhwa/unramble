@@ -14,7 +14,6 @@ public struct OpenAIDictationProvider: DictationProviding {
     private let model: String
     private let endpoint: URL
     private let polishChatClient: (any PolishChatClient)?
-    private let localPolishClient: (any PolishChatClient)?
     private let polishModel: String
     private let session: URLSession
 
@@ -26,7 +25,6 @@ public struct OpenAIDictationProvider: DictationProviding {
         model: String = "gpt-4o-mini-transcribe",
         endpoint: URL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
         polishChatClient: (any PolishChatClient)?,
-        localPolishClient: (any PolishChatClient)? = nil,
         polishModel: String = PolishPipeline.polishModel,
         session: URLSession? = nil
     ) {
@@ -34,7 +32,6 @@ public struct OpenAIDictationProvider: DictationProviding {
         self.model = model
         self.endpoint = endpoint
         self.polishChatClient = polishChatClient
-        self.localPolishClient = localPolishClient
         self.polishModel = polishModel
         if let session {
             self.session = session
@@ -148,30 +145,46 @@ public struct OpenAIDictationProvider: DictationProviding {
 
     // MARK: - Polishing
 
-    /// Run the three-stage polish pipeline on the raw transcript.
+    /// Run the polish pipeline on the raw transcript.
     ///
-    /// Stage 1 (regex) and stage 2 (skip heuristic) always run. Stage 3
-    /// (LLM) only runs when a chat client is configured. LLM failures
-    /// fall back to the regex-cleaned text.
+    /// Deterministic preprocessing always runs. LLM polish only runs
+    /// when a chat client is configured. LLM failures fall back to the
+    /// preprocessed text.
     private func polish(_ raw: String, context: AppContext) async -> String {
-        // Stage 1: deterministic punctuation substitution.
-        let substituted = PolishPipeline.substituteDictatedPunctuation(raw)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            raw, casual: casual,
+            precedingText: context.focusedFieldContent)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
 
         guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
 
-        let result = await PolishPipeline.racePolish(
-            substituted: substituted,
-            stripped: stripped,
-            context: context,
-            language: language,
-            cloudClient: polishChatClient,
-            localClient: localPolishClient,
-            model: polishModel
-        )
-        return result.text
+        let systemPrompt = PolishPipeline.buildCloudSystemPrompt(
+            context: context, language: language)
+        let userPrompt = PolishPipeline.buildUserPrompt(
+            substituted, context: context, language: language)
+
+        do {
+            let polished = try await polishChatClient.complete(
+                model: polishModel,
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt)
+            if polished.isEmpty {
+                return PolishPipeline.normalizeFormatting(
+                    stripped, casual: casual)
+            }
+            let untagged = PolishPipeline.stripKeepTags(
+                polished, casual: casual)
+            return PolishPipeline.normalizeFormatting(
+                untagged, casual: casual)
+        } catch {
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
+        }
     }
 }
 

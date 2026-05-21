@@ -7,14 +7,12 @@ import FoundationModels
 /// Whether dictation uses cloud APIs or on-device processing.
 ///
 /// Cloud mode sends audio to OpenAI for transcription and polishing.
-/// Local mode keeps all data on-device using the best available
-/// backend:
-/// - macOS 26+ with Apple Intelligence: SpeechAnalyzer + Foundation
-///   Models (existing path).
-/// - macOS 14+ on Apple Silicon: Parakeet STT + MLX LLM polish
-///   (open-source models).
+/// Local mode keeps all data on-device using Parakeet STT and a
+/// fine-tuned Qwen3 0.6B model for polish on Apple Silicon.
+/// Currently English-only; non-English languages require cloud mode.
 ///
-/// Persisted in UserDefaults. Defaults to cloud.
+/// Persisted in UserDefaults. Defaults to cloud on first launch;
+/// onboarding recommends on-device for English on Apple Silicon.
 public enum DictationMode: String, CaseIterable, Sendable {
     case cloud
     case local

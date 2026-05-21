@@ -277,9 +277,10 @@ struct OpenAIDictationProviderStubbedTests {
 
     @Test("dictated punctuation substituted when polish client is nil")
     func dictatedPunctuationWithoutLLM() async throws {
-        // "hello period" → "Hello." via regex substitution even without LLM.
+        // "hello comma world" → "Hello, world" via regex substitution
+        // even without LLM.
         let session = stubbedSession { request in
-            let body = #"{"text":"hello period"}"#
+            let body = #"{"text":"hello comma world"}"#
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200,
                 httpVersion: nil, headerFields: nil)!
@@ -291,7 +292,7 @@ struct OpenAIDictationProviderStubbedTests {
             session: session)
         let result = try await provider.dictate(
             audio: silentWAV(), context: AppContext.empty)
-        #expect(result == "Hello.")
+        #expect(result == "Hello, world")
     }
 
     @Test("empty transcript returns empty string")

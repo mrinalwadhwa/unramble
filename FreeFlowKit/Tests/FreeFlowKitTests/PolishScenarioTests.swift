@@ -27,10 +27,8 @@ struct PolishScenarioRegexTests {
         let punctCases = allScenarios.filter { $0.category == "punctuation" }
         for s in punctCases {
             let result = PolishPipeline.substituteDictatedPunctuation(s.input)
-            // The command word should be gone.
-            #expect(
-                !result.lowercased().contains(" period"),
-                "period command should be replaced in: \(s.input)")
+            // The command word should be gone. "period" and "full
+            // stop" are handled by the model, not deterministically.
             #expect(
                 !result.lowercased().contains(" comma"),
                 "comma command should be replaced in: \(s.input)")

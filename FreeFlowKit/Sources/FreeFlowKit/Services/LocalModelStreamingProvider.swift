@@ -21,6 +21,7 @@ public final class LocalModelStreamingProvider: StreamingDictationProviding,
 
     private let lock = NSLock()
     private var accumulatedAudio = Data()
+    private var currentContext: AppContext = .empty
 
     // MARK: - Init
 
@@ -50,7 +51,10 @@ public final class LocalModelStreamingProvider: StreamingDictationProviding,
             try await sttEngine.load()
             Log.debug("[LocalModelStreaming] STT engine loaded")
         }
-        lock.withLock { accumulatedAudio = Data() }
+        lock.withLock {
+            accumulatedAudio = Data()
+            currentContext = context
+        }
     }
 
     public func sendAudio(_ pcmData: Data) async throws {
@@ -77,7 +81,8 @@ public final class LocalModelStreamingProvider: StreamingDictationProviding,
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "" }
 
-        return await polish(trimmed)
+        let context = lock.withLock { currentContext }
+        return await polish(trimmed, context: context)
     }
 
     public func cancelStreaming() async {
@@ -86,29 +91,40 @@ public final class LocalModelStreamingProvider: StreamingDictationProviding,
 
     // MARK: - Polishing
 
-    private func polish(_ raw: String) async -> String {
-        let substituted = PolishPipeline.substituteDictatedPunctuation(raw)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+    private func polish(_ raw: String, context: AppContext) async -> String {
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            raw, casual: casual,
+            precedingText: context.focusedFieldContent)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
 
         guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
+
+        let systemPrompt = PolishPipeline.buildQwenSystemPrompt(
+            context: context)
 
         do {
             Log.debug("[LocalModelStreaming] Polishing via LLM...")
             let polished = try await polishChatClient.complete(
                 model: polishModel,
-                systemPrompt: PolishPipeline.systemPromptLocal,
+                systemPrompt: systemPrompt,
                 userPrompt: stripped)
             if polished.isEmpty {
                 Log.debug("[LocalModelStreaming] LLM returned empty, using deterministic")
-                return PolishPipeline.normalizeFormatting(stripped)
+                return PolishPipeline.normalizeFormatting(
+                    stripped, casual: casual)
             }
             Log.debug("[LocalModelStreaming] Polished: '\(polished)'")
-            return PolishPipeline.normalizeFormatting(polished)
+            return PolishPipeline.normalizeFormatting(
+                polished, casual: casual)
         } catch {
             Log.debug("[LocalModelStreaming] Polish failed: \(error)")
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
     }
 }

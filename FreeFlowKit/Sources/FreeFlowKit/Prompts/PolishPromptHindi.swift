@@ -27,7 +27,7 @@ Speech-to-text engines produce messy output. Fix these problems:
 - "ब्रैकेट ओपन" → [
 - "ब्रैकेट क्लोज" → ]
 
-8. Preserved symbols in <keep> tags: You MUST keep the <keep> tags and their content exactly as they appear. Do not remove, rewrite, or reinterpret them. <keep>¶</keep> means a paragraph break and <keep>↵</keep> means a line break.
+8. Preserved symbols in <keep> tags: You MUST keep the <keep> tags and their content exactly as they appear. Do not remove, rewrite, or reinterpret them. <keep>[PAR]</keep> means a paragraph break and <keep>[NL]</keep> means a line break.
 
 9. Wording preservation: keep the user's original words. Do not substitute verbs, swap phrases, or rewrite sentences.
 

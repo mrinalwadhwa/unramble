@@ -335,8 +335,7 @@
                 font-family: inherit;
             }
 
-            .entry-choice-card:hover,
-            .entry-choice-card.selected {
+            .entry-choice-card:hover {
                 border-color: var(--color-text);
                 transform: translateY(-1px);
                 background: rgba(255, 255, 255, 0.92);
@@ -346,6 +345,30 @@
                 opacity: 0.45;
                 cursor: default;
                 pointer-events: none;
+            }
+
+            .entry-choice-card.disabled:hover {
+                border-color: var(--color-border);
+                transform: none;
+                background: rgba(255, 255, 255, 0.7);
+            }
+
+            .entry-choice-header {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                margin-bottom: 0.125rem;
+            }
+
+            .entry-choice-badge {
+                font-size: 0.6875rem;
+                font-weight: 600;
+                color: var(--color-green);
+                background: var(--color-green-bg);
+                padding: 0.125rem 0.5rem;
+                border-radius: 999px;
+                letter-spacing: 0.01em;
+                white-space: nowrap;
             }
 
             .entry-choice-note {
@@ -375,7 +398,7 @@
                 gap: 0.75rem;
                 width: 100%;
                 max-width: 392px;
-                margin: 1.5rem auto 1.5rem;
+                margin: 0.75rem auto;
             }
 
             .entry-divider-line {
@@ -938,32 +961,21 @@
                     <h1>Welcome to FreeFlow</h1>
                     <p class="intro-copy">Press a hotkey, dictate naturally, polished text appears in any app.</p>
 
-                    <div style="height: 3rem"></div>
+                    <div style="height: 2rem"></div>
 
-                    <div class="entry-choice-group">
-                        <button id="entry-cloud" class="entry-choice-card selected" type="button">
-                            <div class="entry-choice-title">Transcribe in the cloud</div>
-                            <div class="entry-choice-copy">
-                                Highly accurate and very fast. Great with technical terms and jargon. Requires an OpenAI API key.
-                            </div>
-                        </button>
-                    </div>
+                    <!-- First card slot: populated by JS based on smart defaults -->
+                    <div id="welcome-first-card" class="entry-choice-group"></div>
 
-                    <div id="welcome-divider" class="entry-divider" style="opacity:0; transition:opacity 0.2s ease">
+                    <div id="welcome-divider" class="entry-divider" style="display:none">
                         <div class="entry-divider-line"></div>
                         <div class="entry-divider-text">or</div>
                         <div class="entry-divider-line"></div>
                     </div>
 
-                    <div id="welcome-local-group" class="entry-choice-group" style="opacity:0; transition:opacity 0.2s ease">
-                        <button id="entry-local" class="entry-choice-card" type="button">
-                            <div class="entry-choice-title">Transcribe on this Mac</div>
-                            <div class="entry-choice-copy">
-                                Completely private but less accurate. Works offline and nothing leaves your Mac. Powered by Apple Intelligence.
-                            </div>
-                        </button>
-                        <div id="local-requires-note" class="entry-choice-note" style="display:none">Requires macOS 26 or later</div>
-                    </div>
+                    <!-- Second card slot: populated by JS based on smart defaults -->
+                    <div id="welcome-second-card" class="entry-choice-group"></div>
+
+                    <div id="welcome-note" class="entry-choice-note" style="display:none"></div>
                 </div>
 
                 <!-- API key sub-state -->
@@ -1404,14 +1416,118 @@
                 // ----------------------------------------------------------------
 
                 function handleOnboardingState(data) {
-                    // Always show the divider and local card.
-                    document.getElementById("welcome-divider").style.opacity = "1";
-                    document.getElementById("welcome-local-group").style.opacity = "1";
+                    var isAppleSilicon = !!data.isAppleSilicon;
+                    var localAvailable = !!data.localModeAvailable;
+                    var lang = data.systemLanguage || "en";
+                    var langName = data.systemLanguageName || "English";
+                    var isEnglish = lang === "en";
 
-                    if (!data.localModeAvailable) {
-                        // Disable the card and show the version note.
-                        document.getElementById("entry-local").classList.add("disabled");
-                        document.getElementById("local-requires-note").style.display = "";
+                    // Determine which card goes first and whether to show Recommended.
+                    var localFirst = isAppleSilicon && isEnglish;
+                    var showBothCards = localAvailable;
+
+                    var firstSlot = document.getElementById("welcome-first-card");
+                    var secondSlot = document.getElementById("welcome-second-card");
+                    var divider = document.getElementById("welcome-divider");
+                    var note = document.getElementById("welcome-note");
+
+                    firstSlot.innerHTML = "";
+                    secondSlot.innerHTML = "";
+
+                    if (!localAvailable) {
+                        // Intel: cloud only, no choice.
+                        firstSlot.appendChild(buildCloudCard(false));
+                        divider.style.display = "none";
+                        note.textContent = "On-device processing requires Apple Silicon.";
+                        note.style.display = "";
+                    } else if (localFirst) {
+                        // Apple Silicon + English: local recommended, on top.
+                        firstSlot.appendChild(buildLocalCard(true, isEnglish, langName));
+                        divider.style.display = "";
+                        secondSlot.appendChild(buildCloudCard(false));
+                    } else {
+                        // Apple Silicon + non-English: cloud on top, local below.
+                        firstSlot.appendChild(buildCloudCard(true, langName));
+                        divider.style.display = "";
+                        secondSlot.appendChild(buildLocalCard(false, isEnglish, langName));
+                    }
+
+                    bindCardButtons();
+                }
+
+                function buildLocalCard(recommended, isEnglish, langName) {
+                    var card = document.createElement("button");
+                    card.className = "entry-choice-card";
+                    card.id = "entry-local";
+                    card.type = "button";
+
+                    var header = '<div class="entry-choice-header">'
+                        + '<div class="entry-choice-title">Transcribe on this Mac</div>';
+                    if (recommended) {
+                        header += '<span class="entry-choice-badge">Recommended</span>';
+                    }
+                    header += '</div>';
+
+                    var copy;
+                    if (isEnglish) {
+                        copy = "Highly accurate and very fast. "
+                            + "Works offline and nothing leaves your Mac. "
+                            + "English only. Powered by models fine-tuned for dictation.";
+                    } else {
+                        copy = "Works offline and nothing leaves your Mac. "
+                            + "English only. Powered by models fine-tuned for dictation.";
+                    }
+
+                    card.innerHTML = header
+                        + '<div class="entry-choice-copy">' + copy + '</div>';
+
+                    return card;
+                }
+
+                function buildCloudCard(recommended, langName) {
+                    var card = document.createElement("button");
+                    card.className = "entry-choice-card";
+                    card.id = "entry-cloud";
+                    card.type = "button";
+
+                    var header = '<div class="entry-choice-header">'
+                        + '<div class="entry-choice-title">Transcribe in the cloud</div>';
+                    if (recommended) {
+                        header += '<span class="entry-choice-badge">Recommended</span>';
+                    }
+                    header += '</div>';
+
+                    var copy;
+                    if (recommended && langName) {
+                        copy = "Best quality for " + langName + ". "
+                            + "Supports 57 languages. Requires an OpenAI API key.";
+                    } else {
+                        copy = "Supports 57 languages. Requires an OpenAI API key.";
+                    }
+
+                    card.innerHTML = header
+                        + '<div class="entry-choice-copy">' + copy + '</div>';
+
+                    return card;
+                }
+
+                function bindCardButtons() {
+                    var localCard = document.getElementById("entry-local");
+                    var cloudCard = document.getElementById("entry-cloud");
+
+                    if (localCard) {
+                        localCard.addEventListener("click", function (e) {
+                            e.preventDefault();
+                            bridge.send("setDictationMode", { mode: "local" });
+                            next();
+                        });
+                    }
+
+                    if (cloudCard) {
+                        cloudCard.addEventListener("click", function (e) {
+                            e.preventDefault();
+                            showWelcomeApiKey();
+                        });
                     }
                 }
 
@@ -1746,16 +1862,8 @@
                 // ----------------------------------------------------------------
 
                 function bindButtons() {
-                    // Welcome: cloud card.
-                    bindClick("entry-cloud", function () {
-                        showWelcomeApiKey();
-                    });
-
-                    // Welcome: local card.
-                    bindClick("entry-local", function () {
-                        bridge.send("setDictationMode", { mode: "local" });
-                        next();
-                    });
+                    // Card buttons are bound dynamically by bindCardButtons()
+                    // after handleOnboardingState populates the card slots.
 
                     // API key: save.
                     bindClick("api-key-save", function () {

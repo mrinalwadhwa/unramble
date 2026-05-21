@@ -147,11 +147,21 @@ final class OnboardingBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
-    /// Push onboarding state with local mode availability.
+    /// Push onboarding state with local mode availability, hardware,
+    /// and language info so the welcome screen can set smart defaults.
     func pushOnboardingState() {
-        pushEvent(
-            name: "onboardingState",
-            data: ["localModeAvailable": DictationMode.isLocalAvailable])
+        let language = Settings.shared.language
+        var data: [String: Any] = [
+            "localModeAvailable": DictationMode.isLocalAvailable,
+            "systemLanguage": language.languageCode,
+            "systemLanguageName": language.displayName,
+        ]
+        #if arch(arm64)
+        data["isAppleSilicon"] = true
+        #else
+        data["isAppleSilicon"] = false
+        #endif
+        pushEvent(name: "onboardingState", data: data)
     }
 
     /// Render SF Symbols to PNG data URIs and push to the web view.

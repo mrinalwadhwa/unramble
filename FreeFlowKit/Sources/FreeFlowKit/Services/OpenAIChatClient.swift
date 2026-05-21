@@ -51,7 +51,7 @@ public struct OpenAIChatClient: PolishChatClient {
     /// Send a two-message chat completion and return the assistant's reply.
     ///
     /// - Parameters:
-    ///   - model: Model identifier (e.g. `gpt-4.1-nano`).
+    ///   - model: Model identifier (e.g. `gpt-5.4-nano`).
     ///   - systemPrompt: System message content.
     ///   - userPrompt: User message content.
     /// - Returns: The assistant's reply, trimmed of leading/trailing whitespace.
@@ -68,6 +68,7 @@ public struct OpenAIChatClient: PolishChatClient {
 
         let body: [String: Any] = [
             "model": model,
+            "temperature": 0,
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userPrompt],

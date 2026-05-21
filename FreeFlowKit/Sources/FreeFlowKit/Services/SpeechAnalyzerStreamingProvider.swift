@@ -30,6 +30,7 @@ public final class SpeechAnalyzerStreamingProvider: StreamingDictationProviding,
     private var chunkHandler: (@Sendable (String) async -> Void)?
     private var audioBytesSent: Int = 0
     private var inputFormat: AVAudioFormat?
+    private var currentContext: AppContext = .empty
 
     // MARK: - Init
 
@@ -132,6 +133,7 @@ public final class SpeechAnalyzerStreamingProvider: StreamingDictationProviding,
             self.inputFormat = fmt
             self.collectedText = ""
             self.audioBytesSent = 0
+            self.currentContext = context
         }
     }
 
@@ -229,27 +231,36 @@ public final class SpeechAnalyzerStreamingProvider: StreamingDictationProviding,
     }
 
     private func polishText(_ raw: String) async -> String {
-        let substituted = PolishPipeline.substituteDictatedPunctuation(raw)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
+        let context: AppContext = lock.withLock { currentContext }
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let substituted = PolishPipeline.substituteDictatedPunctuation(
+            raw, casual: casual,
+            precedingText: context.focusedFieldContent)
+        let stripped = PolishPipeline.stripKeepTags(
+            substituted, casual: casual)
 
         guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
 
-        // Send the tag-stripped text to the local model. The on-device
-        // 3B model does not understand <keep> tags and may strip or
-        // mangle protected symbols.
+        let systemPrompt = PolishPipeline.buildQwenSystemPrompt(
+            context: context)
+
         do {
             let polished = try await polishChatClient.complete(
                 model: polishModel,
-                systemPrompt: PolishPipeline.systemPromptLocal,
+                systemPrompt: systemPrompt,
                 userPrompt: stripped)
             if polished.isEmpty {
-                return PolishPipeline.normalizeFormatting(stripped)
+                return PolishPipeline.normalizeFormatting(
+                    stripped, casual: casual)
             }
-            return PolishPipeline.normalizeFormatting(polished)
+            return PolishPipeline.normalizeFormatting(
+                polished, casual: casual)
         } catch {
-            return PolishPipeline.normalizeFormatting(stripped)
+            return PolishPipeline.normalizeFormatting(
+                stripped, casual: casual)
         }
     }
 }

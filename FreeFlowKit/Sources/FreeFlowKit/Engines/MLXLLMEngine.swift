@@ -76,7 +76,7 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
             throw LocalModelError.modelNotLoaded
         }
 
-        let params = GenerateParameters(maxTokens: maxTokens)
+        let params = GenerateParameters(maxTokens: maxTokens, temperature: 0)
         let session = ChatSession(
             container,
             instructions: systemPrompt,
