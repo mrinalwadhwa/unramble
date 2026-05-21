@@ -7,9 +7,12 @@ import FoundationModels
 /// Whether dictation uses cloud APIs or on-device processing.
 ///
 /// Cloud mode sends audio to OpenAI for transcription and polishing.
-/// Local mode uses Apple SpeechAnalyzer and Foundation Models, keeping
-/// all data on-device. Local mode requires macOS 26+ with Apple
-/// Intelligence enabled.
+/// Local mode keeps all data on-device using the best available
+/// backend:
+/// - macOS 26+ with Apple Intelligence: SpeechAnalyzer + Foundation
+///   Models (existing path).
+/// - macOS 14+ on Apple Silicon: Parakeet STT + MLX LLM polish
+///   (open-source models).
 ///
 /// Persisted in UserDefaults. Defaults to cloud.
 public enum DictationMode: String, CaseIterable, Sendable {
@@ -26,11 +29,23 @@ public enum DictationMode: String, CaseIterable, Sendable {
 
     /// Whether on-device mode is available on this system.
     ///
-    /// Requires macOS 26+ with Apple Intelligence enabled. Checks both
-    /// the OS version and the runtime availability of the on-device
-    /// language model so the UI only offers on-device mode when it will
-    /// actually work.
+    /// True when Apple Intelligence is available (macOS 26+), or when
+    /// running on Apple Silicon (macOS 14+) where open-source models
+    /// can be used.
     public static var isLocalAvailable: Bool {
+        if isAppleIntelligenceAvailable { return true }
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Whether Apple Intelligence is available for the local backend.
+    ///
+    /// When true, the local path uses SpeechAnalyzer + Foundation
+    /// Models. When false, it falls back to Parakeet + MLX.
+    public static var isAppleIntelligenceAvailable: Bool {
         #if canImport(FoundationModels)
         if #available(macOS 26, *) {
             return SystemLanguageModel.default.availability == .available

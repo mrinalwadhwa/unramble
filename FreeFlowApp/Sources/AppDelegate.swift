@@ -255,24 +255,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let streamingProvider: (any StreamingDictationProviding)?
         let onSessionExpired: (@Sendable () -> Void)?
 
-        if Settings.shared.dictationMode == .local, #available(macOS 26, *) {
-            let polisher = FoundationModelChatClient()
-            dictationProvider = SpeechAnalyzerDictationProvider(
-                polishChatClient: polisher, language: language)
-            streamingProvider = SpeechAnalyzerStreamingProvider(
-                polishChatClient: polisher, language: language)
+        if Settings.shared.dictationMode == .local {
+            // Open-source models: Parakeet STT + MLX LLM polish.
+            Log.debug("[AppDelegate] Using open-source local models (Parakeet + MLX)")
+            let modelManager = LocalModelManager()
+            let sttEngine = ParakeetEngine(modelManager: modelManager)
+            let llmEngine = MLXLLMEngine(
+                name: "Qwen3 0.6B",
+                modelID: "mlx-community/Qwen3-0.6B-4bit")
+            let polisher = MLXPolishClient(engine: llmEngine)
+            dictationProvider = LocalModelDictationProvider(
+                sttEngine: sttEngine, polishChatClient: polisher)
+            streamingProvider = LocalModelStreamingProvider(
+                sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil
         } else {
             let polishClient = OpenAIChatClient(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            // On macOS 26+, create a local polish client to race against
-            // the cloud client. If the cloud is slow, the local model
-            // provides a fallback within ~1.3s max.
+            // Create a local polish client to race against the cloud.
+            // If the cloud is slow, the local model provides a fallback.
             let localPolisher: (any PolishChatClient)?
-            if #available(macOS 26, *) {
+            if DictationMode.isAppleIntelligenceAvailable, #available(macOS 26, *) {
                 localPolisher = FoundationModelChatClient()
             } else {
+                #if arch(arm64)
+                let llmEngine = MLXLLMEngine(
+                    name: "Qwen3 0.6B",
+                    modelID: "mlx-community/Qwen3-0.6B-4bit")
+                localPolisher = MLXPolishClient(engine: llmEngine)
+                #else
                 localPolisher = nil
+                #endif
             }
             dictationProvider = OpenAIDictationProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",

@@ -5,13 +5,24 @@ import PackageDescription
 let package = Package(
     name: "FreeFlowKit",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     products: [
         .library(
             name: "FreeFlowKit",
             targets: ["FreeFlowKit"]
         )
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/ml-explore/mlx-swift-lm",
+            exact: "3.31.3"),
+        .package(
+            url: "https://github.com/huggingface/swift-huggingface",
+            exact: "0.9.0"),
+        .package(
+            url: "https://github.com/huggingface/swift-transformers",
+            exact: "1.3.0"),
     ],
     targets: [
         .target(
@@ -21,7 +32,13 @@ let package = Package(
         ),
         .target(
             name: "FreeFlowKit",
-            dependencies: ["ObjCExceptionCatcher"],
+            dependencies: [
+                "ObjCExceptionCatcher",
+                .product(name: "MLXLLM", package: "mlx-swift-lm"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
+            ],
             path: "Sources/FreeFlowKit"
         ),
         .testTarget(

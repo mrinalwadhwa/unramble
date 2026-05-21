@@ -2,7 +2,7 @@ name: FreeFlow
 options:
   bundleIdPrefix: computer.autonomy
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
   groupSortPosition: top
@@ -14,7 +14,7 @@ configs:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
   configs:
     Release:
       ENABLE_HARDENED_RUNTIME: true
