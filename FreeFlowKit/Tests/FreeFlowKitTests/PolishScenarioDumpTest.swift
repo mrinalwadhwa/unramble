@@ -84,12 +84,15 @@ struct PolishScenarioDumpLocal {
             let substituted = PolishPipeline.substituteDictatedPunctuation(s.input)
             let stripped = PolishPipeline.stripKeepTags(substituted)
             do {
+                // Send tag-stripped text to local model (matches
+                // real provider behavior — local models don't
+                // understand <keep> tags).
                 let raw = try await client.complete(
                     model: "",
                     systemPrompt: PolishPipeline.systemPromptLocal,
-                    userPrompt: substituted)
+                    userPrompt: stripped)
                 let result = PolishPipeline.normalizeFormatting(
-                    PolishPipeline.stripKeepTags(raw.isEmpty ? stripped : raw))
+                    raw.isEmpty ? stripped : raw)
                 let isMatch = s.matches(result)
                 if isMatch { matches += 1 }
                 let tag = isMatch ? "MATCH" : "DIFF"
@@ -109,3 +112,6 @@ struct PolishScenarioDumpLocal {
     }
 }
 #endif
+
+// MLX model dump tests are in PolishScenarioDumpMLXTest.swift.
+// They must be run via xcodebuild (Metal shaders required).

@@ -149,7 +149,7 @@ final class AudioPipelineTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
 
-        print("\n═══ E2E Results: \(passed) passed, \(mismatched) mismatched, \(broken) broken, \(skipped) skipped ═══\n")
+        print("\n═══ Results: \(passed) passed, \(mismatched) mismatched, \(broken) broken, \(skipped) skipped ═══\n")
 
         if broken > 0 {
             let summary = brokenScenarios.map { s in

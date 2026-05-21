@@ -156,6 +156,16 @@ public enum PolishPipeline {
             result = first.uppercased() + result.dropFirst()
         }
 
+        // Remove spurious commas from Apple STT artifacts.
+        result = cleanSpuriousCommas(result)
+
+        // Strip multi-word noise phrases (uh huh, mm hmm) as units
+        // before single filler sounds, so they aren't split by L1.
+        result = stripNoisePhrases(result)
+
+        // Strip pure filler sounds (um, uh, ah, hmm, etc.).
+        result = stripFillerSounds(result)
+
         return result.trimmingCharacters(in: .whitespaces)
     }
 
@@ -204,6 +214,108 @@ public enum PolishPipeline {
         }
         result += text[lastEnd...]
         return result
+    }
+
+    // MARK: - Filler Phrase Stripping
+
+    /// Multi-word noise sounds — acknowledgment noises that are never
+    /// content. Matched as units before single filler sounds run.
+    private static let noisePhrasesPattern: NSRegularExpression = {
+        let phrases = ["uh huh", "uh-huh", "mm hmm", "mm-hmm"]
+        let joined = phrases.map { NSRegularExpression.escapedPattern(for: $0) }
+            .joined(separator: "|")
+        // swiftlint:disable:next force_try
+        return try! NSRegularExpression(
+            pattern: "(?i)\\b(\(joined))\\b[,.]?\\s*",
+            options: [])
+    }()
+
+    /// Strip multi-word noise phrases ("uh huh", "mm hmm") that are
+    /// never content words. Run before single filler sound stripping
+    /// so multi-word noise sounds are removed as units.
+    public static func stripNoisePhrases(_ text: String) -> String {
+        var result = noisePhrasesPattern.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: "")
+
+        // Collapse multiple spaces and trim.
+        result = result.replacingOccurrences(
+            of: " {2,}", with: " ", options: .regularExpression)
+
+        return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - Filler Sound Stripping
+
+    private static let fillerSoundPattern: NSRegularExpression = {
+        // Pure vocalized pauses — never content words in English.
+        // Shuffled to avoid order-dependent prompt overfitting.
+        let fillers = [
+            "um", "eh", "mmm", "uhh", "hm", "umm", "mm",
+            "uh", "uhhh", "uhm", "ah", "hmm", "mh", "ehh",
+        ]
+        let joined = fillers.joined(separator: "|")
+        // Word boundary + optional trailing comma/period + whitespace.
+        // "uhm, I was thinking" → "I was thinking"
+        // swiftlint:disable:next force_try
+        return try! NSRegularExpression(
+            pattern: "(?i)\\b(\(joined))\\b[,.]?\\s*",
+            options: [])
+    }()
+
+    /// Strip pure filler sounds (um, uh, ah, hmm, etc.).
+    ///
+    /// These are vocalized pauses that the speaker did not intend as
+    /// words. Trailing punctuation attached to the filler is removed
+    /// with it. Applied pre-LLM so models receive cleaner input.
+    public static func stripFillerSounds(_ text: String) -> String {
+        var result = fillerSoundPattern.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: "")
+
+        // Collapse multiple spaces left behind.
+        result = result.replacingOccurrences(
+            of: " {2,}", with: " ", options: .regularExpression)
+
+        return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - Spurious Comma Cleanup
+
+    /// Remove spurious commas inserted by Apple's speech-to-text engine.
+    ///
+    /// Apple's dictation sometimes inserts commas before or after words
+    /// where they don't belong: "I will be there at 3, PM,, tomorrow,"
+    /// becomes "I will be there at 3 PM tomorrow".
+    public static func cleanSpuriousCommas(_ text: String) -> String {
+        var result = text
+
+        // Collapse doubled/tripled commas: ",," or ",,," → ","
+        result = result.replacingOccurrences(
+            of: #",{2,}"#, with: ",", options: .regularExpression)
+
+        // Remove comma before AM/PM (case insensitive).
+        result = result.replacingOccurrences(
+            of: #",\s*(AM|PM|a\.m\.|p\.m\.)"#, with: " $1",
+            options: .regularExpression)
+
+        // Remove trailing comma at end of sentence (before period or end).
+        result = result.replacingOccurrences(
+            of: #",(\s*[.!?])"#, with: "$1", options: .regularExpression)
+        result = result.replacingOccurrences(
+            of: #",\s*$"#, with: "", options: .regularExpression)
+
+        // Remove comma-space-comma patterns.
+        result = result.replacingOccurrences(
+            of: #",\s*,"#, with: ",", options: .regularExpression)
+
+        // Collapse multiple spaces left behind.
+        result = result.replacingOccurrences(
+            of: " {2,}", with: " ", options: .regularExpression)
+
+        return result.trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Polish Race
@@ -474,7 +586,122 @@ public enum PolishPipeline {
                 options: .regularExpression)
             output.append(l)
         }
-        return output.joined(separator: "\n")
+        result = output.joined(separator: "\n")
+
+        // Fix capitalization of known tech terms. These are product
+        // names that should always be capitalized the same way. This
+        // is additive only — never removes or transforms content.
+        result = capitalizeKnownTerms(result)
+
+        return result
+    }
+
+    // MARK: - Known Term Capitalization
+
+    /// Terms mapped from lowercase to correct capitalization.
+    /// Only whole-word matches are replaced to avoid mangling
+    /// substrings (e.g. "redis" in "predispose").
+    private static let knownTerms: [(NSRegularExpression, String)] = {
+        let terms: [(String, String)] = [
+            // Databases
+            ("redis", "Redis"),
+            ("memcached", "Memcached"),
+            ("elasticsearch", "Elasticsearch"),
+            ("postgresql", "PostgreSQL"),
+            ("postgres", "Postgres"),
+            ("mongodb", "MongoDB"),
+            ("mysql", "MySQL"),
+            ("sqlite", "SQLite"),
+            ("dynamodb", "DynamoDB"),
+            ("cassandra", "Cassandra"),
+            ("couchdb", "CouchDB"),
+            // Infrastructure / DevOps
+            ("kubernetes", "Kubernetes"),
+            ("docker", "Docker"),
+            ("terraform", "Terraform"),
+            ("ansible", "Ansible"),
+            ("jenkins", "Jenkins"),
+            ("nginx", "Nginx"),
+            ("apache", "Apache"),
+            ("grafana", "Grafana"),
+            ("prometheus", "Prometheus"),
+            ("datadog", "Datadog"),
+            ("splunk", "Splunk"),
+            ("pagerduty", "PagerDuty"),
+            ("cloudflare", "Cloudflare"),
+            ("vercel", "Vercel"),
+            ("supabase", "Supabase"),
+            ("heroku", "Heroku"),
+            // Messaging / streaming
+            ("rabbitmq", "RabbitMQ"),
+            ("kafka", "Kafka"),
+            // Languages / runtimes
+            ("javascript", "JavaScript"),
+            ("typescript", "TypeScript"),
+            ("python", "Python"),
+            ("kotlin", "Kotlin"),
+            ("swift", "Swift"),
+            ("rust", "Rust"),
+            ("golang", "Golang"),
+            // Frameworks / libraries
+            ("react", "React"),
+            ("angular", "Angular"),
+            ("vue", "Vue"),
+            ("svelte", "Svelte"),
+            ("django", "Django"),
+            ("flask", "Flask"),
+            ("fastapi", "FastAPI"),
+            ("nextjs", "Next.js"),
+            ("nuxt", "Nuxt"),
+            ("webpack", "Webpack"),
+            ("vite", "Vite"),
+            ("numpy", "NumPy"),
+            ("pandas", "Pandas"),
+            ("pytorch", "PyTorch"),
+            ("tensorflow", "TensorFlow"),
+            ("swiftui", "SwiftUI"),
+            ("combine", "Combine"),
+            // Cloud services
+            ("firebase", "Firebase"),
+            // Platforms / tools
+            ("github", "GitHub"),
+            ("gitlab", "GitLab"),
+            ("bitbucket", "Bitbucket"),
+            ("jira", "Jira"),
+            ("confluence", "Confluence"),
+            ("notion", "Notion"),
+            ("slack", "Slack"),
+            ("zoom", "Zoom"),
+            ("figma", "Figma"),
+            ("linear", "Linear"),
+            // Products
+            ("macos", "macOS"),
+            ("ios", "iOS"),
+            ("iphone", "iPhone"),
+            ("ipad", "iPad"),
+            ("watchos", "watchOS"),
+            ("xcode", "Xcode"),
+        ]
+        return terms.map { (pattern, replacement) in
+            // Case-insensitive whole-word match.
+            // swiftlint:disable:next force_try
+            let regex = try! NSRegularExpression(
+                pattern: "(?<=\\b)\(NSRegularExpression.escapedPattern(for: pattern))(?=\\b)",
+                options: .caseInsensitive)
+            return (regex, replacement)
+        }
+    }()
+
+    /// Replace known tech terms with their correct capitalization.
+    static func capitalizeKnownTerms(_ text: String) -> String {
+        var result = text
+        for (regex, replacement) in knownTerms {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: replacement)
+        }
+        return result
     }
 
     // MARK: - Context Formatting

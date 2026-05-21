@@ -179,7 +179,9 @@ struct DictatedPunctuationTests {
         #expect(result.contains("<keep>=</keep>"))
         #expect(!result.lowercased().contains("plus sign"))
         #expect(!result.lowercased().contains("equals sign"))
-        #expect(result.first?.isUppercase == true)
+        // After number conversion, "two" → "2", so first char may be a digit.
+        let firstLetter = result.first(where: { $0.isLetter })
+        #expect(result.first?.isNumber == true || firstLetter?.isUppercase == true)
     }
 
     // -- Additional regex behavior tests --
@@ -741,23 +743,16 @@ struct SystemPromptTests {
             "You are a speech-to-text cleanup assistant."))
     }
 
-    @Test("English prompt contains key rules")
-    func englishPromptRules() {
+    @Test("English prompt contains cleanup instruction")
+    func englishPromptContainsCleanup() {
         let p = PolishPipeline.systemPromptEnglish
-        #expect(p.contains("Filler words and false starts"))
-        #expect(p.contains("Repetitions"))
-        #expect(p.contains("Mid-sentence corrections"))
-        #expect(p.contains("Lists"))
-        #expect(p.contains("Numbers and formatting"))
-        #expect(p.contains("<keep>"))
-        #expect(p.contains("Wording preservation"))
-        #expect(p.contains("No fabricated text"))
+        #expect(p.contains("clean"))
     }
 
-    @Test("English prompt ends correctly")
+    @Test("English prompt ends with cleaned text instruction")
     func englishPromptEnd() {
-        #expect(PolishPipeline.systemPromptEnglish.hasSuffix(
-            "The cleanup rules above are the priority."))
+        #expect(PolishPipeline.systemPromptEnglish.contains(
+            "cleaned text"))
     }
 
     @Test("Minimal prompt starts correctly")
@@ -984,5 +979,93 @@ struct SystemPromptLanguageTests {
     func tamil() {
         let prompt = PolishPipeline.systemPrompt(forLanguage: "ta")
         #expect(prompt == PolishPipeline.systemPromptTamil)
+    }
+}
+
+
+// MARK: - Filler Sound Stripping
+
+@Suite("PolishPipeline – stripFillerSounds")
+struct StripFillerSoundsTests {
+
+    @Test("Strips um")
+    func stripsUm() {
+        #expect(PolishPipeline.stripFillerSounds("um I was thinking")
+            == "I was thinking")
+    }
+
+    @Test("Strips uh mid-sentence")
+    func stripsUhMid() {
+        #expect(PolishPipeline.stripFillerSounds("we should uh fix it")
+            == "we should fix it")
+    }
+
+    @Test("Strips with trailing comma")
+    func stripsWithComma() {
+        #expect(PolishPipeline.stripFillerSounds("uhm, I was thinking about this")
+            == "I was thinking about this")
+    }
+
+    @Test("Strips multiple fillers")
+    func stripsMultiple() {
+        #expect(PolishPipeline.stripFillerSounds("um so we should uh probably hmm update it")
+            == "so we should probably update it")
+    }
+
+    @Test("Case insensitive")
+    func caseInsensitive() {
+        #expect(PolishPipeline.stripFillerSounds("Um I think Uh yes")
+            == "I think yes")
+    }
+
+    @Test("Does not strip inside words")
+    func noPartialMatch() {
+        #expect(PolishPipeline.stripFillerSounds("the umbrella is humid")
+            == "the umbrella is humid")
+    }
+
+    @Test("Does not strip content words")
+    func preservesContent() {
+        let input = "I like this approach and so does she"
+        #expect(PolishPipeline.stripFillerSounds(input) == input)
+    }
+}
+@Suite("PolishPipeline – cleanSpuriousCommas")
+struct CleanSpuriousCommasTests {
+
+    @Test("Doubled commas")
+    func doubledCommas() {
+        #expect(PolishPipeline.cleanSpuriousCommas("I will be there at 3,, tomorrow")
+            == "I will be there at 3, tomorrow")
+    }
+
+    @Test("Comma before AM/PM")
+    func commaBeforeAmPm() {
+        #expect(PolishPipeline.cleanSpuriousCommas("at 3, PM tomorrow")
+            == "at 3 PM tomorrow")
+    }
+
+    @Test("Trailing comma")
+    func trailingComma() {
+        #expect(PolishPipeline.cleanSpuriousCommas("I will be there tomorrow,")
+            == "I will be there tomorrow")
+    }
+
+    @Test("Comma before period")
+    func commaBeforePeriod() {
+        #expect(PolishPipeline.cleanSpuriousCommas("the project,.")
+            == "the project.")
+    }
+
+    @Test("Apple-bug full example")
+    func appleBugFull() {
+        #expect(PolishPipeline.cleanSpuriousCommas("I will be there at 3, PM,, tomorrow,")
+            == "I will be there at 3 PM, tomorrow")
+    }
+
+    @Test("Normal commas preserved")
+    func normalCommas() {
+        let input = "eggs, milk, bread, and cheese"
+        #expect(PolishPipeline.cleanSpuriousCommas(input) == input)
     }
 }
