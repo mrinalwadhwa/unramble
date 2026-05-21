@@ -179,8 +179,11 @@ public struct OpenAIDictationProvider: DictationProviding {
             }
             let untagged = PolishPipeline.stripKeepTags(
                 polished, casual: casual)
-            return PolishPipeline.normalizeFormatting(
+            let normalized = PolishPipeline.normalizeFormatting(
                 untagged, casual: casual)
+            return PolishPipeline.matchInputCasing(
+                normalized, preprocessedInput: substituted,
+                casual: casual)
         } catch {
             return PolishPipeline.normalizeFormatting(
                 stripped, casual: casual)

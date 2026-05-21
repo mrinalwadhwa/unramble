@@ -597,6 +597,7 @@ public enum PolishPipeline {
             ("flask", "Flask"),
             ("fastapi", "FastAPI"),
             ("nextjs", "Next.js"),
+            ("nodejs", "Node.js"),
             ("nuxt", "Nuxt"),
             ("webpack", "Webpack"),
             ("vite", "Vite"),
@@ -628,9 +629,113 @@ public enum PolishPipeline {
             ("ipad", "iPad"),
             ("watchos", "watchOS"),
             ("xcode", "Xcode"),
+            // Cloud providers
+            ("aws", "AWS"),
+            ("gcp", "GCP"),
+            ("azure", "Azure"),
+            ("amazon", "Amazon"),
+            ("google", "Google"),
+            ("microsoft", "Microsoft"),
+            // Tech acronyms (3+ chars, unambiguous)
+            ("api", "API"),
+            ("sql", "SQL"),
+            ("css", "CSS"),
+            ("html", "HTML"),
+            // Note: "http" and "https" omitted — they appear in URLs
+            // (https://...) where capitalizing would break the URL.
+            ("json", "JSON"),
+            ("xml", "XML"),
+            ("yaml", "YAML"),
+            ("url", "URL"),
+            ("cli", "CLI"),
+            ("sdk", "SDK"),
+            ("dns", "DNS"),
+            ("tcp", "TCP"),
+            ("ssh", "SSH"),
+            ("ssl", "SSL"),
+            ("tls", "TLS"),
+            ("vpn", "VPN"),
+            ("cdn", "CDN"),
+            // French loanwords — always use accented form
+            ("cafe", "café"),
+            ("resume", "résumé"),
+            ("fiance", "fiancé"),
+            ("fiancee", "fiancée"),
+            ("naive", "naïve"),
+            ("protege", "protégé"),
+            ("entrees", "entrées"),
+            ("entree", "entrée"),
         ]
         return terms.map { (pattern, replacement) in
-            // Case-insensitive whole-word match.
+            // Case-insensitive whole-word match. Negative lookbehind
+            // for "/" to avoid capitalizing inside paths like
+            // "application/json".
+            // swiftlint:disable:next force_try
+            let regex = try! NSRegularExpression(
+                pattern: "(?<!/)(?<=\\b)\(NSRegularExpression.escapedPattern(for: pattern))(?=\\b)",
+                options: .caseInsensitive)
+            return (regex, replacement)
+        }
+    }()
+
+    /// Multi-word phrase transforms — patterns that span multiple words.
+    /// Compiled once at startup like knownTerms.
+    private static let knownPhrases: [(NSRegularExpression, String)] = {
+        let phrases: [(String, String)] = [
+            // Number idioms — keep as words, not digits
+            ("one on one", "one-on-one"),
+            // HTTP terms (only as phrases to avoid false positives)
+            ("bearer token", "Bearer token"),
+            ("authorization header", "Authorization header"),
+            ("content type", "Content-Type"),
+            ("cache control", "Cache-Control"),
+            ("cache-control", "Cache-Control"),
+            ("accept header", "Accept header"),
+            ("x forwarded for", "X-Forwarded-For"),
+            ("x-forwarded-for", "X-Forwarded-For"),
+            ("api key", "API key"),
+            ("fetch api", "Fetch API"),
+            // Place names
+            ("new york", "New York"),
+            ("san francisco", "San Francisco"),
+            ("los angeles", "Los Angeles"),
+            ("las vegas", "Las Vegas"),
+            // Number idioms — convert back from digits to words
+            ("square 1", "square one"),
+            ("day 1", "day one"),
+            ("1 on 1", "one-on-one"),
+            ("1-on-1", "one-on-one"),
+            ("2 to tango", "two to tango"),
+            // Node.js variants
+            ("node js", "Node.js"),
+            ("node.js", "Node.js"),
+            // Units
+            ("gigs of", "GB of"),
+            // French phrases
+            ("raison d'etre", "raison d'être"),
+            ("tete a tete", "tête-à-tête"),
+            ("tete-a-tete", "tête-à-tête"),
+            // AWS service phrases
+            ("s3 bucket", "S3 bucket"),
+            ("ec2 instance", "EC2 instance"),
+            ("rds database", "RDS database"),
+            ("sqs queue", "SQS queue"),
+            ("sns topic", "SNS topic"),
+            ("iam role", "IAM role"),
+            ("gke cluster", "GKE cluster"),
+            ("eks cluster", "EKS cluster"),
+            // AWS regions
+            ("us east one", "us-east-1"),
+            ("us east two", "us-east-2"),
+            ("us west one", "us-west-1"),
+            ("us west two", "us-west-2"),
+            ("eu west one", "eu-west-1"),
+            ("eu west two", "eu-west-2"),
+            ("eu central one", "eu-central-1"),
+            ("ap southeast one", "ap-southeast-1"),
+            ("ap northeast one", "ap-northeast-1"),
+        ]
+        return phrases.map { (pattern, replacement) in
             // swiftlint:disable:next force_try
             let regex = try! NSRegularExpression(
                 pattern: "(?<=\\b)\(NSRegularExpression.escapedPattern(for: pattern))(?=\\b)",
@@ -639,9 +744,17 @@ public enum PolishPipeline {
         }
     }()
 
-    /// Replace known tech terms with their correct capitalization.
+    /// Replace known tech terms with their correct capitalization
+    /// and apply known phrase transforms.
     static func capitalizeKnownTerms(_ text: String) -> String {
         var result = text
+        // Multi-word phrases first (before single words break them).
+        for (regex, replacement) in knownPhrases {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: replacement)
+        }
         for (regex, replacement) in knownTerms {
             result = regex.stringByReplacingMatches(
                 in: result,
@@ -861,6 +974,41 @@ public enum PolishPipeline {
             result.replaceSubrange(range, with: collapsed)
         }
         return result
+    }
+
+    // MARK: - Cloud Output Capitalization
+
+    /// Match the first-letter casing of the cloud model output to the
+    /// preprocessed input.
+    ///
+    /// If the preprocessed input started lowercase (continuation
+    /// mid-sentence), force the output lowercase — the model sometimes
+    /// capitalizes despite receiving lowercase input. If the input
+    /// started uppercase and the model stripped a preamble leaving
+    /// lowercase output, re-capitalize it.
+    public static func matchInputCasing(
+        _ text: String, preprocessedInput: String,
+        casual: Bool
+    ) -> String {
+        guard !casual else { return text }
+        guard let outputFirst = text.first, outputFirst.isLetter,
+              let inputFirst = preprocessedInput.first, inputFirst.isLetter
+        else { return text }
+
+        if inputFirst.isLowercase && outputFirst.isUppercase {
+            // Continuation: input was lowercase, force output lowercase.
+            // But skip acronyms — if the first word is all-uppercase
+            // (e.g. "AWS", "API"), don't lowercase it.
+            let firstWord = text.prefix(while: { $0.isLetter })
+            if firstWord.count > 1 && firstWord.allSatisfy({ $0.isUppercase }) {
+                return text
+            }
+            return outputFirst.lowercased() + text.dropFirst()
+        } else if inputFirst.isUppercase && outputFirst.isLowercase {
+            // Preamble stripped: input was uppercase, re-capitalize.
+            return outputFirst.uppercased() + text.dropFirst()
+        }
+        return text
     }
 
     // MARK: - Helpers

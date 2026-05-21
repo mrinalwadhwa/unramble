@@ -34,8 +34,11 @@ private func runCloudPipeline(
             return "[empty] \(PolishPipeline.normalizeFormatting(stripped, casual: casual))"
         }
         let untagged = PolishPipeline.stripKeepTags(raw, casual: casual)
-        return PolishPipeline.normalizeFormatting(
+        let normalized = PolishPipeline.normalizeFormatting(
             untagged, casual: casual)
+        return PolishPipeline.matchInputCasing(
+            normalized, preprocessedInput: substituted,
+            casual: casual)
     } catch {
         return "[error] \(error)"
     }

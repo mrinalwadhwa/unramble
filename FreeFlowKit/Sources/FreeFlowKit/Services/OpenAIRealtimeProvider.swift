@@ -1217,8 +1217,11 @@ public final class OpenAIRealtimeProvider: StreamingDictationProviding, @uncheck
             }
             let untagged = PolishPipeline.stripKeepTags(
                 polished, casual: casual)
-            let result = PolishPipeline.normalizeFormatting(
+            let normalized = PolishPipeline.normalizeFormatting(
                 untagged, casual: casual)
+            let result = PolishPipeline.matchInputCasing(
+                normalized, preprocessedInput: substituted,
+                casual: casual)
             if stripped != result {
                 Log.debug("[Polish] CHANGED: \"\(stripped)\" → \"\(result)\"")
             }
