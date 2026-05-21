@@ -295,6 +295,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             streamingProvider = LocalModelStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil
+
+            // Preload models in the background so the first dictation is fast.
+            Task.detached(priority: .utility) {
+                do {
+                    async let stt: () = sttEngine.load()
+                    async let llm: () = llmEngine.load()
+                    try await stt
+                    try await llm
+                    Log.debug("[AppDelegate] Models preloaded")
+                } catch {
+                    Log.debug("[AppDelegate] Preload failed (will retry on first use): \(error)")
+                }
+            }
             #else
             fatalError("Local mode requires Apple Silicon")
             #endif

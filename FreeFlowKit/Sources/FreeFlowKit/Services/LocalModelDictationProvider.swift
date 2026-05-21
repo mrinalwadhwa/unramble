@@ -65,6 +65,11 @@ public struct LocalModelDictationProvider: DictationProviding {
                 return PolishPipeline.normalizeFormatting(
                     stripped, casual: casual)
             }
+            if let fallback = PolishPipeline.guardAgainstTruncation(
+                polished: polished, preprocessed: stripped) {
+                return PolishPipeline.normalizeFormatting(
+                    fallback, casual: casual)
+            }
             return PolishPipeline.normalizeFormatting(
                 polished, casual: casual)
         } catch {

@@ -88,8 +88,7 @@ accidentally doubled mid-sentence ("I think I think we should" → "I \
 think we should", "the the client" → "the client"). But when a word \
 is repeated 3 or more times deliberately for emphasis — especially at \
 the start of a sentence — keep all instances and separate with commas: \
-"wait wait wait hold on" → "Wait, wait, wait, hold on." Other \
-emphasis examples: "no no no", "stop stop stop", "go go go". Use a \
+"wait wait wait hold on" → "Wait, wait, wait, hold on." Use a \
 comma (not a period) after the emphasis to keep it as one sentence: \
 "no no no we can't do that" → "No, no, no, we can't do that." Also \
 keep 2-word emphasis: "please please", "never ever", "now now", "yes \
@@ -172,7 +171,7 @@ Output:
 2. Restart the worker
 3. Verify
 
-When recapping a meeting, standup, sync, or retro where multiple \
+When the speaker is recapping a meeting, standup, sync, or retro where multiple \
 people reported, format each person's update as a bullet:
 Input: "in the check-in dave said the API is live maria flagged a \
 test gap and sam will add monitoring"

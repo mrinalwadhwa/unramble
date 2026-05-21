@@ -185,7 +185,20 @@ public enum PolishPipeline {
             with: "\n",
             options: .regularExpression)
 
-        if !casual {
+        if casual {
+            // Casual: lowercase the first character unless the first
+            // word is an abbreviation (all-uppercase like "API", "AWS")
+            // or the pronoun "I".
+            if let first = result.first, first.isLetter, first.isUppercase {
+                let firstWord = result.prefix(while: { $0.isLetter })
+                let isAbbreviation = firstWord.count > 1
+                    && firstWord.allSatisfy({ $0.isUppercase })
+                let isPronounI = firstWord == "I"
+                if !isAbbreviation && !isPronounI {
+                    result = first.lowercased() + result.dropFirst()
+                }
+            }
+        } else {
             // Capitalize first letter after sentence-ending punctuation + space.
             result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
 
@@ -1057,5 +1070,27 @@ public enum PolishPipeline {
             return false
         }
         return last == "." || last == "?" || last == "!"
+    }
+
+    /// Check whether the model aggressively truncated input by
+    /// misidentifying normal speech as a self-correction. If the
+    /// polished output lost more than half the input, return the
+    /// preprocessed text instead.
+    public static func guardAgainstTruncation(
+        polished: String, preprocessed: String
+    ) -> String? {
+        guard preprocessed.count >= 40 else { return nil }
+        let ratio = Double(polished.count) / Double(preprocessed.count)
+        if ratio < 0.25 {
+            Log.debug(
+                "[TRUNCATION_GUARD] polished=\(polished.count)chars"
+                + " input=\(preprocessed.count)chars"
+                + " ratio=\(String(format: "%.0f", ratio * 100))%"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+        return nil
     }
 }

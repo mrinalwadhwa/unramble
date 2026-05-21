@@ -76,8 +76,10 @@ public final class LocalModelStreamingProvider: StreamingDictationProviding,
         let wav = WAVEncoder.encode(
             pcmData: audio, sampleRate: 16000, channels: 1, bitsPerSample: 16)
         Log.debug("[LocalModelStreaming] Transcribing \(wav.count) byte WAV")
+        let sttStart = CFAbsoluteTimeGetCurrent()
         let raw = try await sttEngine.transcribe(audio: wav)
-        Log.debug("[LocalModelStreaming] Raw transcription: '\(raw)'")
+        let sttElapsed = CFAbsoluteTimeGetCurrent() - sttStart
+        Log.debug("[LocalModelStreaming] Raw transcription: '\(raw)' (stt=\(String(format: "%.2f", sttElapsed))s)")
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "" }
 
@@ -109,16 +111,23 @@ public final class LocalModelStreamingProvider: StreamingDictationProviding,
 
         do {
             Log.debug("[LocalModelStreaming] Polishing via LLM...")
+            let polishStart = CFAbsoluteTimeGetCurrent()
             let polished = try await polishChatClient.complete(
                 model: polishModel,
                 systemPrompt: systemPrompt,
                 userPrompt: stripped)
+            let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
             if polished.isEmpty {
                 Log.debug("[LocalModelStreaming] LLM returned empty, using deterministic")
                 return PolishPipeline.normalizeFormatting(
                     stripped, casual: casual)
             }
-            Log.debug("[LocalModelStreaming] Polished: '\(polished)'")
+            if let fallback = PolishPipeline.guardAgainstTruncation(
+                polished: polished, preprocessed: stripped) {
+                return PolishPipeline.normalizeFormatting(
+                    fallback, casual: casual)
+            }
+            Log.debug("[LocalModelStreaming] Polished: '\(polished)' (polish=\(String(format: "%.2f", polishElapsed))s)")
             return PolishPipeline.normalizeFormatting(
                 polished, casual: casual)
         } catch {
