@@ -255,38 +255,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let streamingProvider: (any StreamingDictationProviding)?
         let onSessionExpired: (@Sendable () -> Void)?
 
+        // Resolve the LoRA adapter path for fine-tuned polish.
+        // Looks in the app bundle first, then Application Support.
+        let adapterPath: String? = {
+            #if arch(arm64)
+            if let bundled = Bundle.main.path(
+                forResource: "adapters",
+                ofType: "safetensors",
+                inDirectory: "models/qwen3-polish-adapter") {
+                return (bundled as NSString).deletingLastPathComponent
+            }
+            let appSupport = LocalModelManager()
+                .modelPath(for: "qwen3-polish-adapter")
+            if FileManager.default.fileExists(
+                atPath: appSupport.appendingPathComponent(
+                    "adapters.safetensors").path) {
+                return appSupport.path
+            }
+            return nil
+            #else
+            return nil
+            #endif
+        }()
+
         if Settings.shared.dictationMode == .local {
-            // Open-source models: Parakeet STT + MLX LLM polish.
-            Log.debug("[AppDelegate] Using open-source local models (Parakeet + MLX)")
+            // Local mode: Parakeet STT + fine-tuned MLX LLM polish.
+            Log.debug("[AppDelegate] Using local models (Parakeet + MLX)")
             let modelManager = LocalModelManager()
             let sttEngine = ParakeetEngine(modelManager: modelManager)
+            #if arch(arm64)
             let llmEngine = MLXLLMEngine(
-                name: "Qwen3 0.6B",
-                modelID: "mlx-community/Qwen3-0.6B-4bit")
-            let polisher = MLXPolishClient(engine: llmEngine)
+                name: "Qwen3 0.6B Polish",
+                modelID: "mlx-community/Qwen3-0.6B-4bit",
+                adapterPath: adapterPath)
+            let polisher: any PolishChatClient = MLXPolishClient(
+                engine: llmEngine)
+            #else
+            let polisher: any PolishChatClient = OpenAIChatClient(
+                apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
+            #endif
             dictationProvider = LocalModelDictationProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             streamingProvider = LocalModelStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil
         } else {
+            // Cloud mode: OpenAI STT + cloud polish, with local
+            // fine-tuned MLX as fallback when cloud is slow.
             let polishClient = OpenAIChatClient(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            // Create a local polish client to race against the cloud.
-            // If the cloud is slow, the local model provides a fallback.
             let localPolisher: (any PolishChatClient)?
-            if DictationMode.isAppleIntelligenceAvailable, #available(macOS 26, *) {
-                localPolisher = FoundationModelChatClient()
-            } else {
-                #if arch(arm64)
-                let llmEngine = MLXLLMEngine(
-                    name: "Qwen3 0.6B",
-                    modelID: "mlx-community/Qwen3-0.6B-4bit")
-                localPolisher = MLXPolishClient(engine: llmEngine)
-                #else
-                localPolisher = nil
-                #endif
-            }
+            #if arch(arm64)
+            let llmEngine = MLXLLMEngine(
+                name: "Qwen3 0.6B Polish",
+                modelID: "mlx-community/Qwen3-0.6B-4bit",
+                adapterPath: adapterPath)
+            localPolisher = MLXPolishClient(engine: llmEngine)
+            #else
+            localPolisher = nil
+            #endif
             dictationProvider = OpenAIDictationProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
                 polishChatClient: polishClient,

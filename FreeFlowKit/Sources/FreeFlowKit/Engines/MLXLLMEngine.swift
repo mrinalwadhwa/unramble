@@ -13,15 +13,20 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
 
     public let name: String
     private let modelID: String
+    private let adapterPath: String?
     private let lock = NSLock()
     private var container: ModelContainer?
 
     /// - Parameters:
     ///   - name: Display name for diagnostics.
-    ///   - modelID: HuggingFace model ID (e.g. "mlx-community/Qwen3-0.6B-4bit").
-    public init(name: String, modelID: String) {
+    ///   - modelID: HuggingFace model ID (e.g. "mlx-community/Qwen3-0.6B-4bit")
+    ///     or absolute path to a local model directory.
+    ///   - adapterPath: Optional path to a LoRA adapter directory
+    ///     containing `adapter_config.json` and `adapters.safetensors`.
+    public init(name: String, modelID: String, adapterPath: String? = nil) {
         self.name = name
         self.modelID = modelID
+        self.adapterPath = adapterPath
     }
 
     public var isReady: Bool { lock.withLock { container != nil } }
@@ -29,12 +34,29 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
     public func load() async throws {
         guard !isReady else { return }
 
-        let configuration = ModelConfiguration(id: modelID)
+        // Support both HuggingFace repo IDs and local directory paths.
+        let configuration: ModelConfiguration
+        if modelID.hasPrefix("/") {
+            configuration = ModelConfiguration(
+                directory: URL(fileURLWithPath: modelID))
+        } else {
+            configuration = ModelConfiguration(id: modelID)
+        }
 
         let loaded = try await loadModelContainer(
             from: HubDownloaderBridge(),
             using: TokenizerLoaderBridge(),
             configuration: configuration)
+
+        // Apply LoRA adapter if provided.
+        if let adapterPath {
+            let adapterURL = URL(fileURLWithPath: adapterPath)
+            let adapter = try LoRAContainer.from(directory: adapterURL)
+            try await loaded.perform { context in
+                try context.model.load(adapter: adapter)
+            }
+            Log.debug("[MLXLLMEngine] \(name) adapter loaded from \(adapterPath)")
+        }
 
         lock.withLock { container = loaded }
         Log.debug("[MLXLLMEngine] \(name) loaded")
