@@ -57,10 +57,11 @@ struct PolishScenarioDumpCloud {
         else { return }
         let client = OpenAIChatClient(apiKey: apiKey)
 
-        print("\n=== CLOUD LLM (buildCloudSystemPrompt + \(PolishPipeline.polishModel)) ===\n")
+        let scenarios = evalScenarios()
+        print("\n=== CLOUD LLM (\(PolishPipeline.polishModel), \(scenarios.count) scenarios) ===\n")
         var matches = 0
         var categoryStats: [String: (match: Int, total: Int)] = [:]
-        for s in allScenarios {
+        for s in scenarios {
             let result = await runCloudPipeline(
                 scenario: s, client: client)
             let isMatch = s.matches(result)
@@ -80,7 +81,7 @@ struct PolishScenarioDumpCloud {
             }
             print()
         }
-        print("Score: \(matches)/\(allScenarios.count)")
+        print("Score: \(matches)/\(scenarios.count)")
         print("\n--- Category breakdown ---")
         for cat in categoryStats.keys.sorted() {
             let s = categoryStats[cat]!

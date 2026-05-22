@@ -37,6 +37,7 @@ public final class ParakeetEngine: LocalSTTEngine, @unchecked Sendable {
 
     private let modelManager: LocalModelManager
     private let modelID: String
+    private let modelPathOverride: String?
 
     // MARK: - Constants
 
@@ -58,10 +59,12 @@ public final class ParakeetEngine: LocalSTTEngine, @unchecked Sendable {
 
     public init(
         modelManager: LocalModelManager,
-        modelID: String = "parakeet-tdt-0.6b-v3-coreml"
+        modelID: String = "parakeet-tdt-0.6b-v3-coreml",
+        modelPath: String? = nil
     ) {
         self.modelManager = modelManager
         self.modelID = modelID
+        self.modelPathOverride = modelPath
     }
 
     public var isReady: Bool {
@@ -73,7 +76,12 @@ public final class ParakeetEngine: LocalSTTEngine, @unchecked Sendable {
     public func load() async throws {
         guard !isReady else { return }
 
-        let modelDir = modelManager.modelPath(for: modelID)
+        let modelDir: URL
+        if let override = modelPathOverride {
+            modelDir = URL(fileURLWithPath: override)
+        } else {
+            modelDir = modelManager.modelPath(for: modelID)
+        }
         guard FileManager.default.fileExists(atPath: modelDir.path) else {
             throw LocalModelError.modelNotFound(modelDir.path)
         }

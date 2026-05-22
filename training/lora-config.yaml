@@ -1,0 +1,19 @@
+# LoRA fine-tuning config for Qwen3 0.6B dictation polish
+model: mlx-community/Qwen3-0.6B-4bit
+data: .
+train: true
+fine_tune_type: lora
+mask_prompt: true
+batch_size: 4
+iters: 400
+learning_rate: 1e-5
+steps_per_report: 10
+steps_per_eval: 50
+val_batches: -1
+save_every: 50
+adapter_path: adapters
+max_seq_length: 512
+seed: 42
+
+# LoRA parameters (set via lora_parameters in the model config)
+# rank=8, alpha=16 are the defaults in mlx-lm

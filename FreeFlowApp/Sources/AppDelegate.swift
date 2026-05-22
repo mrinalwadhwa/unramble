@@ -245,6 +245,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let audioProvider = AudioCaptureProvider()
 
+    /// Resolve a model directory path, checking the app bundle first,
+    /// then Application Support. Returns the directory path as a String,
+    /// or nil if not found in either location.
+    private static func resolveModelPath(
+        _ modelID: String, file: String,
+        modelManager: LocalModelManager
+    ) -> String? {
+        if let bundled = Bundle.main.path(
+            forResource: (file as NSString).deletingPathExtension,
+            ofType: (file as NSString).pathExtension,
+            inDirectory: "models/\(modelID)") {
+            return (bundled as NSString).deletingLastPathComponent
+        }
+        let appSupport = modelManager.modelPath(for: modelID)
+        if FileManager.default.fileExists(
+            atPath: appSupport.appendingPathComponent(file).path) {
+            return appSupport.path
+        }
+        return nil
+    }
+
     private func setupPipeline() {
         audioProvider.setAudioDeviceProvider(audioDeviceProvider)
         audioProvider.setSoundFeedbackProvider(soundFeedbackProvider)
@@ -255,38 +276,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let streamingProvider: (any StreamingDictationProviding)?
         let onSessionExpired: (@Sendable () -> Void)?
 
-        // Resolve the LoRA adapter path for fine-tuned polish.
-        // Looks in the app bundle first, then Application Support.
-        let adapterPath: String? = {
-            #if arch(arm64)
-            if let bundled = Bundle.main.path(
-                forResource: "adapters",
-                ofType: "safetensors",
-                inDirectory: "models/qwen3-polish-adapter") {
-                return (bundled as NSString).deletingLastPathComponent
-            }
-            let appSupport = LocalModelManager()
-                .modelPath(for: "qwen3-polish-adapter")
-            if FileManager.default.fileExists(
-                atPath: appSupport.appendingPathComponent(
-                    "adapters.safetensors").path) {
-                return appSupport.path
-            }
-            return nil
-            #else
-            return nil
-            #endif
-        }()
-
         if Settings.shared.dictationMode == .local {
             // Local mode: Parakeet STT + fine-tuned MLX LLM polish.
             #if arch(arm64)
             Log.debug("[AppDelegate] Using local models (Parakeet + MLX)")
             let modelManager = LocalModelManager()
-            let sttEngine = ParakeetEngine(modelManager: modelManager)
+
+            // Resolve model paths: app bundle first, then Application Support.
+            let qwenModelPath = Self.resolveModelPath(
+                "qwen3-0.6b-4bit", file: "model.safetensors",
+                modelManager: modelManager)
+            let adapterPath = Self.resolveModelPath(
+                "qwen3-0.6b-4bit-polish-adapter", file: "adapters.safetensors",
+                modelManager: modelManager)
+
+            let parakeetPath = Self.resolveModelPath(
+                "parakeet-tdt-0.6b-v3-coreml", file: "tokens.txt",
+                modelManager: modelManager)
+            let sttEngine = ParakeetEngine(
+                modelManager: modelManager,
+                modelPath: parakeetPath)
             let llmEngine = MLXLLMEngine(
                 name: "Qwen3 0.6B Polish",
-                modelID: "mlx-community/Qwen3-0.6B-4bit",
+                modelID: qwenModelPath ?? "mlx-community/Qwen3-0.6B-4bit",
                 adapterPath: adapterPath)
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)

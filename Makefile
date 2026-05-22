@@ -1,4 +1,4 @@
-.PHONY: build run test clean xcode generate release archive sign notarize appcast version
+.PHONY: build run test clean xcode generate models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
 XCODEGEN := $(shell command -v xcodegen 2>/dev/null)
@@ -38,6 +38,15 @@ ifndef XCODEGEN
 	$(error "xcodegen not found. Install with: brew install xcodegen")
 endif
 	xcodegen generate
+
+# Download models listed in FreeFlowApp/models.json
+models:
+	@./scripts/download-models.sh
+
+# Generate training data from YAML, then train a LoRA adapter
+train:
+	@cd training && python3 generate_training_data.py --no-casual --split
+	@cd training && python3 -u -m mlx_lm.lora --config lora-config.yaml
 
 # Build the app (generates project first if missing)
 build: $(PROJECT)

@@ -1,0 +1,27 @@
+{
+  "models": {
+    "parakeet-tdt-0.6b-v3-coreml": {
+      "source": "huggingface",
+      "repo": "mrinalwadhwa/parakeet-tdt-0.6b-v3-coreml",
+      "revision": "a2aeaa3aab2b4ec131b18f1b6fd238d6cf69c04c",
+      "include": [
+        "Decoder.mlmodelc/*",
+        "Encoder.mlmodelc/*",
+        "JointDecisionv3.mlmodelc/*",
+        "Preprocessor.mlmodelc/*",
+        "parakeet_v3_vocab.json"
+      ],
+      "sha256": "c140798baed20562bca6e020d950a4d22fede2d4ea8542b5f1644623d6e34297"
+    },
+    "qwen3-0.6b-4bit": {
+      "source": "huggingface",
+      "repo": "mrinalwadhwa/Qwen3-0.6B-4bit",
+      "revision": "44c9f61dea041165b988662ba914dbfef0e0d096",
+      "sha256": "325144df29dbb6f0b8d5a775eb333fe7f4fdf22d1c18c589a15894540a1c5287"
+    },
+    "qwen3-0.6b-4bit-polish-adapter": {
+      "source": "bundled",
+      "sha256": "b513f277b978db326552174472428e0e83eddf488e08bbfbb8a3e92b7bcc9943"
+    }
+  }
+}

@@ -9,8 +9,8 @@ import XCTest
 /// provider (transcription + polish) and compares the output against
 /// the accepted results from PolishScenarioData.
 ///
-/// Gated by FREEFLOW_TEST_OPENAI=1 and requires audio files in
-/// .scratch/e2e/audio/. Run `./generate-audio.sh` first.
+/// Gated by FREEFLOW_TEST_OPENAI=1 and requires audio fixtures in
+/// Tests/FreeFlowKitTests/Fixtures/audio/.
 ///
 /// These tests hit the real OpenAI API and cost real money. They are
 /// slow (~2s per scenario) and should not run in CI without explicit
@@ -35,7 +35,7 @@ final class AudioPipelineTests: XCTestCase {
 
         let audioDir = findAudioDir()
         guard let audioDir else {
-            throw XCTSkip("Audio directory not found. Run .scratch/e2e/generate-audio.sh first.")
+            throw XCTSkip("Audio fixtures not found at Tests/FreeFlowKitTests/Fixtures/audio/")
         }
 
         // Build providers.
@@ -161,16 +161,13 @@ final class AudioPipelineTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Find the audio directory relative to the repo root.
+    /// Find the audio fixtures directory next to the test source.
     private func findAudioDir() -> URL? {
-        // Walk up from the test file to find the repo root.
-        var dir = URL(fileURLWithPath: #file)
-        for _ in 0..<10 {
-            dir = dir.deletingLastPathComponent()
-            let candidate = dir.appendingPathComponent(".scratch/e2e/audio")
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                return candidate
-            }
+        let testFile = URL(fileURLWithPath: #file)
+        let testDir = testFile.deletingLastPathComponent()
+        let candidate = testDir.appendingPathComponent("Fixtures/audio")
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return candidate
         }
         return nil
     }

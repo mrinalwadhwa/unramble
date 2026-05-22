@@ -10,7 +10,7 @@ import XCTest
 /// No polish — this isolates STT accuracy.
 ///
 /// Enable: touch /tmp/freeflow-test-stt-compare
-/// Requires: audio in .scratch/e2e/audio/ and Parakeet model
+/// Requires: audio fixtures in Tests/FreeFlowKitTests/Fixtures/audio/ and Parakeet model
 /// in ~/Library/Application Support/freeflow/models/.
 final class STTComparisonTests: XCTestCase {
 
@@ -109,15 +109,11 @@ final class STTComparisonTests: XCTestCase {
     // MARK: - Helpers
 
     private func findAudioDir() -> URL? {
-        var dir = URL(fileURLWithPath: #file)
-        for _ in 0..<10 {
-            dir = dir.deletingLastPathComponent()
-            let candidate = dir.appendingPathComponent(
-                ".scratch/e2e/audio")
-            if FileManager.default.fileExists(
-                atPath: candidate.path) {
-                return candidate
-            }
+        let testFile = URL(fileURLWithPath: #file)
+        let testDir = testFile.deletingLastPathComponent()
+        let candidate = testDir.appendingPathComponent("Fixtures/audio")
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return candidate
         }
         return nil
     }

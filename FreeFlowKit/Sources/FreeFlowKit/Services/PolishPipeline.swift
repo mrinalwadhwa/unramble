@@ -1073,24 +1073,63 @@ public enum PolishPipeline {
     }
 
     /// Check whether the model aggressively truncated input by
-    /// misidentifying normal speech as a self-correction. If the
-    /// polished output lost more than half the input, return the
-    /// preprocessed text instead.
+    /// misidentifying normal speech as a self-correction.
+    ///
+    /// Two triggers:
+    /// - Output is less than 25% of input length (extreme truncation)
+    /// - Output dropped 2+ sentences AND is less than 60% of input
+    ///   length (moderate sentence dropping)
+    ///
+    /// Returns the preprocessed text as fallback, or nil if no
+    /// truncation detected.
     public static func guardAgainstTruncation(
         polished: String, preprocessed: String
     ) -> String? {
         guard preprocessed.count >= 40 else { return nil }
         let ratio = Double(polished.count) / Double(preprocessed.count)
+
+        // Extreme truncation: output is tiny compared to input.
         if ratio < 0.25 {
             Log.debug(
-                "[TRUNCATION_GUARD] polished=\(polished.count)chars"
+                "[TRUNCATION_GUARD] ratio=\(String(format: "%.0f", ratio * 100))%"
+                + " polished=\(polished.count)chars"
                 + " input=\(preprocessed.count)chars"
-                + " ratio=\(String(format: "%.0f", ratio * 100))%"
                 + " — falling back to preprocessed"
                 + " | polished=\"\(polished)\""
                 + " | preprocessed=\"\(preprocessed)\"")
             return preprocessed
         }
+
+        // Sentence dropping: model removed whole sentences.
+        let inputSentences = countSentences(preprocessed)
+        let outputSentences = countSentences(polished)
+        if inputSentences >= 3
+            && outputSentences < inputSentences - 1
+            && ratio < 0.6 {
+            Log.debug(
+                "[TRUNCATION_GUARD] sentences=\(inputSentences)→\(outputSentences)"
+                + " ratio=\(String(format: "%.0f", ratio * 100))%"
+                + " polished=\(polished.count)chars"
+                + " input=\(preprocessed.count)chars"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+
         return nil
+    }
+
+    /// Count sentence-ending punctuation marks in text.
+    private static func countSentences(_ text: String) -> Int {
+        var count = 0
+        var prev: Character = " "
+        for char in text {
+            if (char == "." || char == "!" || char == "?") && prev != "." && prev != "!" && prev != "?" {
+                count += 1
+            }
+            prev = char
+        }
+        return count
     }
 }

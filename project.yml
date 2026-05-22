@@ -38,6 +38,11 @@ targets:
       - path: FreeFlowApp/Sources
       - path: FreeFlowApp/Resources
         buildPhase: resources
+        excludes:
+          - "models/**"
+      - path: FreeFlowApp/Resources/models
+        buildPhase: resources
+        type: folder
     settings:
       base:
         PRODUCT_NAME: FreeFlow

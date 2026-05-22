@@ -42,7 +42,6 @@ private func runMLXDump(
     name: String,
     modelID: String,
     adapterPath: String? = nil,
-    scenarios: [PolishScenario]? = nil,
     logPath: String = "/tmp/freeflow-mlx-eval.log"
 ) async throws {
     let log = EvalLogger(path: logPath)
@@ -55,11 +54,12 @@ private func runMLXDump(
     }
     let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
-    let evalScenarios = scenarios ?? allScenarios
-    log.log("=== \(name) ===")
+    let evalSet = evalScenarios()
+    log.log("=== \(name) (\(evalSet.count) scenarios) ===")
     log.log("")
     var matches = 0
-    for s in evalScenarios {
+    var categoryStats: [String: (match: Int, total: Int)] = [:]
+    for s in evalSet {
         let casual = s.style == "casual"
         let substituted = PolishPipeline.substituteDictatedPunctuation(
             s.input, casual: casual, precedingText: s.precedingText)
@@ -74,11 +74,15 @@ private func runMLXDump(
                 raw.isEmpty ? stripped : raw)
             let isMatch = s.matches(result)
             if isMatch { matches += 1 }
+            var stats = categoryStats[s.category, default: (0, 0)]
+            stats.total += 1
+            if isMatch { stats.match += 1 }
+            categoryStats[s.category] = stats
             let tag = isMatch ? "MATCH" : "DIFF"
             log.log("[\(s.category)] \(tag)")
-            log.log("  Input:    \(s.input)")
-            log.log("  Output:   \(result)")
             if !isMatch {
+                log.log("  Input:    \(s.input)")
+                log.log("  Output:   \(result)")
                 log.log("  Expected: \(s.accepted[0])")
             }
             log.log("")
@@ -88,7 +92,13 @@ private func runMLXDump(
             log.log("")
         }
     }
-    log.log("Score: \(matches)/\(evalScenarios.count)")
+    log.log("Score: \(matches)/\(evalSet.count)")
+    log.log("")
+    log.log("--- Category breakdown ---")
+    for cat in categoryStats.keys.sorted() {
+        let s = categoryStats[cat]!
+        log.log("  \(cat): \(s.match)/\(s.total)")
+    }
     log.log("")
     await engine.unload()
 }
@@ -124,24 +134,6 @@ struct PolishScenarioDumpMLX {
             name: "Gemma 3 1B",
             modelID: "mlx-community/gemma-3-1b-it-qat-4bit",
             logPath: "/tmp/freeflow-mlx-eval-gemma.log")
-    }
-
-    @Test("Qwen3 0.6B Fine-tuned (training set)")
-    func qwen06FinetunedTraining() async throws {
-        let flagPath = "/tmp/freeflow-test-mlx-adapter-path"
-        guard FileManager.default.fileExists(atPath: "/tmp/freeflow-test-mlx-training"),
-              FileManager.default.fileExists(atPath: flagPath),
-              let adapterPath = try? String(
-                contentsOfFile: flagPath, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !adapterPath.isEmpty
-        else { return }
-        try await runMLXDump(
-            name: "Qwen3 0.6B Fine-tuned (training)",
-            modelID: "mlx-community/Qwen3-0.6B-4bit",
-            adapterPath: adapterPath,
-            scenarios: allTrainingScenarios,
-            logPath: "/tmp/freeflow-mlx-eval-training.log")
     }
 
     @Test("Qwen3 0.6B Fine-tuned")

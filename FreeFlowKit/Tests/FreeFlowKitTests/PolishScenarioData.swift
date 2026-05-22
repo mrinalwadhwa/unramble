@@ -60,35 +60,57 @@ struct PolishScenario {
 /// All polish scenarios loaded from polish-tests.json.
 ///
 /// The JSON file is generated from polish-tests.yaml (the source of
-/// truth) and lives in .scratch/fine-tuning/. Found by walking up
-/// from the test source file.
-let allScenarios: [PolishScenario] = {
-    guard let url = findScenariosJSON() else {
-        fatalError("polish-tests.json not found — walk up from \(#file)")
-    }
-    guard let data = try? Data(contentsOf: url),
-          let entries = try? JSONDecoder().decode([ScenarioEntry].self, from: data)
-    else {
-        fatalError("Failed to parse polish-tests.json")
-    }
-    return entries.map { scenarioFromEntry($0) }
-}()
+/// truth) and lives in training/. Found by walking up from the test
+/// source file.
+let allScenarios: [PolishScenario] = loadScenarios(from: "polish-tests.json")
 
 /// All training scenarios loaded from polish-training-eval.json.
 ///
 /// Used to evaluate the model against its own training data
 /// through the full Swift pipeline (preprocessing → model → postprocessing).
-let allTrainingScenarios: [PolishScenario] = {
-    guard let url = findFineTuningFile("polish-training-eval.json") else {
-        fatalError("polish-training-eval.json not found — walk up from \(#file)")
+let allTrainingScenarios: [PolishScenario] = loadScenarios(from: "polish-training-eval.json")
+
+/// Load scenarios from a JSON file, applying environment-based filters.
+///
+/// - `FREEFLOW_TEST_CATEGORIES=list,meeting` — run only these categories
+/// - `FREEFLOW_TEST_NO_CASUAL=1` — exclude casual scenarios
+private func loadScenarios(from filename: String) -> [PolishScenario] {
+    guard let url = findTrainingFile(filename) else {
+        fatalError("\(filename) not found — walk up from \(#file)")
     }
     guard let data = try? Data(contentsOf: url),
           let entries = try? JSONDecoder().decode([ScenarioEntry].self, from: data)
     else {
-        fatalError("Failed to parse polish-training-eval.json")
+        fatalError("Failed to parse \(filename)")
     }
-    return entries.map { scenarioFromEntry($0) }
-}()
+    var scenarios = entries.map { scenarioFromEntry($0) }
+
+    // Filter by category if specified.
+    if let cats = ProcessInfo.processInfo.environment["FREEFLOW_TEST_CATEGORIES"],
+       !cats.isEmpty {
+        let allowed = Set(cats.split(separator: ",").map(String.init))
+        scenarios = scenarios.filter { allowed.contains($0.category) }
+    }
+
+    // Exclude casual if specified.
+    if ProcessInfo.processInfo.environment["FREEFLOW_TEST_NO_CASUAL"] == "1" {
+        scenarios = scenarios.filter { $0.style != "casual" }
+    }
+
+    return scenarios
+}
+
+/// Choose between test and training scenarios based on environment.
+///
+/// When `FREEFLOW_TEST_TRAINING=1` is set, return training scenarios.
+/// Otherwise return test scenarios. Applies the same category and
+/// casual filters.
+func evalScenarios() -> [PolishScenario] {
+    if ProcessInfo.processInfo.environment["FREEFLOW_TEST_TRAINING"] == "1" {
+        return allTrainingScenarios
+    }
+    return allScenarios
+}
 
 /// Build a PolishScenario from a JSON entry, constructing an AppContext
 /// that reflects the scenario's style and preceding text so that
@@ -118,19 +140,14 @@ private struct ScenarioEntry: Decodable {
     let preceding_text: String?
 }
 
-private func findFineTuningFile(_ name: String) -> URL? {
+private func findTrainingFile(_ name: String) -> URL? {
     var dir = URL(fileURLWithPath: #file)
     for _ in 0..<10 {
         dir = dir.deletingLastPathComponent()
-        let candidate = dir.appendingPathComponent(
-            ".scratch/fine-tuning/\(name)")
+        let candidate = dir.appendingPathComponent("training/\(name)")
         if FileManager.default.fileExists(atPath: candidate.path) {
             return candidate
         }
     }
     return nil
-}
-
-private func findScenariosJSON() -> URL? {
-    findFineTuningFile("polish-tests.json")
 }

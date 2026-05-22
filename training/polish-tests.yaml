@@ -1,0 +1,1159 @@
+- category: apple-bug
+  input: Can you check, the, status of, the deployment,,
+  accepted:
+  - Can you check the status of the deployment.
+  - Can you check the status of the deployment?
+- category: apple-bug
+  input: I will be there at 3, PM,, tomorrow,
+  accepted:
+  - I will be there at 3 PM tomorrow.
+  - I will be there at 3 p.m. tomorrow.
+  - I will be there at 3:00 PM tomorrow.
+- category: apple-bug
+  input: Let me know if you have any, questions, about the, project.
+  accepted:
+  - Let me know if you have any questions about the project.
+- category: apple-bug
+  input: Please, send, the report,, by Friday.
+  accepted:
+  - Please send the report by Friday.
+- category: apple-bug
+  input: The meeting is at, 10,, AM, on Monday,
+  accepted:
+  - The meeting is at 10 AM on Monday.
+- category: apple-bug
+  input: the report is due due on Friday
+  accepted:
+  - The report is due on Friday.
+- category: backtrack
+  input: I'll be there in ten no twenty minutes
+  accepted:
+  - I'll be there in 20 minutes.
+- category: backtrack
+  input: the cost is two actually three hundred dollars per month
+  accepted:
+  - The cost is $300 per month.
+- category: backtrack
+  input: we need three no four developers on this project
+  accepted:
+  - We need 4 developers on this project.
+- category: capitalization
+  input: can you ask sarah from the london office about the api changes
+  accepted:
+  - Can you ask Sarah from the London office about the API changes?
+- category: capitalization
+  input: dmitri from the zurich office fixed the elasticsearch cluster
+  accepted:
+  - Dmitri from the Zurich office fixed the Elasticsearch cluster.
+- category: capitalization
+  input: i went to new york last week and met with john from google
+  accepted:
+  - I went to New York last week and met with John from Google.
+- category: capitalization
+  input: jennifer from the paris office joined the zoom call
+  accepted:
+  - Jennifer from the Paris office joined the Zoom call.
+- category: capitalization
+  input: microsoft teams doesn't work well with google chrome on macos
+  accepted:
+  - Microsoft Teams doesn't work well with Google Chrome on MacOS.
+  - Microsoft Teams doesn't work well with Google Chrome on macOS.
+- category: capitalization
+  input: the android app uses firebase and kotlin
+  accepted:
+  - The Android app uses Firebase and Kotlin.
+- category: capitalization
+  input: the iphone sixteen pro max runs ios eighteen
+  accepted:
+  - The iPhone 16 Pro Max runs iOS 18.
+- category: capitalization
+  input: we scheduled a meeting with alex from amazon in seattle
+  accepted:
+  - We scheduled a meeting with Alex from Amazon in Seattle.
+- category: capitalization
+  input: we're using kubernetes on aws with a postgres database
+  accepted:
+  - We are using Kubernetes on AWS with a PostgreSQL database.
+  - We are using Kubernetes on AWS with a Postgres database.
+  - We're using Kubernetes on AWS with a PostgreSQL database.
+  - We're using Kubernetes on AWS with a Postgres database.
+- category: clean
+  input: Can you review the pull request by end of day?
+  accepted:
+  - Can you review the pull request by end of day?
+- category: clean
+  input: I'll be in the office from 9 AM to 5 PM.
+  accepted:
+  - I'll be in the office from 9 AM to 5 PM.
+- category: clean
+  input: Please forward the invoice to the finance team.
+  accepted:
+  - Please forward the invoice to the finance team.
+- category: clean
+  input: The deployment went smoothly.
+  accepted:
+  - The deployment went smoothly.
+- category: clean
+  input: The meeting is scheduled for March 15th at 2:30 PM.
+  accepted:
+  - The meeting is scheduled for March 15th at 2:30 PM.
+  - The meeting is scheduled for March 15th at 2:30 p.m.
+- category: clean
+  input: The server responded with a 200 status code.
+  accepted:
+  - The server responded with a 200 status code.
+- category: clean
+  input: We shipped the hotfix yesterday afternoon.
+  accepted:
+  - We shipped the hotfix yesterday afternoon.
+- category: contraction
+  input: I can't believe it doesn't work
+  accepted:
+  - I can't believe it doesn't work.
+- category: contraction
+  input: I shouldn't have waited and now we're behind
+  accepted:
+  - I shouldn't have waited and now we're behind.
+  - I shouldn't have waited, and now we're behind.
+- category: contraction
+  input: I'll send it tomorrow and we'll review it on Monday
+  accepted:
+  - I'll send it tomorrow and we'll review it on Monday.
+  - I'll send it tomorrow, and we'll review it on Monday.
+- category: contraction
+  input: he won't agree but she'll probably support it
+  accepted:
+  - He won't agree but she'll probably support it.
+  - He won't agree, but she'll probably support it.
+- category: contraction
+  input: she's already left and I haven't finished yet
+  accepted:
+  - She's already left and I haven't finished yet.
+  - She's already left, and I haven't finished yet.
+- category: contraction
+  input: they've already finished and we've just started
+  accepted:
+  - They've already finished and we've just started.
+  - They've already finished, and we've just started.
+- category: contraction
+  input: we're planning to launch and it's going to be great
+  accepted:
+  - We're planning to launch and it's going to be great.
+  - We're planning to launch, and it's going to be great.
+- category: contraction
+  input: you'd think it'd be simpler but it isn't
+  accepted:
+  - You'd think it'd be simpler but it isn't.
+  - You'd think it'd be simpler, but it isn't.
+- category: correction
+  input: I'll book the flight for Tuesday actually make that Wednesday
+  accepted:
+  - I'll book the flight for Wednesday.
+- category: correction
+  input: email it to marketing I mean engineering
+  accepted:
+  - Email it to engineering.
+- category: correction
+  input: let me rephrase the project will take two weeks not three
+  accepted:
+  - The project will take 2 weeks, not 3.
+  - The project will take two weeks, not three.
+- category: correction
+  input: schedule it for Thursday no wait Friday morning
+  accepted:
+  - Schedule it for Friday morning.
+- category: correction
+  input: send the report to John no wait send it to Sarah instead
+  accepted:
+  - Send the report to Sarah instead.
+  - Send the report to Sarah.
+- category: correction
+  input: the budget is fifty thousand or rather sixty thousand dollars
+  accepted:
+  - The budget is $60,000.
+- category: correction
+  input: the deadline is Friday I mean Monday the deadline is Monday
+  accepted:
+  - The deadline is Monday.
+- category: correction
+  input: the meeting is at 2 sorry 3 PM tomorrow
+  accepted:
+  - The meeting is at 3 PM tomorrow.
+  - The meeting is at 3 p.m. tomorrow.
+- category: correction
+  input: the server runs Ubuntu sorry CentOS
+  accepted:
+  - The server runs CentOS.
+- category: correction
+  input: we have five hundred no wait five thousand active users
+  accepted:
+  - We have 5,000 active users.
+  - We have 5000 active users.
+- category: correction
+  input: we need five actually seven more licenses
+  accepted:
+  - We need 7 more licenses.
+- category: correction
+  input: we should use Python actually let's use Rust for this
+  accepted:
+  - Let's use Rust for this.
+- category: discourse
+  input: I mean at the end of the day it's about user experience
+  accepted:
+  - At the end of the day, it's about user experience.
+- category: discourse
+  input: at the end of the day we just need it to work
+  accepted:
+  - At the end of the day we just need it to work.
+  - At the end of the day, we just need it to work.
+  - We just need it to work.
+- category: discourse
+  input: frankly the current approach isn't working
+  accepted:
+  - Frankly, the current approach isn't working.
+  - The current approach isn't working.
+- category: discourse
+  input: honestly I think the current design is fine
+  accepted:
+  - Honestly, I think the current design is fine.
+  - I think the current design is fine.
+- category: discourse
+  input: look the bottom line is we need more time
+  accepted:
+  - Look, the bottom line is we need more time.
+  - The bottom line is we need more time.
+  - We need more time.
+- category: discourse
+  input: right so basically we should just ship it
+  accepted:
+  - We should just ship it.
+- category: discourse
+  input: so the thing is we need more budget for Q3
+  accepted:
+  - We need more budget for Q3.
+- category: discourse
+  input: to be honest I don't think this will ship on time
+  accepted:
+  - To be honest, I don't think this will ship on time.
+  - I don't think this will ship on time.
+- category: discourse
+  input: you see the problem is that we don't have enough test coverage
+  accepted:
+  - You see, the problem is that we don't have enough test coverage.
+  - The problem is that we don't have enough test coverage.
+- category: email
+  input: hey can you um send me the thing we talked about yesterday like the report or whatever
+  accepted:
+  - Hey, can you send me the report we talked about yesterday?
+  - Hi, could you send me the report we discussed yesterday?
+- category: email
+  input: just circling back on this um are we still on track for the launch next Thursday
+  accepted:
+  - Just circling back on this. Are we still on track for the launch next Thursday?
+  - Just circling back on this, are we still on track for the launch next Thursday?
+- category: email
+  input: lgtm merge it
+  accepted:
+  - LGTM, merge it.
+  - LGTM, merge it
+  - LGTM merge it.
+  - LGTM merge it
+  - LGTM. Merge it.
+- category: email
+  input: thanks for getting back to me so I wanted to follow up on the proposal we sent last week
+  accepted:
+  - Thanks for getting back to me. I wanted to follow up on the proposal we sent last week.
+- category: emphasis
+  input: never ever deploy on a Friday afternoon
+  accepted:
+  - Never deploy on a Friday afternoon.
+  - Never ever deploy on a Friday afternoon.
+- category: emphasis
+  input: no no no that's completely wrong we need to start over
+  accepted:
+  - No no no, that's completely wrong. We need to start over.
+  - No, no, no, that's completely wrong. We need to start over.
+  - No, no, no. That's completely wrong. We need to start over.
+- category: emphasis
+  input: please please please don't merge that branch
+  accepted:
+  - Please please please don't merge that branch.
+  - Please please please, don't merge that branch.
+  - Please, please, please don't merge that branch.
+  - Please, please, please, don't merge that branch.
+- category: emphasis
+  input: this is absolutely absolutely critical for the launch
+  accepted:
+  - This is absolutely critical for the launch.
+- category: emphasis
+  input: this is really really important please don't forget
+  accepted:
+  - This is really important — please don't forget.
+  - This is really important. Please don't forget.
+  - This is really really important, please don't forget.
+  - This is really really important. Please don't forget.
+- category: emphasis
+  input: we must must fix this before release
+  accepted:
+  - We must fix this before release.
+- category: false-start
+  input: I think we should try to hmm actually you know what let me come back to this later
+  accepted:
+  - Let me come back to this later.
+- category: false-start
+  input: I was going to say but never mind the point is we need more testing
+  accepted:
+  - The point is we need more testing.
+- category: false-start
+  input: maybe we could or actually no let's just go with the original plan
+  accepted:
+  - Let's just go with the original plan.
+- category: false-start
+  input: what if we no that won't work let's just use the existing approach
+  accepted:
+  - Let's just use the existing approach.
+- category: filler
+  input: I just wanted to say that um we really need to uh prioritize this
+  accepted:
+  - We really need to prioritize this.
+- category: filler
+  input: it's like literally the most important thing we need to do
+  accepted:
+  - It's the most important thing we need to do.
+- category: filler
+  input: like I basically just need to uh figure out the API rate limits you know
+  accepted:
+  - I just need to figure out the API rate limits.
+  - I need to figure out the API rate limits.
+- category: filler
+  input: okay so basically what happened was the server crashed at 3 AM
+  accepted:
+  - The server crashed at 3 AM.
+  - The server crashed at 3 a.m.
+- category: filler
+  input: so yeah I mean the deployment went fine right but we should still monitor it
+  accepted:
+  - The deployment went fine, but we should still monitor it.
+- category: filler
+  input: um so I was thinking we should um probably update the documentation
+  accepted:
+  - I was thinking we should probably update the documentation.
+- category: filler
+  input: well actually I think we should wait until Monday
+  accepted:
+  - I think we should wait until Monday.
+- category: filler
+  input: yeah no totally I agree with that approach
+  accepted:
+  - I agree with that approach.
+- category: homophone
+  input: I need to by some groceries
+  accepted:
+  - I need to buy some groceries.
+- category: homophone
+  input: I'll send it to you're email
+  accepted:
+  - I'll send it to your email.
+- category: homophone
+  input: its important that it's configuration is correct
+  accepted:
+  - It is important that its configuration is correct.
+  - It's important that its configuration is correct.
+  - It’s important that its configuration is correct.
+  - It's important that the configuration is correct.
+- category: homophone
+  input: please bare with me while I pull up the report
+  accepted:
+  - Please bear with me while I pull up the report.
+- category: homophone
+  input: the affect on performance was significant
+  accepted:
+  - The effect on performance was significant.
+- category: homophone
+  input: the team has too many tasks and not enough personal
+  accepted:
+  - The team has too many tasks and not enough personnel.
+- category: homophone
+  input: their going to be late for the meeting
+  accepted:
+  - They are going to be late for the meeting.
+  - They're going to be late for the meeting.
+  - They’re going to be late for the meeting.
+- category: homophone
+  input: we need to check weather the server is running
+  accepted:
+  - We need to check whether the server is running.
+- category: homophone
+  input: we need to ensure the data is compliant with there policies
+  accepted:
+  - We need to ensure the data is compliant with their policies.
+- category: homophone
+  input: who's laptop is on the conference table
+  accepted:
+  - Whose laptop is on the conference table?
+- category: keep-tag
+  input: I was thinking dot dot dot maybe we should wait
+  accepted:
+  - I was thinking … maybe we should wait.
+  - I was thinking… maybe we should wait.
+- category: keep-tag
+  input: check the hashtag trending topic
+  accepted:
+  - 'Check the #trending topic.'
+- category: keep-tag
+  input: the deadline was moved to Friday new paragraph please update your tickets accordingly
+  accepted:
+  - 'The deadline was moved to Friday.
+
+
+    Please update your tickets accordingly.
+
+    '
+- category: keep-tag
+  input: research ampersand development is our focus
+  accepted:
+  - Research & development is our focus.
+- category: keep-tag
+  input: see the summary new line details are below
+  accepted:
+  - 'See the summary.
+
+    Details are below.
+
+    '
+- category: keep-tag
+  input: the price is dollar sign fifty with a ten percent sign discount
+  accepted:
+  - The price is $50 with a 10% discount.
+- category: keep-tag
+  input: two plus sign three equals sign five
+  accepted:
+  - 2 + 3 = 5
+  - 2 + 3 = 5.
+  - 2+3=5.
+- category: keep-tag
+  input: the password is asterisk asterisk asterisk asterisk
+  accepted:
+  - The password is ****.
+  - The password is ****
+- category: keep-tag
+  input: this is asterisk really asterisk important
+  accepted:
+  - This is *really* important.
+- category: list
+  input: I need to buy eggs and milk
+  accepted:
+  - I need to buy eggs and milk.
+- category: list
+  input: I need to buy eggs milk bread butter and cheese
+  accepted:
+  - 'I need to buy:
+
+    - Eggs
+
+    - Milk
+
+    - Bread
+
+    - Butter
+
+    - Cheese
+
+    '
+- category: list
+  input: here's what I picked up at the store apples bananas grapes and strawberries
+  accepted:
+  - 'Here''s what I picked up at the store:
+
+    - Apples
+
+    - Bananas
+
+    - Grapes
+
+    - Strawberries
+
+    '
+- category: list
+  input: my focus areas are one refactor the auth module and two improve the error handling
+  accepted:
+  - 'My focus areas are:
+
+    1. Refactor the auth module
+
+    2. Improve the error handling
+
+    '
+  - 'My focus areas are:
+
+    1. Refactor the auth module.
+
+    2. Improve the error handling.
+
+    '
+- category: list
+  input: my focus areas are one refactor the auth module two improve the error handling and three add request logging
+  accepted:
+  - 'My focus areas are:
+
+    1. Refactor the auth module
+
+    2. Improve the error handling
+
+    3. Add request logging
+
+    '
+  - 'My focus areas are:
+
+    1. Refactor the auth module.
+
+    2. Improve the error handling.
+
+    3. Add request logging.
+
+    '
+- category: list
+  input: please order five monitors three keyboards and ten mice
+  accepted:
+  - 'Please order:
+
+    - 5 monitors
+
+    - 3 keyboards
+
+    - 10 mice
+
+    '
+- category: list
+  input: please review the design and the implementation
+  accepted:
+  - Please review the design and the implementation.
+  - Please review the design and implementation.
+- category: list
+  input: step one clone the repo step two install dependencies step three run tests step four deploy
+  accepted:
+  - '1. Clone the repo
+
+    2. Install dependencies
+
+    3. Run tests
+
+    4. Deploy
+
+    '
+  - '1. Clone the repo.
+
+    2. Install dependencies.
+
+    3. Run tests.
+
+    4. Deploy.
+
+    '
+  - 'Step 1: Clone the repo
+
+    Step 2: Install dependencies
+
+    Step 3: Run tests
+
+    Step 4: Deploy
+
+    '
+- category: list
+  input: the action items from the meeting are update the roadmap schedule a design review and hire two more engineers
+  accepted:
+  - 'The action items from the meeting are:
+
+    - Update the roadmap
+
+    - Schedule a design review
+
+    - Hire 2 more engineers
+
+    '
+  - 'The action items from the meeting are:
+
+    - Update the roadmap
+
+    - Schedule a design review
+
+    - Hire two more engineers
+
+    '
+  - 'The action items from the meeting are:
+
+    1. Update the roadmap
+
+    2. Schedule a design review
+
+    3. Hire 2 more engineers
+
+    '
+  - 'The action items from the meeting are:
+
+    1. Update the roadmap
+
+    2. Schedule a design review
+
+    3. Hire two more engineers
+
+    '
+  - 'The action items from the meeting are:
+
+    1. Update the roadmap schedule.
+
+    2. Schedule a design review.
+
+    3. Hire 2 more engineers.
+
+    '
+- category: list
+  input: the choices are accept or reject
+  accepted:
+  - The choices are accept or reject.
+  - 'The choices are: accept or reject.'
+- category: list
+  input: the options are upgrade or replace
+  accepted:
+  - The options are upgrade or replace.
+  - 'The options are: upgrade or replace.'
+- category: list
+  input: the priorities are first fix the login bug second add caching third write documentation
+  accepted:
+  - 'The priorities are:
+
+    1. Fix the login bug
+
+    2. Add caching
+
+    3. Write documentation
+
+    '
+  - 'The priorities are:
+
+    1. Fix the login bug.
+
+    2. Add caching.
+
+    3. Write documentation.
+
+    '
+- category: list
+  input: the tasks for this sprint are first set up the CI pipeline second write the integration tests and third update the deployment scripts
+  accepted:
+  - 'The tasks for this sprint are:
+
+    1. Set up the CI pipeline
+
+    2. Write the integration tests
+
+    3. Update the deployment scripts
+
+    '
+  - 'The tasks for this sprint are:
+
+    1. Set up the CI pipeline.
+
+    2. Write the integration tests.
+
+    3. Update the deployment scripts.
+
+    '
+- category: list
+  input: we need to test the frontend and the backend
+  accepted:
+  - We need to test the frontend and the backend.
+- category: list
+  input: you can use SSH or the web console
+  accepted:
+  - You can use SSH or the web console.
+- category: meeting
+  input: okay so in today's standup um john said the backend API is ready sarah mentioned she's blocked on the design review and mike said he'll finish the tests by tomorrow
+  accepted:
+  - 'In today''s standup:
+
+    - John said the backend API is ready.
+
+    - Sarah mentioned she''s blocked on the design review.
+
+    - Mike said he''ll finish the tests by tomorrow.
+
+    '
+  - 'In today''s standup:
+
+    - John said the backend API is ready
+
+    - Sarah mentioned she''s blocked on the design review
+
+    - Mike said he''ll finish the tests by tomorrow
+
+    '
+- category: meeting
+  input: the key takeaways from the meeting are one we need to hire two more engineers two the deadline is moved to April fifteenth and three we should schedule a follow up for next week
+  accepted:
+  - 'The key takeaways from the meeting are:
+
+    1. We need to hire 2 more engineers.
+
+    2. The deadline is moved to April 15th.
+
+    3. We should schedule a follow-up for next week.
+
+    '
+  - 'The key takeaways from the meeting are:
+
+    1. We need to hire 2 more engineers
+
+    2. The deadline is moved to April 15th
+
+    3. We should schedule a follow-up for next week
+
+    '
+- category: multilingual
+  input: abhi meeting mein discuss karte hain then we'll send the proposal
+  accepted:
+  - Abhi meeting mein discuss karte hain, then we'll send the proposal.
+- category: multilingual
+  input: the restaurant is called cafe del sol on fifth avenue
+  accepted:
+  - The restaurant is called Café del Sol on Fifth Avenue.
+  - The restaurant is called Cafe del Sol on Fifth Avenue.
+  - The restaurant is called Café del Sol on 5th Avenue.
+  - The restaurant is called Cafe del Sol on 5th Avenue.
+- category: multilingual
+  input: we should use the raison d'etre of the project as our north star
+  accepted:
+  - We should use the raison d'être of the project as our North Star.
+  - We should use the raison d'être of the project as our north star.
+- category: no-leadin-list
+  input: eggs milk bread butter and cheese
+  accepted:
+  - '- Eggs
+
+    - Milk
+
+    - Bread
+
+    - Butter
+
+    - Cheese
+
+    '
+  - Eggs, milk, bread, butter, and cheese.
+- category: no-leadin-list
+  input: first the database second the cache third the load balancer
+  accepted:
+  - '1. The database
+
+    2. The cache
+
+    3. The load balancer
+
+    '
+- category: number
+  input: I have eight files to review
+  accepted:
+  - I have 8 files to review.
+- category: number
+  input: it costs ninety nine dollars and ninety nine cents
+  accepted:
+  - It costs $99.99
+  - It costs $99.99.
+- category: number
+  input: it took about thirty seconds to load
+  accepted:
+  - It took about 30 seconds to load.
+- category: number
+  input: my phone number is five five five one two three four five six seven
+  accepted:
+  - My phone number is 555-123-4567.
+- category: number
+  input: she's the twenty first employee
+  accepted:
+  - She's the 21st employee.
+- category: number
+  input: the budget is five hundred thousand dollars
+  accepted:
+  - The budget is $500,000.
+- category: number
+  input: the conversion rate is twenty three point five percent
+  accepted:
+  - The conversion rate is 23.5%.
+- category: number
+  input: the disk is eighty five percent full
+  accepted:
+  - The disk is 85% full.
+- category: number
+  input: the latency is about two hundred and fifty milliseconds
+  accepted:
+  - The latency is about 250 milliseconds.
+  - The latency is about 250ms.
+- category: number
+  input: the meeting is at two thirty PM on March fifteenth
+  accepted:
+  - The meeting is at 2:30 PM on March 15th.
+  - The meeting is at 2:30 p.m. on March 15th.
+- category: number
+  input: the meeting is on the third floor
+  accepted:
+  - The meeting is on the 3rd floor.
+- category: number
+  input: the ratio is one to four
+  accepted:
+  - The ratio is 1:4.
+- category: number
+  input: the salary range is ninety thousand to one hundred twenty thousand dollars
+  accepted:
+  - The salary range is $90,000 to $120,000.
+- category: number
+  input: the temperature is minus forty degrees Celsius
+  accepted:
+  - The temperature is -40°C.
+- category: number
+  input: there are two options here
+  accepted:
+  - There are 2 options here.
+- category: number
+  input: this is our fifth release this year
+  accepted:
+  - This is our 5th release this year.
+- category: number
+  input: version three point fourteen point one
+  accepted:
+  - Version 3.14.1
+  - Version 3.14.1.
+- category: number
+  input: we have twelve million active users
+  accepted:
+  - We have 12 million active users.
+- category: number
+  input: we only have one server left
+  accepted:
+  - We only have 1 server left.
+- category: number
+  input: we processed one point two million requests yesterday
+  accepted:
+  - We processed 1.2 million requests yesterday.
+- category: preserve
+  input: He mentioned that the deadline might slip.
+  accepted:
+  - He mentioned that the deadline might slip.
+- category: preserve
+  input: I reckon we should ship it by Friday
+  accepted:
+  - I reckon we should ship it by Friday.
+- category: preserve
+  input: I wanted to grab some coffee before the meeting
+  accepted:
+  - I wanted to grab some coffee before the meeting.
+- category: preserve
+  input: I wanted to grab some coffee before the meeting.
+  accepted:
+  - I wanted to grab some coffee before the meeting.
+- category: preserve
+  input: She's gonna present the demo tomorrow.
+  accepted:
+  - She's gonna present the demo tomorrow.
+- category: preserve
+  input: The thing is kinda broken.
+  accepted:
+  - The thing is kinda broken.
+- category: preserve
+  input: We gotta finish this before the deadline.
+  accepted:
+  - We gotta finish this before the deadline.
+- category: preserve
+  input: he mentioned that the deadline might slip
+  accepted:
+  - He mentioned that the deadline might slip.
+- category: preserve
+  input: she's gonna present the demo tomorrow
+  accepted:
+  - She's gonna present the demo tomorrow.
+- category: preserve
+  input: the thing is kinda broken
+  accepted:
+  - The thing is kinda broken.
+- category: punctuation
+  input: add a note new line then add the details
+  accepted:
+  - 'Add a note.
+
+    Then add the details.
+
+    '
+- category: punctuation
+  input: can we push the launch question mark I need more time
+  accepted:
+  - Can we push the launch? I need more time.
+- category: punctuation
+  input: check the function open paren user ID close paren
+  accepted:
+  - Check the function (user ID).
+  - Check the function (userID).
+- category: punctuation
+  input: dear hiring manager comma I am writing to apply for the position period
+  accepted:
+  - Dear hiring manager, I am writing to apply for the position.
+  - Dear Hiring Manager, I am writing to apply for the position.
+- category: punctuation
+  input: dear team comma I wanted to follow up on this period
+  accepted:
+  - Dear team, I wanted to follow up on this.
+- category: punctuation
+  input: we shipped the release on Monday new paragraph the rollout went smoothly with no incidents
+  accepted:
+  - 'We shipped the release on Monday.
+
+
+    The rollout went smoothly with no incidents.
+
+    '
+- category: punctuation
+  input: he said open quote I'll be there close quote
+  accepted:
+  - He said “I'll be there.”
+  - He said, “I'll be there.”
+- category: punctuation
+  input: is this working question mark
+  accepted:
+  - Is this working?
+- category: punctuation
+  input: set the oven to three fifty degrees fahrenheit
+  accepted:
+  - Set the oven to 350°F.
+  - Set the oven to 350 °F.
+- category: punctuation
+  input: she asked open quote when is the deadline close quote
+  accepted:
+  - She asked “When is the deadline?”
+  - She asked, “When is the deadline?”
+  - She asked, “when is the deadline?”
+- category: punctuation
+  input: sure thing exclamation point I'll handle it
+  accepted:
+  - Sure thing! I'll handle it.
+- category: punctuation
+  input: that's great exclamation point
+  accepted:
+  - That's great!
+- category: punctuation
+  input: the balance is minus forty two dollars
+  accepted:
+  - The balance is -$42.
+- category: punctuation
+  input: the brand is called Tom and sign Jerry
+  accepted:
+  - The brand is called Tom & Jerry.
+  - The brand is called Tom &Jerry.
+- category: punctuation
+  input: the options are colon option A semicolon option B semicolon and option C
+  accepted:
+  - 'The options are: option A; option B; and option C.'
+- category: punctuation
+  input: the project em dash which started in January em dash is almost done
+  accepted:
+  - The project—which started in January—is almost done.
+- category: punctuation
+  input: the variable apostrophe s value is null
+  accepted:
+  - The variable's value is null.
+- category: punctuation
+  input: wait dot dot dot I need to think about this
+  accepted:
+  - Wait… I need to think about this.
+- category: punctuation
+  input: water boils at one hundred degrees celsius
+  accepted:
+  - Water boils at 100°C.
+  - Water boils at 100 °C.
+- category: repetition
+  input: I think I think we should fix the the login bug
+  accepted:
+  - I think we should fix the login bug.
+- category: repetition
+  input: can you can you send me the report by Friday
+  accepted:
+  - Can you send me the report by Friday?
+- category: repetition
+  input: it's it's really important that we that we get this right
+  accepted:
+  - It's really important that we get this right.
+- category: repetition
+  input: please please send me the the latest build
+  accepted:
+  - Please, please send me the latest build.
+  - Please please send me the latest build.
+- category: repetition
+  input: she said she said the timeline is is too aggressive
+  accepted:
+  - She said the timeline is too aggressive.
+  - She said, "The timeline is too aggressive."
+- category: repetition
+  input: the problem is the problem is that we don't have enough test coverage
+  accepted:
+  - The problem is that we don't have enough test coverage.
+- category: repetition
+  input: the the client wants wants a progress report
+  accepted:
+  - The client wants a progress report.
+- category: repetition
+  input: we need to we need to make sure that everything is backed up
+  accepted:
+  - We need to make sure everything is backed up.
+  - We need to make sure that everything is backed up.
+- category: repetition
+  input: we should we should update the the documentation
+  accepted:
+  - We should update the documentation.
+- category: run-on
+  input: I talked to the client and they want the feature by next week and also they asked about pricing and I told them we'd send a proposal
+  accepted:
+  - I talked to the client. They want the feature by next week. They also asked about pricing, and I told them we'd send a proposal.
+  - I talked to the client and they want the feature by next week. Also, they asked about pricing. I told them we'd send a proposal.
+  - I talked to the client, and they want the feature by next week. They also asked about pricing, and I told them we'd send a proposal.
+- category: run-on
+  input: so the thing is we tried to deploy on Friday but the tests failed and then we had to roll back and then on Monday we fixed the issue and redeployed and it worked
+  accepted:
+  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed and we had to roll back. On Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed, so we had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back and then on Monday we fixed the issue and redeployed, and it worked.
+- category: run-on
+  input: we need to update the database and then run the migrations and then restart the service and then verify that everything is working and then notify the team
+  accepted:
+  - We need to update the database, run the migrations, and restart the service. Then verify that everything is working and notify the team.
+  - We need to update the database, run the migrations, restart the service, verify that everything is working, and notify the team.
+  - We need to update the database, then run the migrations, then restart the service, then verify that everything is working, and then notify the team.
+- category: casual
+  style: casual
+  input: haha nice one okay I'll review it after lunch
+  accepted:
+  - haha nice one, okay I'll review it after lunch
+  - haha nice one okay I'll review it after lunch
+  - haha nice one, okay, I'll review it after lunch
+  - haha nice one okay i'll review it after lunch
+  - haha nice one, okay i'll review it after lunch
+  - haha nice one, i'll review it after lunch
+- category: casual
+  style: casual
+  input: yeah looks good to me let's ship it
+  accepted:
+  - yeah looks good to me, let's ship it
+  - yeah looks good to me let's ship it
+- category: casual
+  style: casual
+  input: sounds good I'll take a look at that tomorrow
+  accepted:
+  - sounds good, I'll take a look at that tomorrow
+  - sounds good I'll take a look at that tomorrow
+- category: casual
+  style: casual
+  input: oh wait actually can you just ping me when it's ready
+  accepted:
+  - oh wait, can you just ping me when it's ready
+  - oh wait actually can you just ping me when it's ready
+  - oh wait, actually can you just ping me when it's ready
+  - oh wait actually, can you just ping me when it's ready
+  - can you just ping me when it's ready
+- category: casual
+  style: casual
+  input: nice yeah that works for me
+  accepted:
+  - nice, yeah that works for me
+  - nice yeah that works for me
+- category: casual
+  style: casual
+  input: um okay let me check on that and get back to you
+  accepted:
+  - okay let me check on that and get back to you
+  - okay, let me check on that and get back to you
+  - okay let me check on that, and get back to you
+- category: small-number
+  input: we need three developers on this
+  accepted:
+  - We need 3 developers on this.
+- category: thinking
+  input: ah okay so the cache expires every hour
+  accepted:
+  - The cache expires every hour.
+- category: thinking
+  input: ah right I forgot about that constraint
+  accepted:
+  - I forgot about that constraint.
+- category: thinking
+  input: hmm I think the best approach would be to refactor first
+  accepted:
+  - I think the best approach would be to refactor first.
+- category: thinking
+  input: hmm let me see I think we need a bigger instance
+  accepted:
+  - I think we need a bigger instance.
+  - We need a bigger instance.
+- category: thinking
+  input: mm hmm that makes sense let's go with plan B
+  accepted:
+  - That makes sense, let's go with Plan B.
+  - That makes sense, let's go with plan B.
+  - That makes sense. Let's go with Plan B.
+  - That makes sense. Let's go with plan B.
+- category: thinking
+  input: mm let me think ah yes we should use the new API
+  accepted:
+  - We should use the new API.
+- category: thinking
+  input: mm right the error only happens in production
+  accepted:
+  - The error only happens in production.
+- category: thinking
+  input: uh huh so the meeting is at 3
+  accepted:
+  - The meeting is at 3.
+- category: thinking
+  input: uh let me think okay yes the config file is wrong
+  accepted:
+  - The config file is wrong.
+- category: two-item-list
+  input: I talked to the designer and the product manager
+  accepted:
+  - I talked to the designer and the product manager.
+- category: url
+  input: check out our website at www dot example dot com
+  accepted:
+  - Check out our website at www.example.com.
+- category: url
+  input: send it to john at example dot com
+  accepted:
+  - Send it to john@example.com
+  - Send it to john@example.com.
+- category: url
+  input: the API endpoint is slash API slash v2 slash users
+  accepted:
+  - The API endpoint is /api/v2/users.
+- category: vocab
+  input: the bug was reported by priya from the bangalore team
+  accepted:
+  - The bug was reported by Priya from the Bangalore team.
+- category: vocab
+  input: the terraform config deploys to us east one on aws
+  accepted:
+  - The Terraform config deploys to US East 1 on AWS.
+  - The Terraform config deploys to us-east-1 on AWS.
+- category: vocab
+  input: use the fetch API with the authorization header set to bearer token
+  accepted:
+  - Use the Fetch API with the Authorization header set to Bearer token.
+- category: vocab
+  input: we migrated from jenkins to github actions last quarter
+  accepted:
+  - We migrated from Jenkins to GitHub Actions last quarter.
+- category: vocab
+  input: we're deploying the kubernetes cluster on GKE with istio service mesh
+  accepted:
+  - We're deploying the Kubernetes cluster on GKE with Istio service mesh.
+- category: vocab
+  input: we're switching from redis to memcached for session storage
+  accepted:
+  - We're switching from Redis to Memcached for session storage.
