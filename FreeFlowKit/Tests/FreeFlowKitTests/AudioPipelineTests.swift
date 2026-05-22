@@ -91,7 +91,7 @@ final class AudioPipelineTests: XCTestCase {
             let pipeline = DictationPipeline(
                 audioProvider: audio,
                 contextProvider: MockAppContextProvider(),
-                dictationProvider: batchProvider,
+                batchProvider: batchProvider,
                 textInjector: injector,
                 coordinator: coordinator,
                 streamingProvider: streamingProvider

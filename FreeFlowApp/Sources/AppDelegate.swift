@@ -272,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioDeviceProvider.setAudioCaptureProvider(audioProvider)
 
         let language = Settings.shared.language.languageCode
-        let dictationProvider: (any DictationProviding)?
+        let batchProvider: (any BatchDictationProviding)?
         let streamingProvider: (any StreamingDictationProviding)?
         let onSessionExpired: (@Sendable () -> Void)?
 
@@ -302,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 adapterPath: adapterPath)
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
-            dictationProvider = nil
+            batchProvider = nil
             streamingProvider = LocalModelStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil
@@ -326,7 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Cloud mode: OpenAI STT + cloud polish.
             let polishClient = OpenAIChatClient(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            dictationProvider = OpenAIDictationProvider(
+            batchProvider = OpenAIDictationProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
                 polishChatClient: polishClient)
             streamingProvider = OpenAIRealtimeProvider(
@@ -342,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newPipeline = DictationPipeline(
             audioProvider: audioProvider,
             contextProvider: AXAppContextProvider(),
-            dictationProvider: dictationProvider,
+            batchProvider: batchProvider,
             textInjector: textInjector,
             coordinator: coordinator,
             transcriptBuffer: transcriptBuffer,

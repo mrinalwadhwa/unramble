@@ -25,8 +25,8 @@ final class StreamingPipelineTests: XCTestCase {
 
     /// Build a batch mock with a delay. Used as the default dictation
     /// provider in test pipelines where batch is not the focus.
-    private func makeSlowBatchProvider() -> MockDictationProvider {
-        let batch = MockDictationProvider()
+    private func makeSlowBatchProvider() -> MockBatchDictationProvider {
+        let batch = MockBatchDictationProvider()
         batch.stubbedDelay = 5.0
         return batch
     }
@@ -34,22 +34,22 @@ final class StreamingPipelineTests: XCTestCase {
     private func makeStreamingPipeline(
         audioProvider: MockAudioProvider? = nil,
         contextProvider: MockAppContextProvider = MockAppContextProvider(),
-        dictationProvider: MockDictationProvider? = nil,
+        batchProvider: MockBatchDictationProvider? = nil,
         streamingProvider: MockStreamingDictationProvider = MockStreamingDictationProvider(),
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
         transcriptBuffer: TranscriptBuffer? = nil
     ) -> (
         DictationPipeline, MockAudioProvider, MockAppContextProvider,
-        MockDictationProvider, MockStreamingDictationProvider,
+        MockBatchDictationProvider, MockStreamingDictationProvider,
         MockTextInjector, RecordingCoordinator
     ) {
         let audio = audioProvider ?? makeStreamingAudioProvider()
-        let dictation = dictationProvider ?? makeSlowBatchProvider()
+        let dictation = batchProvider ?? makeSlowBatchProvider()
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: contextProvider,
-            dictationProvider: dictation,
+            batchProvider: dictation,
             textInjector: textInjector,
             coordinator: coordinator,
             transcriptBuffer: transcriptBuffer,
@@ -315,9 +315,9 @@ final class StreamingPipelineTests: XCTestCase {
         let streaming = MockStreamingDictationProvider()
         streaming.stubbedStartError = DictationError.networkError("connection refused")
 
-        let dictation = MockDictationProvider(stubbedText: "Batch fallback text")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch fallback text")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -338,9 +338,9 @@ final class StreamingPipelineTests: XCTestCase {
         let streaming = MockStreamingDictationProvider()
         streaming.stubbedFinishError = DictationError.networkError("connection lost")
 
-        let dictation = MockDictationProvider(stubbedText: "Batch recovery")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch recovery")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -358,9 +358,9 @@ final class StreamingPipelineTests: XCTestCase {
     func testStreamingEmptyResultUsesBatchFallback() async {
         // When streaming returns empty, batch result is used (parallel mode).
         let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockDictationProvider(stubbedText: "Batch result")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch result")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -378,9 +378,9 @@ final class StreamingPipelineTests: XCTestCase {
     func testBothEmptyResultsSkipInjection() async {
         // When both streaming and batch return empty, skip injection.
         let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockDictationProvider(stubbedText: "")
+        let dictation = MockBatchDictationProvider(stubbedText: "")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -397,9 +397,9 @@ final class StreamingPipelineTests: XCTestCase {
     func testBothWhitespaceOnlyResultsSkipInjection() async {
         // When both streaming and batch return whitespace-only, skip injection.
         let streaming = MockStreamingDictationProvider(stubbedText: "   \n  ")
-        let dictation = MockDictationProvider(stubbedText: "  \t  ")
+        let dictation = MockBatchDictationProvider(stubbedText: "  \t  ")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -434,9 +434,9 @@ final class StreamingPipelineTests: XCTestCase {
         // When both streaming and batch return empty, nothing stored.
         let buffer = TranscriptBuffer()
         let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockDictationProvider(stubbedText: "")
+        let dictation = MockBatchDictationProvider(stubbedText: "")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming,
+            batchProvider: dictation, streamingProvider: streaming,
             transcriptBuffer: buffer)
 
         await pipeline.activate()
@@ -452,9 +452,9 @@ final class StreamingPipelineTests: XCTestCase {
         // When streaming returns empty but batch returns text, store batch result.
         let buffer = TranscriptBuffer()
         let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockDictationProvider(stubbedText: "Batch text")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch text")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming,
+            batchProvider: dictation, streamingProvider: streaming,
             transcriptBuffer: buffer)
 
         await pipeline.activate()
@@ -471,9 +471,9 @@ final class StreamingPipelineTests: XCTestCase {
         let buffer = TranscriptBuffer()
         let streaming = MockStreamingDictationProvider()
         streaming.stubbedFinishError = DictationError.networkError("fail")
-        let dictation = MockDictationProvider(stubbedText: "Batch recovered")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch recovered")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming,
+            batchProvider: dictation, streamingProvider: streaming,
             transcriptBuffer: buffer)
 
         await pipeline.activate()
@@ -577,12 +577,12 @@ final class StreamingPipelineTests: XCTestCase {
         // enablePCMStream defaults to false, so pcmAudioStream is nil.
 
         let streaming = MockStreamingDictationProvider(stubbedText: "Should not be used")
-        let dictation = MockDictationProvider(stubbedText: "Batch text")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch text")
 
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            dictationProvider: dictation,
+            batchProvider: dictation,
             textInjector: MockTextInjector(),
             coordinator: RecordingCoordinator(),
             streamingProvider: streaming
@@ -601,12 +601,12 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testFallbackToBatchWhenNoStreamingProvider() async {
         let audio = makeStreamingAudioProvider()
-        let dictation = MockDictationProvider(stubbedText: "Batch only")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch only")
 
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            dictationProvider: dictation,
+            batchProvider: dictation,
             textInjector: MockTextInjector(),
             coordinator: RecordingCoordinator()
                 // No streamingProvider passed — defaults to nil.
@@ -634,7 +634,7 @@ final class StreamingPipelineTests: XCTestCase {
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            dictationProvider: batch,
+            batchProvider: batch,
             textInjector: injector,
             coordinator: coordinator,
             streamingProvider: streaming
@@ -678,7 +678,7 @@ final class StreamingPipelineTests: XCTestCase {
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            dictationProvider: MockDictationProvider(),
+            batchProvider: MockBatchDictationProvider(),
             textInjector: MockTextInjector(),
             coordinator: coordinator,
             streamingProvider: streaming
@@ -829,9 +829,9 @@ final class StreamingPipelineTests: XCTestCase {
     func testStreamingSuccessSkipsBatch() async {
         // When streaming succeeds, batch should NOT be called.
         let streaming = MockStreamingDictationProvider(stubbedText: "Streaming result")
-        let dictation = MockDictationProvider(stubbedText: "Batch result")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch result")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -850,9 +850,9 @@ final class StreamingPipelineTests: XCTestCase {
         // When streaming fails, batch HTTP should be called as fallback.
         let streaming = MockStreamingDictationProvider()
         streaming.stubbedFinishError = DictationError.networkError("ws died")
-        let dictation = MockDictationProvider(stubbedText: "Batch fallback")
+        let dictation = MockBatchDictationProvider(stubbedText: "Batch fallback")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -871,10 +871,10 @@ final class StreamingPipelineTests: XCTestCase {
         // When both streaming and batch fail, no text should be injected.
         let streaming = MockStreamingDictationProvider()
         streaming.stubbedFinishError = DictationError.networkError("ws died")
-        let dictation = MockDictationProvider()
+        let dictation = MockBatchDictationProvider()
         dictation.stubbedError = DictationError.networkError("http died")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            dictationProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)

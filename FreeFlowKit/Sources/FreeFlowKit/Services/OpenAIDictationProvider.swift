@@ -8,7 +8,7 @@ import Foundation
 /// regex substitution, skip-heuristic, and (if a chat client is provided)
 /// LLM refinement. When no polish chat client is provided, the raw
 /// transcript is returned after regex preprocessing only.
-public struct OpenAIDictationProvider: DictationProviding {
+public struct OpenAIDictationProvider: BatchDictationProviding {
 
     private let apiKeyProvider: @Sendable () -> String
     private let model: String
@@ -42,7 +42,7 @@ public struct OpenAIDictationProvider: DictationProviding {
         }
     }
 
-    // MARK: - DictationProviding
+    // MARK: - BatchDictationProviding
 
     public func dictate(audio: Data, context: AppContext) async throws -> String {
         guard !audio.isEmpty else {

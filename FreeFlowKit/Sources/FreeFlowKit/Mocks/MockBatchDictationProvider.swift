@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Track call counts and recorded arguments to verify pipeline behavior
 /// without making real network calls to the dictation service.
-public final class MockDictationProvider: DictationProviding, @unchecked Sendable {
+public final class MockBatchDictationProvider: BatchDictationProviding, @unchecked Sendable {
 
     private let lock = NSLock()
     private var _dictateCallCount: Int = 0

@@ -3,7 +3,7 @@ import Foundation
 /// Orchestrate the full dictation flow from hotkey press to text injection.
 ///
 /// `DictationPipeline` implements `PipelineProviding` by coordinating an
-/// `AudioProviding`, `AppContextProviding`, `DictationProviding`, and
+/// `AudioProviding`, `AppContextProviding`, `BatchDictationProviding`, and
 /// `TextInjecting` service. It drives the `RecordingCoordinator` state
 /// machine through each phase:
 ///
@@ -28,7 +28,7 @@ public actor DictationPipeline: PipelineProviding {
 
     private let audioProvider: AudioProviding
     private let contextProvider: AppContextProviding
-    private let dictationProvider: DictationProviding?
+    private let batchProvider: BatchDictationProviding?
     private let streamingProvider: StreamingDictationProviding?
     private let textInjector: TextInjecting
     private let coordinator: RecordingCoordinator
@@ -161,7 +161,7 @@ public actor DictationPipeline: PipelineProviding {
     public init(
         audioProvider: AudioProviding,
         contextProvider: AppContextProviding,
-        dictationProvider: DictationProviding? = nil,
+        batchProvider: BatchDictationProviding? = nil,
         textInjector: TextInjecting,
         coordinator: RecordingCoordinator,
         transcriptBuffer: TranscriptBuffer? = nil,
@@ -173,7 +173,7 @@ public actor DictationPipeline: PipelineProviding {
     ) {
         self.audioProvider = audioProvider
         self.contextProvider = contextProvider
-        self.dictationProvider = dictationProvider
+        self.batchProvider = batchProvider
         self.textInjector = textInjector
         self.coordinator = coordinator
         self.transcriptBuffer = transcriptBuffer
@@ -643,7 +643,7 @@ public actor DictationPipeline: PipelineProviding {
 
         let task = Task {
             [
-                pendingContext, audioProvider, dictationProvider, streamingProvider,
+                pendingContext, audioProvider, batchProvider, streamingProvider,
                 textInjector, coordinator, minimumAudioDuration, transcriptBuffer,
                 earlyThreshold, micDiagnosticStore, recoveryBox,
                 completeEnteredAt
@@ -756,13 +756,13 @@ public actor DictationPipeline: PipelineProviding {
                         context: context,
                         coordinator: coordinator,
                         recoveryBox: recoveryBox)
-                } else if let dictationProvider {
+                } else if let batchProvider {
                     dictatedText = await finishCloudDictation(
                         streaming: streaming,
                         chunksAlreadyInjected: chunksInjected,
                         audioBuffer: audioBuffer,
                         context: context,
-                        dictationProvider: dictationProvider,
+                        batchProvider: batchProvider,
                         minimumAudioDuration: minimumAudioDuration,
                         silenceThreshold: postRecordThreshold,
                         coordinator: coordinator,
@@ -772,12 +772,12 @@ public actor DictationPipeline: PipelineProviding {
                     await coordinator.reset()
                     dictatedText = nil
                 }
-            } else if let dictationProvider {
+            } else if let batchProvider {
                 Log.debug("[Pipeline] batch mode, sending to dictation service")
                 dictatedText = await batchDictate(
                     audioBuffer: audioBuffer,
                     context: context,
-                    dictationProvider: dictationProvider,
+                    batchProvider: batchProvider,
                     minimumAudioDuration: minimumAudioDuration,
                     silenceThreshold: postRecordThreshold,
                     coordinator: coordinator,
@@ -938,7 +938,7 @@ public actor DictationPipeline: PipelineProviding {
         chunksAlreadyInjected: Bool,
         audioBuffer: AudioBuffer,
         context: AppContext,
-        dictationProvider: DictationProviding,
+        batchProvider: BatchDictationProviding,
         minimumAudioDuration: TimeInterval,
         silenceThreshold: Float,
         coordinator: RecordingCoordinator,
@@ -949,7 +949,7 @@ public actor DictationPipeline: PipelineProviding {
                 streaming: streaming,
                 audioBuffer: audioBuffer,
                 context: context,
-                dictationProvider: dictationProvider,
+                batchProvider: batchProvider,
                 coordinator: coordinator,
                 recoveryBox: recoveryBox)
         }
@@ -976,7 +976,7 @@ public actor DictationPipeline: PipelineProviding {
             text = await batchDictate(
                 audioBuffer: audioBuffer,
                 context: context,
-                dictationProvider: dictationProvider,
+                batchProvider: batchProvider,
                 minimumAudioDuration: minimumAudioDuration,
                 silenceThreshold: silenceThreshold,
                 coordinator: coordinator,
@@ -996,7 +996,7 @@ public actor DictationPipeline: PipelineProviding {
         streaming: StreamingDictationProviding,
         audioBuffer: AudioBuffer,
         context: AppContext,
-        dictationProvider: DictationProviding,
+        batchProvider: BatchDictationProviding,
         coordinator: RecordingCoordinator,
         recoveryBox: RecoveryBox
     ) async -> String? {
@@ -1020,7 +1020,7 @@ public actor DictationPipeline: PipelineProviding {
                 }
                 guard !Task.isCancelled else { break }
                 do {
-                    let text = try await dictationProvider.dictate(
+                    let text = try await batchProvider.dictate(
                         audio: tailWAV, context: context)
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !trimmed.isEmpty { return trimmed }
@@ -1141,7 +1141,7 @@ public actor DictationPipeline: PipelineProviding {
     private func batchDictate(
         audioBuffer: AudioBuffer,
         context: AppContext,
-        dictationProvider: DictationProviding,
+        batchProvider: BatchDictationProviding,
         minimumAudioDuration: TimeInterval,
         silenceThreshold: Float,
         coordinator: RecordingCoordinator,
@@ -1172,7 +1172,7 @@ public actor DictationPipeline: PipelineProviding {
 
         // Send audio + context to the dictation service.
         do {
-            let text = try await dictationProvider.dictate(
+            let text = try await batchProvider.dictate(
                 audio: audioBuffer.data, context: context)
             return text
         } catch let error as DictationError where error == .authenticationFailed {
@@ -1241,7 +1241,7 @@ public actor DictationPipeline: PipelineProviding {
     public func retryDictation() async {
         guard let audio = recoveryAudio,
             let context = recoveryContext,
-            let dictationProvider
+            let batchProvider
         else {
             await coordinator.reset()
             return
@@ -1251,7 +1251,7 @@ public actor DictationPipeline: PipelineProviding {
         guard started else { return }
 
         do {
-            let text = try await dictationProvider.dictate(
+            let text = try await batchProvider.dictate(
                 audio: audio, context: context)
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {

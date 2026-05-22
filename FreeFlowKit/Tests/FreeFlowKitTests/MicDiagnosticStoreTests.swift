@@ -559,18 +559,18 @@ struct MicDiagnosticStoreTests {
         /// verify entries are recorded for each dictation outcome.
         private func makePipeline(
             audioProvider: MockAudioProvider = MockAudioProvider(),
-            dictationProvider: MockDictationProvider = MockDictationProvider(),
+            batchProvider: MockBatchDictationProvider = MockBatchDictationProvider(),
             store: MicDiagnosticStore = MicDiagnosticStore()
-        ) -> (DictationPipeline, MockAudioProvider, MockDictationProvider, MicDiagnosticStore) {
+        ) -> (DictationPipeline, MockAudioProvider, MockBatchDictationProvider, MicDiagnosticStore) {
             let pipeline = DictationPipeline(
                 audioProvider: audioProvider,
                 contextProvider: MockAppContextProvider(),
-                dictationProvider: dictationProvider,
+                batchProvider: batchProvider,
                 textInjector: MockTextInjector(),
                 coordinator: RecordingCoordinator(),
                 micDiagnosticStore: store
             )
-            return (pipeline, audioProvider, dictationProvider, store)
+            return (pipeline, audioProvider, batchProvider, store)
         }
 
         @Test("Successful dictation records an 'ok' entry")
@@ -580,11 +580,11 @@ struct MicDiagnosticStoreTests {
             audio.stubbedAmbientRMS = 0.001
             audio.stubbedMicProximity = .nearField
 
-            let dictation = MockDictationProvider(stubbedText: "Hello world")
+            let dictation = MockBatchDictationProvider(stubbedText: "Hello world")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
-                dictationProvider: dictation,
+                batchProvider: dictation,
                 store: store
             )
 
@@ -639,11 +639,11 @@ struct MicDiagnosticStoreTests {
             audio.stubbedMicProximity = .nearField
 
             // Server returns whitespace-only text.
-            let dictation = MockDictationProvider(stubbedText: "   ")
+            let dictation = MockBatchDictationProvider(stubbedText: "   ")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
-                dictationProvider: dictation,
+                batchProvider: dictation,
                 store: store
             )
 
@@ -665,11 +665,11 @@ struct MicDiagnosticStoreTests {
             audio.stubbedAmbientRMS = 0.001
             audio.stubbedMicProximity = .nearField
 
-            let dictation = MockDictationProvider(stubbedText: "First")
+            let dictation = MockBatchDictationProvider(stubbedText: "First")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
-                dictationProvider: dictation,
+                batchProvider: dictation,
                 store: store
             )
 
@@ -699,11 +699,11 @@ struct MicDiagnosticStoreTests {
             audio.stubbedAmbientRMS = 0.001
             audio.stubbedMicProximity = .farField
 
-            let dictation = MockDictationProvider(stubbedText: "test")
+            let dictation = MockBatchDictationProvider(stubbedText: "test")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
-                dictationProvider: dictation,
+                batchProvider: dictation,
                 store: store
             )
 
@@ -726,7 +726,7 @@ struct MicDiagnosticStoreTests {
             let pipeline = DictationPipeline(
                 audioProvider: MockAudioProvider(),
                 contextProvider: MockAppContextProvider(),
-                dictationProvider: MockDictationProvider(stubbedText: "safe"),
+                batchProvider: MockBatchDictationProvider(stubbedText: "safe"),
                 textInjector: MockTextInjector(),
                 coordinator: RecordingCoordinator()
             )

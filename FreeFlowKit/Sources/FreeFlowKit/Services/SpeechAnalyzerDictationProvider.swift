@@ -10,7 +10,7 @@ import Speech
 /// (not SpeechAnalyzer) so it can run concurrently with a
 /// SpeechAnalyzer streaming session without conflicts.
 @available(macOS 26, *)
-public struct SpeechAnalyzerDictationProvider: DictationProviding {
+public struct SpeechAnalyzerDictationProvider: BatchDictationProviding {
 
     private let polishChatClient: (any PolishChatClient)?
     private let polishModel: String
