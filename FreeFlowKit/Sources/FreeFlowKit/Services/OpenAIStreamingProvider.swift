@@ -26,7 +26,7 @@ import Foundation
 ///      until `conversation.item.input_audio_transcription.completed`.
 ///   4. Tear down the connection and polish the transcript locally.
 ///   5. Pre-open a new backup connection in the background.
-public final class OpenAIRealtimeProvider: StreamingDictationProviding, @unchecked Sendable {
+public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchecked Sendable {
 
     // MARK: - Configuration
 

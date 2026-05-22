@@ -6,7 +6,7 @@ import Foundation
 /// results, error stubbing, argument recording, and call counting.
 /// Used in tests to exercise the streaming pipeline path without
 /// making real WebSocket connections.
-public final class MockStreamingDictationProvider: StreamingDictationProviding, @unchecked Sendable
+public final class MockStreamingProvider: StreamingDictationProviding, @unchecked Sendable
 {
 
     private let lock = NSLock()

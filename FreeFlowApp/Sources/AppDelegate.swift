@@ -303,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
             batchProvider = nil
-            streamingProvider = LocalModelStreamingProvider(
+            streamingProvider = LocalStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil
 
@@ -326,10 +326,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Cloud mode: OpenAI STT + cloud polish.
             let polishClient = OpenAIChatClient(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            batchProvider = OpenAIDictationProvider(
+            batchProvider = OpenAIBatchProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
                 polishChatClient: polishClient)
-            streamingProvider = OpenAIRealtimeProvider(
+            streamingProvider = OpenAIStreamingProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
                 polishChatClient: polishClient)
             onSessionExpired = { [weak self] in

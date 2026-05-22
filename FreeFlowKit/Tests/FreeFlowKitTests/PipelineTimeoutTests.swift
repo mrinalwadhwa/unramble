@@ -199,11 +199,11 @@ final class PipelineTimeoutTests: XCTestCase {
 
     private func makePipeline(
         audioProvider: MockAudioProvider? = nil,
-        batchProvider: MockBatchDictationProvider = MockBatchDictationProvider(),
+        batchProvider: MockBatchProvider = MockBatchProvider(),
         streamingProvider: HangingStreamingDictationProvider = HangingStreamingDictationProvider(),
         coordinator: RecordingCoordinator = RecordingCoordinator()
     ) -> (
-        DictationPipeline, MockAudioProvider, MockBatchDictationProvider,
+        DictationPipeline, MockAudioProvider, MockBatchProvider,
         HangingStreamingDictationProvider, MockTextInjector, RecordingCoordinator
     ) {
         let audio = audioProvider ?? makeStreamingAudioProvider()
@@ -270,7 +270,7 @@ final class PipelineTimeoutTests: XCTestCase {
     func testCompleteReturnsWhenStartStreamingHangs() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnStart = true
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch fallback")
+        let dictation = MockBatchProvider(stubbedText: "Batch fallback")
         let (pipeline, audio, _, _, injector, coordinator) = makePipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -325,7 +325,7 @@ final class PipelineTimeoutTests: XCTestCase {
     func testCompleteReturnsWhenFinishStreamingHangs() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnFinish = true
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch wins")
+        let dictation = MockBatchProvider(stubbedText: "Batch wins")
         let (pipeline, audio, _, _, injector, coordinator) = makePipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -391,7 +391,7 @@ final class PipelineTimeoutTests: XCTestCase {
     /// the streaming provider intermittently hangs.
     func testRapidCyclesWithIntermittentHangs() async {
         let streaming = HangingStreamingDictationProvider()
-        let dictation = MockBatchDictationProvider(stubbedText: "Rapid result")
+        let dictation = MockBatchProvider(stubbedText: "Rapid result")
         let coordinator = RecordingCoordinator()
         let (pipeline, audio, _, _, _, _) = makePipeline(
             batchProvider: dictation,
@@ -489,7 +489,7 @@ final class PipelineTimeoutTests: XCTestCase {
     func testBatchFallbackAfterSetupTimeout() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnStart = true
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch text")
+        let dictation = MockBatchProvider(stubbedText: "Batch text")
         let (pipeline, audio, _, _, injector, coordinator) = makePipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -553,7 +553,7 @@ final class PipelineTimeoutTests: XCTestCase {
     func testQuickReleaseBeforeAudioSetupCompletes() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.startDelay = 2.0  // Slow but not hanging
-        let dictation = MockBatchDictationProvider(stubbedText: "Quick release")
+        let dictation = MockBatchProvider(stubbedText: "Quick release")
         let (pipeline, _, _, _, _, coordinator) = makePipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -579,7 +579,7 @@ final class PipelineTimeoutTests: XCTestCase {
     func testCompleteReturnsWhenSendAudioHangs() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnSendAudio = true
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch fallback")
+        let dictation = MockBatchProvider(stubbedText: "Batch fallback")
         let audio = makeStreamingAudioProvider()
         // Stub a non-silent audio buffer so batch mode has valid audio.
         audio.stubbedBuffer = AudioBuffer(
@@ -626,7 +626,7 @@ final class PipelineTimeoutTests: XCTestCase {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnSendAudio = true
         streaming.hangOnFinish = true
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch wins")
+        let dictation = MockBatchProvider(stubbedText: "Batch wins")
         let audio = makeStreamingAudioProvider()
         audio.stubbedBuffer = AudioBuffer(
             data: makeNonSilentPCMChunk(sampleCount: 16000),
@@ -665,7 +665,7 @@ final class PipelineTimeoutTests: XCTestCase {
         streaming.hangOnSendAudio = true
         streaming.hangOnFinish = true
         // Make batch also hang by using a provider that blocks.
-        let hangingDictation = MockBatchDictationProvider()
+        let hangingDictation = MockBatchProvider()
         hangingDictation.stubbedDelay = 30.0  // 30s — longer than pipeline timeout
         let audio = makeStreamingAudioProvider()
         audio.stubbedBuffer = AudioBuffer(

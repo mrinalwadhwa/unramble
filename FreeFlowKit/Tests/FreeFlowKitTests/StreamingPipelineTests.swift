@@ -25,8 +25,8 @@ final class StreamingPipelineTests: XCTestCase {
 
     /// Build a batch mock with a delay. Used as the default dictation
     /// provider in test pipelines where batch is not the focus.
-    private func makeSlowBatchProvider() -> MockBatchDictationProvider {
-        let batch = MockBatchDictationProvider()
+    private func makeSlowBatchProvider() -> MockBatchProvider {
+        let batch = MockBatchProvider()
         batch.stubbedDelay = 5.0
         return batch
     }
@@ -34,14 +34,14 @@ final class StreamingPipelineTests: XCTestCase {
     private func makeStreamingPipeline(
         audioProvider: MockAudioProvider? = nil,
         contextProvider: MockAppContextProvider = MockAppContextProvider(),
-        batchProvider: MockBatchDictationProvider? = nil,
-        streamingProvider: MockStreamingDictationProvider = MockStreamingDictationProvider(),
+        batchProvider: MockBatchProvider? = nil,
+        streamingProvider: MockStreamingProvider = MockStreamingProvider(),
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
         transcriptBuffer: TranscriptBuffer? = nil
     ) -> (
         DictationPipeline, MockAudioProvider, MockAppContextProvider,
-        MockBatchDictationProvider, MockStreamingDictationProvider,
+        MockBatchProvider, MockStreamingProvider,
         MockTextInjector, RecordingCoordinator
     ) {
         let audio = audioProvider ?? makeStreamingAudioProvider()
@@ -96,7 +96,7 @@ final class StreamingPipelineTests: XCTestCase {
     }
 
     func testStreamingFullCycleInjectsText() async {
-        let streaming = MockStreamingDictationProvider(stubbedText: "Hello streaming")
+        let streaming = MockStreamingProvider(stubbedText: "Hello streaming")
         let (pipeline, audio, _, _, _, injector, _) = makeStreamingPipeline(
             streamingProvider: streaming)
 
@@ -287,7 +287,7 @@ final class StreamingPipelineTests: XCTestCase {
     }
 
     func testCycleWorksAfterStreamingCancel() async {
-        let streaming = MockStreamingDictationProvider(stubbedText: "After cancel")
+        let streaming = MockStreamingProvider(stubbedText: "After cancel")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             streamingProvider: streaming)
 
@@ -312,10 +312,10 @@ final class StreamingPipelineTests: XCTestCase {
     // MARK: - Streaming errors
 
     func testStreamingStartFailureFallsToBatchMode() async {
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         streaming.stubbedStartError = DictationError.networkError("connection refused")
 
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch fallback text")
+        let dictation = MockBatchProvider(stubbedText: "Batch fallback text")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -335,10 +335,10 @@ final class StreamingPipelineTests: XCTestCase {
     }
 
     func testStreamingFinishFailureFallsToBatch() async {
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         streaming.stubbedFinishError = DictationError.networkError("connection lost")
 
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch recovery")
+        let dictation = MockBatchProvider(stubbedText: "Batch recovery")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -357,8 +357,8 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testStreamingEmptyResultUsesBatchFallback() async {
         // When streaming returns empty, batch result is used (parallel mode).
-        let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch result")
+        let streaming = MockStreamingProvider(stubbedText: "")
+        let dictation = MockBatchProvider(stubbedText: "Batch result")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -377,8 +377,8 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testBothEmptyResultsSkipInjection() async {
         // When both streaming and batch return empty, skip injection.
-        let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockBatchDictationProvider(stubbedText: "")
+        let streaming = MockStreamingProvider(stubbedText: "")
+        let dictation = MockBatchProvider(stubbedText: "")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -396,8 +396,8 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testBothWhitespaceOnlyResultsSkipInjection() async {
         // When both streaming and batch return whitespace-only, skip injection.
-        let streaming = MockStreamingDictationProvider(stubbedText: "   \n  ")
-        let dictation = MockBatchDictationProvider(stubbedText: "  \t  ")
+        let streaming = MockStreamingProvider(stubbedText: "   \n  ")
+        let dictation = MockBatchProvider(stubbedText: "  \t  ")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -417,7 +417,7 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testStreamingStoresTranscriptInBuffer() async {
         let buffer = TranscriptBuffer()
-        let streaming = MockStreamingDictationProvider(stubbedText: "Streamed text")
+        let streaming = MockStreamingProvider(stubbedText: "Streamed text")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
             streamingProvider: streaming, transcriptBuffer: buffer)
 
@@ -433,8 +433,8 @@ final class StreamingPipelineTests: XCTestCase {
     func testBothEmptyResultsDoNotStoreInBuffer() async {
         // When both streaming and batch return empty, nothing stored.
         let buffer = TranscriptBuffer()
-        let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockBatchDictationProvider(stubbedText: "")
+        let streaming = MockStreamingProvider(stubbedText: "")
+        let dictation = MockBatchProvider(stubbedText: "")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming,
             transcriptBuffer: buffer)
@@ -451,8 +451,8 @@ final class StreamingPipelineTests: XCTestCase {
     func testStreamingEmptyButBatchSuccessStoresInBuffer() async {
         // When streaming returns empty but batch returns text, store batch result.
         let buffer = TranscriptBuffer()
-        let streaming = MockStreamingDictationProvider(stubbedText: "")
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch text")
+        let streaming = MockStreamingProvider(stubbedText: "")
+        let dictation = MockBatchProvider(stubbedText: "Batch text")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming,
             transcriptBuffer: buffer)
@@ -469,9 +469,9 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testStreamingFailureWithBatchFallbackStoresInBuffer() async {
         let buffer = TranscriptBuffer()
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         streaming.stubbedFinishError = DictationError.networkError("fail")
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch recovered")
+        let dictation = MockBatchProvider(stubbedText: "Batch recovered")
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming,
             transcriptBuffer: buffer)
@@ -493,7 +493,7 @@ final class StreamingPipelineTests: XCTestCase {
         let buffer = TranscriptBuffer()
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let streaming = MockStreamingDictationProvider(stubbedText: "streamed text")
+        let streaming = MockStreamingProvider(stubbedText: "streamed text")
 
         let (pipeline, audio, _, _, _, _, coordinator) = makeStreamingPipeline(
             streamingProvider: streaming, textInjector: injector, transcriptBuffer: buffer)
@@ -513,7 +513,7 @@ final class StreamingPipelineTests: XCTestCase {
         let buffer = TranscriptBuffer()
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let streaming = MockStreamingDictationProvider(stubbedText: "preserved streaming text")
+        let streaming = MockStreamingProvider(stubbedText: "preserved streaming text")
 
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
             streamingProvider: streaming, textInjector: injector, transcriptBuffer: buffer)
@@ -534,7 +534,7 @@ final class StreamingPipelineTests: XCTestCase {
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
         let coordinator = RecordingCoordinator()
         let audio = makeStreamingAudioProvider()
-        let streaming = MockStreamingDictationProvider(stubbedText: "first attempt")
+        let streaming = MockStreamingProvider(stubbedText: "first attempt")
 
         let (pipeline, _, _, _, _, _, _) = makeStreamingPipeline(
             audioProvider: audio, streamingProvider: streaming,
@@ -576,8 +576,8 @@ final class StreamingPipelineTests: XCTestCase {
         let audio = MockAudioProvider()
         // enablePCMStream defaults to false, so pcmAudioStream is nil.
 
-        let streaming = MockStreamingDictationProvider(stubbedText: "Should not be used")
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch text")
+        let streaming = MockStreamingProvider(stubbedText: "Should not be used")
+        let dictation = MockBatchProvider(stubbedText: "Batch text")
 
         let pipeline = DictationPipeline(
             audioProvider: audio,
@@ -601,7 +601,7 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testFallbackToBatchWhenNoStreamingProvider() async {
         let audio = makeStreamingAudioProvider()
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch only")
+        let dictation = MockBatchProvider(stubbedText: "Batch only")
 
         let pipeline = DictationPipeline(
             audioProvider: audio,
@@ -625,7 +625,7 @@ final class StreamingPipelineTests: XCTestCase {
     // MARK: - Multiple consecutive streaming cycles
 
     func testMultipleConsecutiveStreamingCycles() async {
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         let audio = makeStreamingAudioProvider()
         let coordinator = RecordingCoordinator()
         let injector = MockTextInjector()
@@ -672,13 +672,13 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testRapidStreamingActivateCancelCycles() async {
         let audio = makeStreamingAudioProvider()
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            batchProvider: MockBatchDictationProvider(),
+            batchProvider: MockBatchProvider(),
             textInjector: MockTextInjector(),
             coordinator: coordinator,
             streamingProvider: streaming
@@ -705,7 +705,7 @@ final class StreamingPipelineTests: XCTestCase {
     // MARK: - Streaming send error during forwarding
 
     func testStreamingSendErrorDoesNotCrash() async {
-        let streaming = MockStreamingDictationProvider(stubbedText: "Partial result")
+        let streaming = MockStreamingProvider(stubbedText: "Partial result")
         // Fail on the second sendAudio call.
         streaming.stubbedSendError = DictationError.networkError("send failed")
 
@@ -743,7 +743,7 @@ final class StreamingPipelineTests: XCTestCase {
     // MARK: - Chunk handler wiring
 
     func testPipelineSetsChunkHandlerOnStreamingProvider() async {
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
             streamingProvider: streaming)
 
@@ -828,8 +828,8 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testStreamingSuccessSkipsBatch() async {
         // When streaming succeeds, batch should NOT be called.
-        let streaming = MockStreamingDictationProvider(stubbedText: "Streaming result")
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch result")
+        let streaming = MockStreamingProvider(stubbedText: "Streaming result")
+        let dictation = MockBatchProvider(stubbedText: "Batch result")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -848,9 +848,9 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testStreamingFailureFallsToBatchHTTP() async {
         // When streaming fails, batch HTTP should be called as fallback.
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         streaming.stubbedFinishError = DictationError.networkError("ws died")
-        let dictation = MockBatchDictationProvider(stubbedText: "Batch fallback")
+        let dictation = MockBatchProvider(stubbedText: "Batch fallback")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
 
@@ -869,9 +869,9 @@ final class StreamingPipelineTests: XCTestCase {
 
     func testBothStreamingAndBatchFailSkipInjection() async {
         // When both streaming and batch fail, no text should be injected.
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         streaming.stubbedFinishError = DictationError.networkError("ws died")
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.networkError("http died")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)

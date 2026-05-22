@@ -3,16 +3,16 @@ import Testing
 
 @testable import FreeFlowKit
 
-@Suite("LocalModelStreamingProvider")
-struct LocalModelStreamingProviderTests {
+@Suite("LocalStreamingProvider")
+struct LocalStreamingProviderTests {
 
     // MARK: - Helpers
 
     private func makeProvider(
         sttEngine: MockLocalSTTEngine = MockLocalSTTEngine(),
         polishClient: StreamingMockPolishClient? = nil
-    ) -> (LocalModelStreamingProvider, MockLocalSTTEngine, StreamingMockPolishClient?) {
-        let provider = LocalModelStreamingProvider(
+    ) -> (LocalStreamingProvider, MockLocalSTTEngine, StreamingMockPolishClient?) {
+        let provider = LocalStreamingProvider(
             sttEngine: sttEngine,
             polishChatClient: polishClient)
         return (provider, sttEngine, polishClient)

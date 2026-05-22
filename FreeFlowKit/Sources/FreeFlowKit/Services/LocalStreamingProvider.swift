@@ -6,7 +6,7 @@ import Foundation
 /// via the `LocalSTTEngine` when the session ends. The engine does not
 /// support true streaming, so audio is buffered and transcribed on
 /// `finishStreaming()`.
-public final class LocalModelStreamingProvider: StreamingDictationProviding,
+public final class LocalStreamingProvider: StreamingDictationProviding,
     @unchecked Sendable
 {
 

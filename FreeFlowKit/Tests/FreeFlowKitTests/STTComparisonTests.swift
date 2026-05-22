@@ -71,7 +71,7 @@ final class STTComparisonTests: XCTestCase {
             var aTime = 0.0
             var aMatch = false
             if #available(macOS 26, *) {
-                let provider = SpeechAnalyzerDictationProvider(
+                let provider = SpeechAnalyzerBatchProvider(
                     polishChatClient: nil)
                 let aStart = CFAbsoluteTimeGetCurrent()
                 // dictate with nil polisher returns raw transcript

@@ -15,7 +15,7 @@ import Testing
 // Gated by FREEFLOW_TEST_OPENAI_BENCH=1 since they hit the real API and
 // take a few seconds each. Run with:
 //   OPENAI_API_KEY=... FREEFLOW_TEST_OPENAI=1 FREEFLOW_TEST_OPENAI_BENCH=1 \
-//     swift test --filter "OpenAIRealtimeBenchmark"
+//     swift test --filter "OpenAIStreamingBenchmark"
 // ---------------------------------------------------------------------------
 
 private func silentPCM(seconds: Double = 0.5, sampleRate: Int = 16000) -> Data {
@@ -38,11 +38,11 @@ private func chunked(_ pcm: Data, chunkSizeMs: Int, sampleRate: Int = 16000) -> 
 }
 
 @Suite(
-    "OpenAIRealtimeProvider – benchmark",
+    "OpenAIStreamingProvider – benchmark",
     .disabled(
         if: ProcessInfo.processInfo.environment["FREEFLOW_TEST_OPENAI"] != "1"
             || ProcessInfo.processInfo.environment["FREEFLOW_TEST_OPENAI_BENCH"] != "1"))
-struct OpenAIRealtimeBenchmarkTests {
+struct OpenAIStreamingBenchmarkTests {
 
     private var apiKey: String {
         ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
@@ -55,7 +55,7 @@ struct OpenAIRealtimeBenchmarkTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIRealtimeProvider(
+        let provider = OpenAIStreamingProvider(
             apiKey: apiKey, polishChatClient: nil)
 
         let pcm = silentPCM(seconds: 1.0)
@@ -79,7 +79,7 @@ struct OpenAIRealtimeBenchmarkTests {
         await provider.cancelStreaming()
 
         print("""
-            ── OpenAIRealtimeProvider single session breakdown ──
+            ── OpenAIStreamingProvider single session breakdown ──
             startStreaming:  \(String(format: "%.3f", tStart.timeIntervalSince(t0)))s
             sendAudio total: \(String(format: "%.3f", tSent.timeIntervalSince(tStart)))s (\(chunks.count) chunks)
             finishStreaming: \(String(format: "%.3f", tFinish.timeIntervalSince(tSent)))s
@@ -96,7 +96,7 @@ struct OpenAIRealtimeBenchmarkTests {
             return
         }
 
-        let provider = OpenAIRealtimeProvider(
+        let provider = OpenAIStreamingProvider(
             apiKey: apiKey, polishChatClient: nil)
 
         let pcm = silentPCM(seconds: 1.0)
@@ -143,7 +143,7 @@ struct OpenAIRealtimeBenchmarkTests {
         }
 
         print("""
-            ── OpenAIRealtimeProvider \(runs) sessions (1s silent PCM) ──
+            ── OpenAIStreamingProvider \(runs) sessions (1s silent PCM) ──
             startStreaming:  \(stats(startTimes))
             sendAudio total: \(stats(sendTimes))
             finishStreaming: \(stats(finishTimes))
@@ -162,7 +162,7 @@ struct OpenAIRealtimeBenchmarkTests {
             return
         }
 
-        let provider = OpenAIRealtimeProvider(
+        let provider = OpenAIStreamingProvider(
             apiKey: apiKey, polishChatClient: nil)
 
         let pcm = silentPCM(seconds: 1.0)
@@ -212,7 +212,7 @@ struct OpenAIRealtimeBenchmarkTests {
         }
 
         print("""
-            ── OpenAIRealtimeProvider \(runs) sessions with 1.5s gap (warm backup) ──
+            ── OpenAIStreamingProvider \(runs) sessions with 1.5s gap (warm backup) ──
             startStreaming:  \(stats(startTimes))
             sendAudio total: \(stats(sendTimes))
             finishStreaming: \(stats(finishTimes))

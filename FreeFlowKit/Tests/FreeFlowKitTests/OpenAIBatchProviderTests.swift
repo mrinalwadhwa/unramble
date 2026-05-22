@@ -34,8 +34,8 @@ private func toneWAV(seconds: Double = 1.0, sampleRate: Int = 16000) -> Data {
 
 // MARK: - Stubbed tests
 
-@Suite("OpenAIDictationProvider – stubbed")
-struct OpenAIDictationProviderStubbedTests {
+@Suite("OpenAIBatchProvider – stubbed")
+struct OpenAIBatchProviderStubbedTests {
 
     @Test("POST to audio/transcriptions endpoint")
     func endpointURL() async throws {
@@ -48,7 +48,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "sk-test",
             polishChatClient: nil,
             session: session)
@@ -70,7 +70,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "sk-my-key",
             polishChatClient: nil,
             session: session)
@@ -91,7 +91,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -105,7 +105,7 @@ struct OpenAIDictationProviderStubbedTests {
     @Test("multipart body contains file and model fields")
     func bodyFields() {
         let audio = silentWAV()
-        let body = OpenAIDictationProvider.buildMultipartBody(
+        let body = OpenAIBatchProvider.buildMultipartBody(
             audio: audio,
             model: "gpt-4o-mini-transcribe",
             boundary: "BOUNDARY")
@@ -129,7 +129,7 @@ struct OpenAIDictationProviderStubbedTests {
         // Use a small audio payload with a recognizable marker.
         let marker: [UInt8] = [0xDE, 0xAD, 0xBE, 0xEF]
         let audio = Data(marker)
-        let body = OpenAIDictationProvider.buildMultipartBody(
+        let body = OpenAIBatchProvider.buildMultipartBody(
             audio: audio,
             model: "m",
             boundary: "B")
@@ -144,7 +144,7 @@ struct OpenAIDictationProviderStubbedTests {
             Issue.record("network should not be called for empty audio")
             throw URLError(.badServerResponse)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -162,7 +162,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "bad",
             polishChatClient: nil,
             session: session)
@@ -180,7 +180,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -204,7 +204,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -227,7 +227,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -245,7 +245,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -266,7 +266,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -286,7 +286,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -304,7 +304,7 @@ struct OpenAIDictationProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: "k",
             polishChatClient: nil,
             session: session)
@@ -317,9 +317,9 @@ struct OpenAIDictationProviderStubbedTests {
 // MARK: - Live integration (gated)
 
 @Suite(
-    "OpenAIDictationProvider – live",
+    "OpenAIBatchProvider – live",
     .disabled(if: ProcessInfo.processInfo.environment["FREEFLOW_TEST_OPENAI"] != "1"))
-struct OpenAIDictationProviderLiveTests {
+struct OpenAIBatchProviderLiveTests {
 
     private var apiKey: String {
         ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
@@ -331,7 +331,7 @@ struct OpenAIDictationProviderLiveTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: apiKey, polishChatClient: nil)
         // A 1 kHz tone is not speech, so the transcript will likely be empty
         // or a short placeholder. We just verify the call succeeds.
@@ -344,7 +344,7 @@ struct OpenAIDictationProviderLiveTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: apiKey, polishChatClient: nil)
         _ = try await provider.dictate(
             audio: silentWAV(seconds: 0.5), context: AppContext.empty)
@@ -357,7 +357,7 @@ struct OpenAIDictationProviderLiveTests {
             return
         }
         let polish = OpenAIChatClient(apiKey: apiKey)
-        let provider = OpenAIDictationProvider(
+        let provider = OpenAIBatchProvider(
             apiKey: apiKey, polishChatClient: polish)
         // Silent audio should produce an empty transcript → polish returns ""
         let result = try await provider.dictate(

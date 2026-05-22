@@ -173,11 +173,11 @@ struct DictationPipelineIntegrationTests {
     private func makePipeline(
         audioProvider: MockAudioProvider = MockAudioProvider(),
         contextProvider: MockAppContextProvider = MockAppContextProvider(),
-        batchProvider: MockBatchDictationProvider = MockBatchDictationProvider(),
+        batchProvider: MockBatchProvider = MockBatchProvider(),
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator()
     ) -> (
-        DictationPipeline, MockAudioProvider, MockAppContextProvider, MockBatchDictationProvider,
+        DictationPipeline, MockAudioProvider, MockAppContextProvider, MockBatchProvider,
         MockTextInjector, RecordingCoordinator
     ) {
         let pipeline = DictationPipeline(
@@ -194,7 +194,7 @@ struct DictationPipelineIntegrationTests {
 
     @Test("Full cycle transcribes audio and injects text")
     func fullCycleTranscribes() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "Hello world")
+        let dictation = MockBatchProvider(stubbedText: "Hello world")
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -212,7 +212,7 @@ struct DictationPipelineIntegrationTests {
 
     @Test("Dictation receives audio data captured by the provider")
     func dictationReceivesAudioData() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "test")
+        let dictation = MockBatchProvider(stubbedText: "test")
         let (pipeline, _, _, _, _, _) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -225,7 +225,7 @@ struct DictationPipelineIntegrationTests {
 
     @Test("Dictation failure enters recovery state")
     func dictationFailureEntersRecovery() async {
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.requestFailed(
             statusCode: 502, message: "bad gateway")
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(batchProvider: dictation)
@@ -240,7 +240,7 @@ struct DictationPipelineIntegrationTests {
 
     @Test("Empty dictation result skips injection")
     func emptyDictationSkipsInjection() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "   ")
+        let dictation = MockBatchProvider(stubbedText: "   ")
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -261,7 +261,7 @@ struct DictationPipelineIntegrationTests {
             focusedFieldContent: "Dear team,",
             cursorPosition: 10
         )
-        let dictation = MockBatchDictationProvider(stubbedText: "transcribed text")
+        let dictation = MockBatchProvider(stubbedText: "transcribed text")
         let (pipeline, _, _, _, injector, _) = makePipeline(
             contextProvider: MockAppContextProvider(context: ctx),
             batchProvider: dictation
@@ -277,7 +277,7 @@ struct DictationPipelineIntegrationTests {
 
     @Test("Cancel during recording skips dictation")
     func cancelDuringRecordingSkipsDictation() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "should not appear")
+        let dictation = MockBatchProvider(stubbedText: "should not appear")
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -293,7 +293,7 @@ struct DictationPipelineIntegrationTests {
 
     @Test("Multiple cycles with different transcriptions")
     func multipleCyclesWithDifferentTranscriptions() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "first")
+        let dictation = MockBatchProvider(stubbedText: "first")
         let (pipeline, _, _, _, injector, _) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -350,12 +350,12 @@ struct PipelineTranscriptBufferIntegrationTests {
     private func makePipeline(
         audioProvider: MockAudioProvider = MockAudioProvider(),
         contextProvider: MockAppContextProvider = MockAppContextProvider(),
-        batchProvider: MockBatchDictationProvider = MockBatchDictationProvider(),
+        batchProvider: MockBatchProvider = MockBatchProvider(),
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
         transcriptBuffer: TranscriptBuffer = TranscriptBuffer()
     ) -> (
-        DictationPipeline, MockAudioProvider, MockAppContextProvider, MockBatchDictationProvider,
+        DictationPipeline, MockAudioProvider, MockAppContextProvider, MockBatchProvider,
         MockTextInjector, RecordingCoordinator, TranscriptBuffer
     ) {
         let pipeline = DictationPipeline(
@@ -374,7 +374,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Successful cycle stores transcript in buffer")
     func successfulCycleStoresTranscript() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "Hello from buffer")
+        let dictation = MockBatchProvider(stubbedText: "Hello from buffer")
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -386,7 +386,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Buffer holds trimmed transcript text")
     func bufferHoldsTrimmedText() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "  trimmed text  ")
+        let dictation = MockBatchProvider(stubbedText: "  trimmed text  ")
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -398,7 +398,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Injection failure leaves transcript in buffer for recovery")
     func injectionFailurePreservesBuffer() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "preserved text")
+        let dictation = MockBatchProvider(stubbedText: "preserved text")
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
         let (pipeline, _, _, _, _, coordinator, buffer) = makePipeline(
@@ -429,7 +429,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Successful injection returns to idle, not injectionFailed")
     func successfulInjectionReturnsToIdle() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "good text")
+        let dictation = MockBatchProvider(stubbedText: "good text")
         let (pipeline, _, _, _, _, coordinator, _) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -441,7 +441,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Buffer updated across multiple cycles")
     func bufferUpdatedAcrossCycles() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "first")
+        let dictation = MockBatchProvider(stubbedText: "first")
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -458,7 +458,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Empty dictation result skips buffer store")
     func emptyDictationSkipsBuffer() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "   ")
+        let dictation = MockBatchProvider(stubbedText: "   ")
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -470,7 +470,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Dictation failure does not store in buffer")
     func dictationFailureSkipsBuffer() async {
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.requestFailed(statusCode: 500, message: "fail")
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(batchProvider: dictation)
 
@@ -496,7 +496,7 @@ struct PipelineTranscriptBufferIntegrationTests {
     func cycleAfterFailureAndReset() async {
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let dictation = MockBatchDictationProvider(stubbedText: "first attempt")
+        let dictation = MockBatchProvider(stubbedText: "first attempt")
         let coordinator = RecordingCoordinator()
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(
             batchProvider: dictation, textInjector: injector, coordinator: coordinator)
@@ -527,7 +527,7 @@ struct PipelineTranscriptBufferIntegrationTests {
 
     @Test("Consume clears buffer after recovery paste")
     func consumeClearsBuffer() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "to be consumed")
+        let dictation = MockBatchProvider(stubbedText: "to be consumed")
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
         let (pipeline, _, _, _, _, _, buffer) = makePipeline(

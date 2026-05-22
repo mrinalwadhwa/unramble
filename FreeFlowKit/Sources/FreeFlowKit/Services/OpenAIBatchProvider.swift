@@ -8,7 +8,7 @@ import Foundation
 /// regex substitution, skip-heuristic, and (if a chat client is provided)
 /// LLM refinement. When no polish chat client is provided, the raw
 /// transcript is returned after regex preprocessing only.
-public struct OpenAIDictationProvider: BatchDictationProviding {
+public struct OpenAIBatchProvider: BatchDictationProviding {
 
     private let apiKeyProvider: @Sendable () -> String
     private let model: String

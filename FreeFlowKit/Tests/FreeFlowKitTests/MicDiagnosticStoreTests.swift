@@ -559,9 +559,9 @@ struct MicDiagnosticStoreTests {
         /// verify entries are recorded for each dictation outcome.
         private func makePipeline(
             audioProvider: MockAudioProvider = MockAudioProvider(),
-            batchProvider: MockBatchDictationProvider = MockBatchDictationProvider(),
+            batchProvider: MockBatchProvider = MockBatchProvider(),
             store: MicDiagnosticStore = MicDiagnosticStore()
-        ) -> (DictationPipeline, MockAudioProvider, MockBatchDictationProvider, MicDiagnosticStore) {
+        ) -> (DictationPipeline, MockAudioProvider, MockBatchProvider, MicDiagnosticStore) {
             let pipeline = DictationPipeline(
                 audioProvider: audioProvider,
                 contextProvider: MockAppContextProvider(),
@@ -580,7 +580,7 @@ struct MicDiagnosticStoreTests {
             audio.stubbedAmbientRMS = 0.001
             audio.stubbedMicProximity = .nearField
 
-            let dictation = MockBatchDictationProvider(stubbedText: "Hello world")
+            let dictation = MockBatchProvider(stubbedText: "Hello world")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
@@ -639,7 +639,7 @@ struct MicDiagnosticStoreTests {
             audio.stubbedMicProximity = .nearField
 
             // Server returns whitespace-only text.
-            let dictation = MockBatchDictationProvider(stubbedText: "   ")
+            let dictation = MockBatchProvider(stubbedText: "   ")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
@@ -665,7 +665,7 @@ struct MicDiagnosticStoreTests {
             audio.stubbedAmbientRMS = 0.001
             audio.stubbedMicProximity = .nearField
 
-            let dictation = MockBatchDictationProvider(stubbedText: "First")
+            let dictation = MockBatchProvider(stubbedText: "First")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
@@ -699,7 +699,7 @@ struct MicDiagnosticStoreTests {
             audio.stubbedAmbientRMS = 0.001
             audio.stubbedMicProximity = .farField
 
-            let dictation = MockBatchDictationProvider(stubbedText: "test")
+            let dictation = MockBatchProvider(stubbedText: "test")
             let store = MicDiagnosticStore()
             let (pipeline, _, _, _) = makePipeline(
                 audioProvider: audio,
@@ -726,7 +726,7 @@ struct MicDiagnosticStoreTests {
             let pipeline = DictationPipeline(
                 audioProvider: MockAudioProvider(),
                 contextProvider: MockAppContextProvider(),
-                batchProvider: MockBatchDictationProvider(stubbedText: "safe"),
+                batchProvider: MockBatchProvider(stubbedText: "safe"),
                 textInjector: MockTextInjector(),
                 coordinator: RecordingCoordinator()
             )

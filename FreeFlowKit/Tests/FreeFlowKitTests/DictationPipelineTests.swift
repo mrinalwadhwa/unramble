@@ -9,13 +9,13 @@ final class DictationPipelineTests: XCTestCase {
     private func makePipeline(
         audioProvider: MockAudioProvider = MockAudioProvider(),
         contextProvider: MockAppContextProvider = MockAppContextProvider(),
-        batchProvider: MockBatchDictationProvider = MockBatchDictationProvider(),
+        batchProvider: MockBatchProvider = MockBatchProvider(),
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
         transcriptBuffer: TranscriptBuffer? = nil,
         onSessionExpired: (@Sendable () -> Void)? = nil
     ) -> (
-        DictationPipeline, MockAudioProvider, MockAppContextProvider, MockBatchDictationProvider,
+        DictationPipeline, MockAudioProvider, MockAppContextProvider, MockBatchProvider,
         MockTextInjector, RecordingCoordinator
     ) {
         let pipeline = DictationPipeline(
@@ -91,7 +91,7 @@ final class DictationPipelineTests: XCTestCase {
     }
 
     func testInjectedTextMatchesDictationOutput() async {
-        let dictation = MockBatchDictationProvider(stubbedText: "Hello from dictation")
+        let dictation = MockBatchProvider(stubbedText: "Hello from dictation")
         let (pipeline, _, _, _, injector, _) = makePipeline(batchProvider: dictation)
 
         await pipeline.activate()
@@ -118,7 +118,7 @@ final class DictationPipelineTests: XCTestCase {
             bitsPerSample: 16
         )
         let audio = MockAudioProvider(stubbedBuffer: buffer)
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let (pipeline, _, _, _, injector, _) = makePipeline(
             audioProvider: audio, batchProvider: dictation)
 
@@ -154,7 +154,7 @@ final class DictationPipelineTests: XCTestCase {
             windowTitle: "New Message"
         )
         let contextProvider = MockAppContextProvider(context: stubbedContext)
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let (pipeline, _, _, _, _, _) = makePipeline(
             contextProvider: contextProvider, batchProvider: dictation)
 
@@ -331,7 +331,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testEmptyAudioBufferSkipsDictationAndResetsToIdle() async {
         let audio = MockAudioProvider(stubbedBuffer: .empty)
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(
             audioProvider: audio, batchProvider: dictation)
 
@@ -353,7 +353,7 @@ final class DictationPipelineTests: XCTestCase {
         let context = MockAppContextProvider()
         let injector = MockTextInjector()
         let coordinator = RecordingCoordinator()
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: context,
@@ -419,7 +419,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testSuccessfulCycleStoresTranscriptInBuffer() async {
         let buffer = TranscriptBuffer()
-        let dictation = MockBatchDictationProvider(stubbedText: "Hello from buffer")
+        let dictation = MockBatchProvider(stubbedText: "Hello from buffer")
         let (pipeline, _, _, _, _, _) = makePipeline(
             batchProvider: dictation, transcriptBuffer: buffer)
 
@@ -432,7 +432,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testTranscriptBufferUpdatedOnEachCycle() async {
         let buffer = TranscriptBuffer()
-        let dictation = MockBatchDictationProvider(stubbedText: "first")
+        let dictation = MockBatchProvider(stubbedText: "first")
         let (pipeline, _, _, _, _, _) = makePipeline(
             batchProvider: dictation, transcriptBuffer: buffer)
 
@@ -450,7 +450,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testEmptyDictationResultDoesNotStoreInBuffer() async {
         let buffer = TranscriptBuffer()
-        let dictation = MockBatchDictationProvider(stubbedText: "   ")
+        let dictation = MockBatchProvider(stubbedText: "   ")
         let (pipeline, _, _, _, _, _) = makePipeline(
             batchProvider: dictation, transcriptBuffer: buffer)
 
@@ -463,7 +463,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testDictationFailureDoesNotStoreInBuffer() async {
         let buffer = TranscriptBuffer()
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.requestFailed(statusCode: 500, message: "fail")
         let (pipeline, _, _, _, _, _) = makePipeline(
             batchProvider: dictation, transcriptBuffer: buffer)
@@ -493,7 +493,7 @@ final class DictationPipelineTests: XCTestCase {
         let buffer = TranscriptBuffer()
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let dictation = MockBatchDictationProvider(stubbedText: "dictated text")
+        let dictation = MockBatchProvider(stubbedText: "dictated text")
         let (pipeline, _, _, _, _, coordinator) = makePipeline(
             batchProvider: dictation, textInjector: injector, transcriptBuffer: buffer)
 
@@ -510,7 +510,7 @@ final class DictationPipelineTests: XCTestCase {
         let buffer = TranscriptBuffer()
         let injector = MockTextInjector()
         injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let dictation = MockBatchDictationProvider(stubbedText: "preserved text")
+        let dictation = MockBatchProvider(stubbedText: "preserved text")
         let (pipeline, _, _, _, _, _) = makePipeline(
             batchProvider: dictation, textInjector: injector, transcriptBuffer: buffer)
 
@@ -598,7 +598,7 @@ final class DictationPipelineTests: XCTestCase {
         )
 
         let audio = MockAudioProvider(stubbedBuffer: silentBuffer)
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(
             audioProvider: audio, batchProvider: dictation)
 
@@ -614,7 +614,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testNonSilentAudioProceedsToDictation() async {
         // The default MockAudioProvider now produces non-silent audio.
-        let dictation = MockBatchDictationProvider(stubbedText: "Hello")
+        let dictation = MockBatchProvider(stubbedText: "Hello")
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(
             batchProvider: dictation)
 
@@ -645,7 +645,7 @@ final class DictationPipelineTests: XCTestCase {
         )
 
         let audio = MockAudioProvider(stubbedBuffer: quietBuffer)
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         // Use a high threshold so the quiet audio is rejected.
@@ -684,7 +684,7 @@ final class DictationPipelineTests: XCTestCase {
         )
 
         let audio = MockAudioProvider(stubbedBuffer: quietBuffer)
-        let dictation = MockBatchDictationProvider(stubbedText: "whisper")
+        let dictation = MockBatchProvider(stubbedText: "whisper")
         let coordinator = RecordingCoordinator()
 
         // Use a very low threshold so the quiet audio passes through.
@@ -732,7 +732,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.004
         audio.stubbedAmbientRMS = 0.001
 
-        let dictation = MockBatchDictationProvider(stubbedText: "quiet speech")
+        let dictation = MockBatchProvider(stubbedText: "quiet speech")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -775,7 +775,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.003
         audio.stubbedAmbientRMS = 0.0025
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -818,7 +818,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.003
         audio.stubbedAmbientRMS = 0  // No calibration
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         // Fixed threshold 0.005 rejects peakRMS 0.003.
@@ -863,7 +863,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.0003
         audio.stubbedAmbientRMS = 0.0001
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -892,7 +892,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.015
         audio.stubbedAmbientRMS = 0.003
 
-        let dictation = MockBatchDictationProvider(stubbedText: "coffee shop speech")
+        let dictation = MockBatchProvider(stubbedText: "coffee shop speech")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -924,7 +924,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.003
         audio.stubbedAmbientRMS = 0.002
 
-        let dictation = MockBatchDictationProvider(stubbedText: "quiet built-in mic speech")
+        let dictation = MockBatchProvider(stubbedText: "quiet built-in mic speech")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -955,7 +955,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.0007
         audio.stubbedAmbientRMS = 0.0005
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -986,7 +986,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.004
         audio.stubbedAmbientRMS = 0.005  // high ambient from fan noise
 
-        let dictation = MockBatchDictationProvider(stubbedText: "speech near fan")
+        let dictation = MockBatchProvider(stubbedText: "speech near fan")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1016,7 +1016,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.0011
         audio.stubbedAmbientRMS = 0.001
 
-        let dictation = MockBatchDictationProvider(stubbedText: "whisper")
+        let dictation = MockBatchProvider(stubbedText: "whisper")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1045,7 +1045,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.001
         audio.stubbedAmbientRMS = 0.0008
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1082,7 +1082,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.004
         audio.stubbedAmbientRMS = 0.004
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1120,7 +1120,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.003
         audio.stubbedAmbientRMS = 0.002
 
-        let dictation = MockBatchDictationProvider(stubbedText: "hello world")
+        let dictation = MockBatchProvider(stubbedText: "hello world")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1158,7 +1158,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.009
         audio.stubbedAmbientRMS = 0.014
 
-        let dictation = MockBatchDictationProvider(stubbedText: "whispered with airpods")
+        let dictation = MockBatchProvider(stubbedText: "whispered with airpods")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1197,7 +1197,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.012
         audio.stubbedAmbientRMS = 0.014
 
-        let dictation = MockBatchDictationProvider(stubbedText: "whisper saved by cap")
+        let dictation = MockBatchProvider(stubbedText: "whisper saved by cap")
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1229,7 +1229,7 @@ final class DictationPipelineTests: XCTestCase {
         audio.stubbedPeakRMS = 0.002
         audio.stubbedAmbientRMS = 0.002
 
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
         let pipeline = DictationPipeline(
@@ -1254,7 +1254,7 @@ final class DictationPipelineTests: XCTestCase {
     // MARK: - Session expiry (401 handling)
 
     func testBatchDictation401TransitionsToSessionExpired() async {
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.authenticationFailed
         let coordinator = RecordingCoordinator()
 
@@ -1277,7 +1277,7 @@ final class DictationPipelineTests: XCTestCase {
     }
 
     func testSessionExpiredDoesNotInjectText() async {
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.authenticationFailed
         let injector = MockTextInjector()
         let (pipeline, _, _, _, _, _) = makePipeline(
@@ -1296,7 +1296,7 @@ final class DictationPipelineTests: XCTestCase {
 
     func testSessionExpiredDoesNotStoreInBuffer() async {
         let buffer = TranscriptBuffer()
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.authenticationFailed
         let (pipeline, _, _, _, _, _) = makePipeline(
             batchProvider: dictation,
@@ -1312,7 +1312,7 @@ final class DictationPipelineTests: XCTestCase {
     }
 
     func testNon401ErrorDoesNotTriggerSessionExpired() async {
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.requestFailed(statusCode: 500, message: "fail")
         let coordinator = RecordingCoordinator()
 
@@ -1415,14 +1415,14 @@ final class DictationPipelineTests: XCTestCase {
         audio.enablePCMStream = true
         audio.stubbedPeakRMS = 0.0
 
-        let streaming = MockStreamingDictationProvider()
+        let streaming = MockStreamingProvider()
         streaming.stubbedText = "Hello world."
 
         let coordinator = RecordingCoordinator()
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            batchProvider: MockBatchDictationProvider(),
+            batchProvider: MockBatchProvider(),
             textInjector: MockTextInjector(),
             coordinator: coordinator,
             transcriptBuffer: nil,
@@ -1447,7 +1447,7 @@ final class DictationPipelineTests: XCTestCase {
     // MARK: - Session expired callback
 
     func testSessionExpiredCallbackInvokedOn401() async {
-        let dictation = MockBatchDictationProvider()
+        let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.authenticationFailed
 
         let expectation = XCTestExpectation(description: "session expired")

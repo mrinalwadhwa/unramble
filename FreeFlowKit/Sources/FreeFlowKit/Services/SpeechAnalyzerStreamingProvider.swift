@@ -41,7 +41,7 @@ public final class SpeechAnalyzerStreamingProvider: StreamingDictationProviding,
     ) {
         self.polishChatClient = polishChatClient
         self.polishModel = polishModel
-        self.locale = SpeechAnalyzerDictationProvider.resolveLocale(
+        self.locale = SpeechAnalyzerBatchProvider.resolveLocale(
             language: language)
     }
 
