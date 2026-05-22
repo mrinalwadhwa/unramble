@@ -3,9 +3,8 @@ import Foundation
 /// On-device streaming dictation using a local STT engine.
 ///
 /// Accumulate PCM audio chunks during recording, then batch-transcribe
-/// via the `LocalSTTEngine` when the session ends. Same approach as
-/// `SpeechAnalyzerStreamingProvider` — the engine does not support
-/// true streaming, so audio is buffered and transcribed on
+/// via the `LocalSTTEngine` when the session ends. The engine does not
+/// support true streaming, so audio is buffered and transcribed on
 /// `finishStreaming()`.
 public final class LocalModelStreamingProvider: StreamingDictationProviding,
     @unchecked Sendable

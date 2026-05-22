@@ -28,7 +28,7 @@ public actor DictationPipeline: PipelineProviding {
 
     private let audioProvider: AudioProviding
     private let contextProvider: AppContextProviding
-    private let dictationProvider: DictationProviding
+    private let dictationProvider: DictationProviding?
     private let streamingProvider: StreamingDictationProviding?
     private let textInjector: TextInjecting
     private let coordinator: RecordingCoordinator
@@ -161,7 +161,7 @@ public actor DictationPipeline: PipelineProviding {
     public init(
         audioProvider: AudioProviding,
         contextProvider: AppContextProviding,
-        dictationProvider: DictationProviding,
+        dictationProvider: DictationProviding? = nil,
         textInjector: TextInjecting,
         coordinator: RecordingCoordinator,
         transcriptBuffer: TranscriptBuffer? = nil,
@@ -744,222 +744,68 @@ public actor DictationPipeline: PipelineProviding {
                 context = .empty
             }
 
-            var dictatedText: String = ""
-
+            // Resolve the transcript from the appropriate provider.
+            let dictatedText: String?
             if useStreaming, let streaming = streamingProvider {
-                let chunksAlreadyInjected = chunkInjectedFlag?.isSet ?? false
+                let chunksInjected = chunkInjectedFlag?.isSet ?? false
                 chunkInjectedFlag = nil
-
-                if chunksAlreadyInjected {
-                    // Intermediate chunks have already been injected
-                    // at the cursor. Just finish the session and inject
-                    // the final tail chunk. No backup race — it would
-                    // re-transcribe the full audio and double-inject.
-                    Log.debug("[Pipeline] finishing streaming session (chunks injected, no race)")
-                    do {
-                        let text = try await streaming.finishStreaming()
-                        dictatedText = text
-                    } catch {
-                        Log.debug("[Pipeline] finishStreaming failed: \(error), attempting tail recovery")
-                        // Extract the tail audio (uncommitted portion)
-                        // and try batch transcription as a fallback.
-                        let tailWAV = Self.extractRecoveryWAV(
-                            from: audioBuffer,
-                            uncommittedDuration: streaming.uncommittedAudioDuration)
-
-                        if let tailWAV {
-                            var recovered = false
-                            for attempt in 1...3 {
-                                if attempt > 1 {
-                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                                }
-                                guard !Task.isCancelled else { break }
-                                do {
-                                    let text = try await dictationProvider.dictate(
-                                        audio: tailWAV, context: context)
-                                    let trimmed = text.trimmingCharacters(
-                                        in: .whitespacesAndNewlines)
-                                    if !trimmed.isEmpty {
-                                        dictatedText = trimmed
-                                        recovered = true
-                                        break
-                                    }
-                                } catch {
-                                    Log.debug(
-                                        "[Pipeline] Tail recovery attempt \(attempt) failed: \(error)")
-                                }
-                            }
-                            if !recovered {
-                                recoveryBox.set(audio: tailWAV, context: context)
-                                await coordinator.failDictation()
-                                return
-                            }
-                        } else {
-                            await coordinator.reset()
-                            return
-                        }
-                    }
-                } else if localMode {
-                    // Local mode: use streaming result directly.
-                    // No batch race — on-device providers cannot run
-                    // concurrent recognition sessions.
-                    Log.debug("[Pipeline] finishing streaming session (local, no race)")
-                    do {
-                        let text = try await streaming.finishStreaming()
-                        dictatedText = text
-                    } catch {
-                        Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
-                        await streaming.cancelStreaming()
-                        recoveryBox.set(audio: audioBuffer.data, context: context)
-                        await coordinator.failDictation()
-                        return
-                    }
+                if localMode {
+                    dictatedText = await finishLocalDictation(
+                        streaming: streaming,
+                        audioBuffer: audioBuffer,
+                        context: context,
+                        coordinator: coordinator,
+                        recoveryBox: recoveryBox)
+                } else if let dictationProvider {
+                    dictatedText = await finishCloudDictation(
+                        streaming: streaming,
+                        chunksAlreadyInjected: chunksInjected,
+                        audioBuffer: audioBuffer,
+                        context: context,
+                        dictationProvider: dictationProvider,
+                        minimumAudioDuration: minimumAudioDuration,
+                        silenceThreshold: postRecordThreshold,
+                        coordinator: coordinator,
+                        recoveryBox: recoveryBox)
                 } else {
-                    // No chunks fired yet (short session). Finish
-                    // streaming first; fall back to batch HTTP on failure.
-                    Log.debug("[Pipeline] finishing streaming session")
-
-                    var text: String?
-                    do {
-                        let result = try await streaming.finishStreaming()
-                        let trimmed = result.trimmingCharacters(
-                            in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            text = result
-                            Log.debug("[Pipeline] Streaming completed")
-                        }
-                    } catch {
-                        Log.debug("[Pipeline] Streaming failed: \(error)")
-                    }
-
-                    // Clean up the streaming session so the provider
-                    // is ready for the next activate() cycle.
-                    await streaming.cancelStreaming()
-
-                    // Fall back to batch HTTP if streaming failed or
-                    // returned empty.
-                    if text == nil {
-                        Log.debug("[Pipeline] Falling back to batch HTTP")
-                        text = await batchDictate(
-                            audioBuffer: audioBuffer,
-                            context: context,
-                            dictationProvider: dictationProvider,
-                            minimumAudioDuration: minimumAudioDuration,
-                            silenceThreshold: postRecordThreshold,
-                            coordinator: coordinator,
-                            recoveryBox: recoveryBox
-                        )
-                    }
-
-                    guard let finalText = text else {
-                        Log.debug("[Pipeline] Both streaming and batch failed")
-                        return
-                    }
-                    dictatedText = finalText
+                    Log.debug("[Pipeline] No batch provider, cannot finish cloud dictation")
+                    await coordinator.reset()
+                    dictatedText = nil
                 }
-            } else {
-                // Batch mode: send the complete audio buffer to /dictate.
+            } else if let dictationProvider {
                 Log.debug("[Pipeline] batch mode, sending to dictation service")
-
-                let batchResult = await batchDictate(
+                dictatedText = await batchDictate(
                     audioBuffer: audioBuffer,
                     context: context,
                     dictationProvider: dictationProvider,
                     minimumAudioDuration: minimumAudioDuration,
                     silenceThreshold: postRecordThreshold,
                     coordinator: coordinator,
-                    recoveryBox: recoveryBox
-                )
-                guard let text = batchResult else { return }
-                dictatedText = text
+                    recoveryBox: recoveryBox)
+            } else {
+                Log.debug("[Pipeline] No dictation provider available")
+                await coordinator.reset()
+                dictatedText = nil
             }
+
+            guard let dictatedText else { return }
 
             let t4 = CFAbsoluteTimeGetCurrent()
-            Log.debug("[Pipeline] dictation returned, injecting text")
 
-            // Skip injection for empty or whitespace-only text.
-            let finalText = dictatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !finalText.isEmpty else {
-                Log.debug("[Pipeline] Empty dictation result, skipping injection")
-                if let store = micDiagnosticStore {
-                    await store.record(
-                        MicDiagnosticEntry(
-                            deviceName: audioProvider.deviceName,
-                            proximity: audioProvider.micProximity.rawValue,
-                            ambientRMS: audioProvider.ambientRMS,
-                            peakRMS: audioProvider.peakRMS,
-                            gain: audioProvider.gainFactor,
-                            threshold: postRecordThreshold,
-                            duration: audioBuffer.duration,
-                            latency: CFAbsoluteTimeGetCurrent() - t0,
-                            result: "empty"
-                        ))
-                }
-                await coordinator.reset()
-                return
-            }
-
-            guard !Task.isCancelled else {
-                await coordinator.reset()
-                return
-            }
-
-            // Store the transcript before injection so it survives injection
-            // failure and is available for no-target recovery or re-paste.
-            await transcriptBuffer?.store(finalText)
-
-            // Transition to injecting.
-            let injecting = await coordinator.startInjecting()
-            guard injecting else {
-                await coordinator.reset()
-                return
-            }
-
-            // Inject the composed text.
-            do {
-                try await textInjector.inject(text: finalText, into: context)
-            } catch {
-                Log.debug("[Pipeline] Text injection failed: \(error)")
-                // Signal injection failure so the HUD shows no-target recovery.
-                // The transcript stays in the buffer for re-paste.
-                await coordinator.failInjection()
-                return
-            }
-
-            let t5 = CFAbsoluteTimeGetCurrent()
-
-            // Log timing for each pipeline phase.
-            let fmt = { (dt: Double) -> String in String(format: "%.2fs", dt) }
-            let audioKB = String(format: "%.0f", Double(audioBuffer.data.count) / 1024.0)
-            let mode = useStreaming ? "streaming" : "batch"
-            Log.debug(
-                "[Pipeline] Timing:"
-                    + " stop=\(fmt(t1 - t0))"
-                    + " dictate=\(fmt(t4 - t1))"
-                    + " inject=\(fmt(t5 - t4))"
-                    + " total=\(fmt(t5 - t0))"
-                    + " e2e=\(fmt(t5 - completeEnteredAt))"
-                    + " audio=\(audioKB)KB/\(fmt(audioBuffer.duration))"
-                    + " mode=\(mode)"
-            )
-
-            if let store = micDiagnosticStore {
-                await store.record(
-                    MicDiagnosticEntry(
-                        deviceName: audioProvider.deviceName,
-                        proximity: audioProvider.micProximity.rawValue,
-                        ambientRMS: audioProvider.ambientRMS,
-                        peakRMS: audioProvider.peakRMS,
-                        gain: audioProvider.gainFactor,
-                        threshold: postRecordThreshold,
-                        duration: audioBuffer.duration,
-                        latency: t5 - t0,
-                        result: "ok"
-                    ))
-            }
-
-            // Successful injection — return to idle.
-            await coordinator.finishInjecting()
+            // Inject the result.
+            await injectResult(
+                dictatedText,
+                context: context,
+                audioBuffer: audioBuffer,
+                coordinator: coordinator,
+                textInjector: textInjector,
+                transcriptBuffer: transcriptBuffer,
+                micDiagnosticStore: micDiagnosticStore,
+                audioProvider: audioProvider,
+                silenceThreshold: postRecordThreshold,
+                t0: t0, t1: t1, t4: t4,
+                completeEnteredAt: completeEnteredAt,
+                mode: useStreaming ? "streaming" : "batch")
         }
 
         self.pipelineTask = task
@@ -1053,7 +899,239 @@ public actor DictationPipeline: PipelineProviding {
         await coordinator.reset()
     }
 
-    // MARK: - Batch Dictation Helper
+    // MARK: - Local Dictation
+
+    /// Finish a local streaming session.
+    ///
+    /// Transcribe and polish on-device. No batch fallback — local
+    /// providers cannot run concurrent sessions. Return the polished
+    /// text, or nil on failure (coordinator already updated).
+    private func finishLocalDictation(
+        streaming: StreamingDictationProviding,
+        audioBuffer: AudioBuffer,
+        context: AppContext,
+        coordinator: RecordingCoordinator,
+        recoveryBox: RecoveryBox
+    ) async -> String? {
+        Log.debug("[Pipeline] finishing streaming session (local)")
+        do {
+            let text = try await streaming.finishStreaming()
+            return text
+        } catch {
+            Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
+            await streaming.cancelStreaming()
+            recoveryBox.set(audio: audioBuffer.data, context: context)
+            await coordinator.failDictation()
+            return nil
+        }
+    }
+
+    // MARK: - Cloud Dictation
+
+    /// Finish a cloud streaming session.
+    ///
+    /// Handle three cases: chunks already injected (tail-only finish),
+    /// no chunks yet (finish with batch fallback), or streaming failure
+    /// (batch recovery). Return the final text, or nil on failure.
+    private func finishCloudDictation(
+        streaming: StreamingDictationProviding,
+        chunksAlreadyInjected: Bool,
+        audioBuffer: AudioBuffer,
+        context: AppContext,
+        dictationProvider: DictationProviding,
+        minimumAudioDuration: TimeInterval,
+        silenceThreshold: Float,
+        coordinator: RecordingCoordinator,
+        recoveryBox: RecoveryBox
+    ) async -> String? {
+        if chunksAlreadyInjected {
+            return await finishCloudWithChunks(
+                streaming: streaming,
+                audioBuffer: audioBuffer,
+                context: context,
+                dictationProvider: dictationProvider,
+                coordinator: coordinator,
+                recoveryBox: recoveryBox)
+        }
+
+        // No chunks fired yet (short session). Finish streaming; fall
+        // back to batch HTTP on failure.
+        Log.debug("[Pipeline] finishing streaming session (cloud)")
+        var text: String?
+        do {
+            let result = try await streaming.finishStreaming()
+            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                text = result
+                Log.debug("[Pipeline] Streaming completed")
+            }
+        } catch {
+            Log.debug("[Pipeline] Streaming failed: \(error)")
+        }
+
+        await streaming.cancelStreaming()
+
+        if text == nil {
+            Log.debug("[Pipeline] Falling back to batch HTTP")
+            text = await batchDictate(
+                audioBuffer: audioBuffer,
+                context: context,
+                dictationProvider: dictationProvider,
+                minimumAudioDuration: minimumAudioDuration,
+                silenceThreshold: silenceThreshold,
+                coordinator: coordinator,
+                recoveryBox: recoveryBox)
+        }
+
+        if text == nil {
+            Log.debug("[Pipeline] Both streaming and batch failed")
+        }
+        return text
+    }
+
+    /// Finish a cloud session where intermediate chunks were already
+    /// injected. Only the tail (uncommitted audio) needs transcription.
+    /// On failure, attempt batch recovery of the tail audio.
+    private func finishCloudWithChunks(
+        streaming: StreamingDictationProviding,
+        audioBuffer: AudioBuffer,
+        context: AppContext,
+        dictationProvider: DictationProviding,
+        coordinator: RecordingCoordinator,
+        recoveryBox: RecoveryBox
+    ) async -> String? {
+        Log.debug("[Pipeline] finishing streaming session (chunks injected)")
+        do {
+            return try await streaming.finishStreaming()
+        } catch {
+            Log.debug("[Pipeline] finishStreaming failed: \(error), attempting tail recovery")
+            let tailWAV = Self.extractRecoveryWAV(
+                from: audioBuffer,
+                uncommittedDuration: streaming.uncommittedAudioDuration)
+
+            guard let tailWAV else {
+                await coordinator.reset()
+                return nil
+            }
+
+            for attempt in 1...3 {
+                if attempt > 1 {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+                guard !Task.isCancelled else { break }
+                do {
+                    let text = try await dictationProvider.dictate(
+                        audio: tailWAV, context: context)
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { return trimmed }
+                } catch {
+                    Log.debug("[Pipeline] Tail recovery attempt \(attempt) failed: \(error)")
+                }
+            }
+
+            recoveryBox.set(audio: tailWAV, context: context)
+            await coordinator.failDictation()
+            return nil
+        }
+    }
+
+    // MARK: - Result Injection
+
+    /// Inject polished text at the cursor.
+    ///
+    /// Handle empty results, store transcript, transition state,
+    /// inject via accessibility API, and log timing.
+    private func injectResult(
+        _ text: String,
+        context: AppContext,
+        audioBuffer: AudioBuffer,
+        coordinator: RecordingCoordinator,
+        textInjector: TextInjecting,
+        transcriptBuffer: TranscriptBuffer?,
+        micDiagnosticStore: MicDiagnosticStore?,
+        audioProvider: AudioProviding,
+        silenceThreshold: Float,
+        t0: CFAbsoluteTime, t1: CFAbsoluteTime, t4: CFAbsoluteTime,
+        completeEnteredAt: CFAbsoluteTime,
+        mode: String
+    ) async {
+        Log.debug("[Pipeline] dictation returned, injecting text")
+
+        let finalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !finalText.isEmpty else {
+            Log.debug("[Pipeline] Empty dictation result, skipping injection")
+            if let store = micDiagnosticStore {
+                await store.record(
+                    MicDiagnosticEntry(
+                        deviceName: audioProvider.deviceName,
+                        proximity: audioProvider.micProximity.rawValue,
+                        ambientRMS: audioProvider.ambientRMS,
+                        peakRMS: audioProvider.peakRMS,
+                        gain: audioProvider.gainFactor,
+                        threshold: silenceThreshold,
+                        duration: audioBuffer.duration,
+                        latency: CFAbsoluteTimeGetCurrent() - t0,
+                        result: "empty"
+                    ))
+            }
+            await coordinator.reset()
+            return
+        }
+
+        guard !Task.isCancelled else {
+            await coordinator.reset()
+            return
+        }
+
+        await transcriptBuffer?.store(finalText)
+
+        let injecting = await coordinator.startInjecting()
+        guard injecting else {
+            await coordinator.reset()
+            return
+        }
+
+        do {
+            try await textInjector.inject(text: finalText, into: context)
+        } catch {
+            Log.debug("[Pipeline] Text injection failed: \(error)")
+            await coordinator.failInjection()
+            return
+        }
+
+        let t5 = CFAbsoluteTimeGetCurrent()
+        let fmt = { (dt: Double) -> String in String(format: "%.2fs", dt) }
+        let audioKB = String(format: "%.0f", Double(audioBuffer.data.count) / 1024.0)
+        Log.debug(
+            "[Pipeline] Timing:"
+                + " stop=\(fmt(t1 - t0))"
+                + " dictate=\(fmt(t4 - t1))"
+                + " inject=\(fmt(t5 - t4))"
+                + " total=\(fmt(t5 - t0))"
+                + " e2e=\(fmt(t5 - completeEnteredAt))"
+                + " audio=\(audioKB)KB/\(fmt(audioBuffer.duration))"
+                + " mode=\(mode)"
+        )
+
+        if let store = micDiagnosticStore {
+            await store.record(
+                MicDiagnosticEntry(
+                    deviceName: audioProvider.deviceName,
+                    proximity: audioProvider.micProximity.rawValue,
+                    ambientRMS: audioProvider.ambientRMS,
+                    peakRMS: audioProvider.peakRMS,
+                    gain: audioProvider.gainFactor,
+                    threshold: silenceThreshold,
+                    duration: audioBuffer.duration,
+                    latency: t5 - t0,
+                    result: "ok"
+                ))
+        }
+
+        await coordinator.finishInjecting()
+    }
+
+    // MARK: - Batch Dictation
 
     /// Run the batch dictation path: silence gate, then POST to /dictate.
     ///
@@ -1162,7 +1240,8 @@ public actor DictationPipeline: PipelineProviding {
     /// the user can try again or dismiss.
     public func retryDictation() async {
         guard let audio = recoveryAudio,
-            let context = recoveryContext
+            let context = recoveryContext,
+            let dictationProvider
         else {
             await coordinator.reset()
             return

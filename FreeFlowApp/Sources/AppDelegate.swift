@@ -272,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioDeviceProvider.setAudioCaptureProvider(audioProvider)
 
         let language = Settings.shared.language.languageCode
-        let dictationProvider: any DictationProviding
+        let dictationProvider: (any DictationProviding)?
         let streamingProvider: (any StreamingDictationProviding)?
         let onSessionExpired: (@Sendable () -> Void)?
 
@@ -302,8 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 adapterPath: adapterPath)
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
-            dictationProvider = LocalModelDictationProvider(
-                sttEngine: sttEngine, polishChatClient: polisher)
+            dictationProvider = nil
             streamingProvider = LocalModelStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher)
             onSessionExpired = nil

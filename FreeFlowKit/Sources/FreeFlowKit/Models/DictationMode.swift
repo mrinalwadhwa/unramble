@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(FoundationModels)
-import FoundationModels
-#endif
-
 /// Whether dictation uses cloud APIs or on-device processing.
 ///
 /// Cloud mode sends audio to OpenAI for transcription and polishing.
@@ -27,28 +23,12 @@ public enum DictationMode: String, CaseIterable, Sendable {
 
     /// Whether on-device mode is available on this system.
     ///
-    /// True when Apple Intelligence is available (macOS 26+), or when
-    /// running on Apple Silicon (macOS 14+) where open-source models
-    /// can be used.
+    /// Requires Apple Silicon (macOS 14+) for MLX model inference.
     public static var isLocalAvailable: Bool {
-        if isAppleIntelligenceAvailable { return true }
         #if arch(arm64)
         return true
         #else
         return false
         #endif
-    }
-
-    /// Whether Apple Intelligence is available for the local backend.
-    ///
-    /// When true, the local path uses SpeechAnalyzer + Foundation
-    /// Models. When false, it falls back to Parakeet + MLX.
-    public static var isAppleIntelligenceAvailable: Bool {
-        #if canImport(FoundationModels)
-        if #available(macOS 26, *) {
-            return SystemLanguageModel.default.availability == .available
-        }
-        #endif
-        return false
     }
 }
