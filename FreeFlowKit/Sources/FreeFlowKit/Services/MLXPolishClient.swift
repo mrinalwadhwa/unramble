@@ -52,7 +52,7 @@ public struct MLXPolishClient: PolishChatClient {
         while let start = result.range(of: "<think>"),
               let end = result.range(of: "</think>", range: start.upperBound..<result.endIndex)
         {
-            result.removeSubrange(start.lowerBound...end.upperBound)
+            result.removeSubrange(start.lowerBound..<end.upperBound)
         }
         // Also strip a leading <think> without a closing tag (truncated).
         if let start = result.range(of: "<think>") {

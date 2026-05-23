@@ -1157,3 +1157,131 @@
   input: we're switching from redis to memcached for session storage
   accepted:
   - We're switching from Redis to Memcached for session storage.
+# --- Real Parakeet multi-sentence tests ---
+# These use actual Parakeet transcription output as input.
+# The model must handle punctuated, capitalized, multi-sentence text.
+- category: parakeet-backtrack
+  input: The deployment is scheduled for Thursday. No wait Friday at 3 p.m. Please make sure all the tests pass before then.
+  accepted:
+  - The deployment is scheduled for Friday at 3 PM. Please make sure all the tests pass before then.
+  - The deployment is scheduled for Friday at 3 p.m. Please make sure all the tests pass before then.
+- category: parakeet-preserve
+  input: The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five minute timeout.
+  accepted:
+  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
+  - The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+- category: parakeet-false-start
+  input: We should probably actually know let me think rethink this. The best approach would be to add a retry mechanism with exponential back off. That way we It won't overwhelm the server during peak hours.
+  accepted:
+  - The best approach would be to add a retry mechanism with exponential backoff. That way it won't overwhelm the server during peak hours.
+- category: parakeet-backtrack
+  input: The timeout should be set to 30 uh no 60 seconds and we should add a health check-in point that runs every five minutes.
+  accepted:
+  - The timeout should be set to 60 seconds. We should add a health check-in point that runs every 5 minutes.
+  - The timeout should be set to 60 seconds, and we should add a health check-in point that runs every 5 minutes.
+  - The timeout should be set to 60 seconds and we should add a health check-in point that runs every 5 minutes.
+- category: parakeet-correction
+  input: The sour response time is about 500 milliseconds. Um I mean five seconds. That's way too slow for a real-time application. We need to get it under two hundred milliseconds.
+  accepted:
+  - The sour response time is about 5 seconds. That's way too slow for a real-time application. We need to get it under 200 milliseconds.
+- category: parakeet-preserve
+  input: The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
+  accepted:
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer and they're looking into it.
+  - The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer and they're looking into it.
+- category: parakeet-correction
+  input: We had about twelve hundred active users last month. Uh sorry, I mean twelve thousand. Revenue was up fifteen percent compared to Q three. The churn rate stayed. Flat at around three point five percent.
+  accepted:
+  - We had about 12,000 active users last month. Revenue was up 15% compared to Q3. The churn rate stayed flat at around 3.5%.
+- category: parakeet-split-word
+  input: The churn rate stayed. Flat at around three point five percent.
+  accepted:
+  - The churn rate stayed flat at around 3.5%.
+  - The churn rate stayed flat at around three point five percent.
+# --- Preceding-context echo tests ---
+# The model receives tail sentences with preceding context.
+# It must polish the input without echoing the preceding text.
+- category: parakeet-echo
+  preceding_text: The CI pipeline runs in 3 stages.
+  input: First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five minute timeout.
+  accepted:
+  - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
+  - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+- category: parakeet-echo
+  preceding_text: Here's the plan for tomorrow.
+  input: First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  accepted:
+  - First, we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - First, we'll deploy the database changes during the maintenance window. Then, once that's stable, we'll push the new API version. And finally, we'll update the client SDK and send out the migration guide.
+  - First we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+- category: parakeet-echo
+  preceding_text: The monitoring dashboard shows 3 critical alerts.
+  input: The primary database is running at 95% CPU usage. The cache hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint.
+  accepted:
+  - The primary database is running at 95% CPU usage. The cache hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint.
+- category: parakeet-echo
+  preceding_text: We ran the load test yesterday.
+  input: The P99 latency went from 200 milliseconds to over three seconds under load. We were only pushing about five thousand requests per second which is well below our target.
+  accepted:
+  - The P99 latency went from 200 milliseconds to over 3 seconds under load. We were only pushing about 5,000 requests per second, which is well below our target.
+- category: parakeet-echo
+  preceding_text: There are 3 things blocking the release.
+  input: The login page has a rendering bug on Safari. The password reset flow doesn't send the confirmation email. The admin dashboard crashes when you filter by date range.
+  accepted:
+  - The login page has a rendering bug on Safari. The password reset flow doesn't send the confirmation email. The admin dashboard crashes when you filter by date range.
+- category: parakeet-echo
+  preceding_text: The new search feature shipped last week.
+  input: Response times are under 200 milliseconds. User engagement is up fifteen percent. The only issue is that filters don't work on mobile yet.
+  accepted:
+  - Response times are under 200 milliseconds. User engagement is up 15%. The only issue is that filters don't work on mobile yet.
+  - Response times are under 200 milliseconds. User engagement is up by 15%. The only issue is that filters don't work on mobile yet.
+# Exact reconstructions of live duplication failures (samples 6 and 50)
+- category: parakeet-echo
+  preceding_text: The CI pipeline runs in 3 stages.
+  input: First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five minute timeout.
+  accepted:
+  - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
+  - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+- category: parakeet-echo
+  preceding_text: Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window.
+  input: Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  accepted:
+  - Then once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - Once that's stable, we'll push the new API version. And finally, we'll update the client SDK and send out the migration guide.
+  - Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  - Once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+# --- Exact live failure reproductions ---
+# Sample 34: backtrack across sentence boundary "wrong. Right call"
+- category: parakeet-backtrack
+  input: Honestly, this is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the wrong. Right call.
+  accepted:
+  - This is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the right call.
+  - Honestly, this is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the right call.
+# Sample 15: dictated punctuation "dash" and "comma" in multi-sentence
+- category: parakeet-punctuation
+  input: Please send the update to the team dash and make sure to CC the project manager. The deadline is Friday, comma. So don't wait until the last minute.
+  accepted:
+  - Please send the update to the team — and make sure to CC the project manager. The deadline is Friday, so don't wait until the last minute.
+# Sample 50: full input (not echo — testing the whole 4-sentence dictation)
+- category: parakeet-preserve
+  input: Okay, so here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  accepted:
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+# Sample 26: 5-sentence preserve (last sentence was dropped in v11)
+- category: parakeet-preserve
+  input: The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
+  accepted:
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer and they're looking into it.
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
+# Exact live failures: trailing filler (samples 9, 27)
+- category: parakeet-trailing
+  input: I've been looking into the memory leak we found last week. It turns out the WebSocket connections aren't being closed properly. Every time a client disconnects, we're leaking about two megabytes. Right.
+  accepted:
+  - I've been looking into the memory leak we found last week. It turns out the WebSocket connections aren't being closed properly. Every time a client disconnects, we're leaking about 2 MB.
+  - I've been looking into the memory leak we found last week. It turns out the WebSocket connections aren't being closed properly. Every time a client disconnects, we're leaking about 2 megabytes.
+- category: parakeet-trailing
+  input: Can we get the staging environment reset by tomorrow? The QA team needs a clean database to run their regression tests. I can handle the deployment if you take care of the database. Yeah.
+  accepted:
+  - Can we get the staging environment reset by tomorrow? The QA team needs a clean database to run their regression tests. I can handle the deployment if you take care of the database.

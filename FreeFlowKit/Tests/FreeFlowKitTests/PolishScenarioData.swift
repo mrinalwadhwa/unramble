@@ -85,8 +85,10 @@ private func loadScenarios(from filename: String) -> [PolishScenario] {
     }
     var scenarios = entries.map { scenarioFromEntry($0) }
 
-    // Filter by category if specified.
-    if let cats = ProcessInfo.processInfo.environment["FREEFLOW_TEST_CATEGORIES"],
+    // Filter by category if specified (env var or flag file).
+    if let cats = flagFileOrEnv(
+        "FREEFLOW_TEST_CATEGORIES",
+        flagPath: "/tmp/freeflow-test-categories"),
        !cats.isEmpty {
         let allowed = Set(cats.split(separator: ",").map(String.init))
         scenarios = scenarios.filter { allowed.contains($0.category) }
@@ -102,14 +104,26 @@ private func loadScenarios(from filename: String) -> [PolishScenario] {
 
 /// Choose between test and training scenarios based on environment.
 ///
-/// When `FREEFLOW_TEST_TRAINING=1` is set, return training scenarios.
-/// Otherwise return test scenarios. Applies the same category and
-/// casual filters.
+/// When `FREEFLOW_TEST_TRAINING=1` is set (env var or flag file),
+/// return training scenarios. Otherwise return test scenarios. Applies
+/// the same category and casual filters.
 func evalScenarios() -> [PolishScenario] {
-    if ProcessInfo.processInfo.environment["FREEFLOW_TEST_TRAINING"] == "1" {
+    if ProcessInfo.processInfo.environment["FREEFLOW_TEST_TRAINING"] == "1"
+        || FileManager.default.fileExists(atPath: "/tmp/freeflow-test-training") {
         return allTrainingScenarios
     }
     return allScenarios
+}
+
+/// Read a flag file's contents as a comma-separated category filter,
+/// or fall back to the environment variable.
+private func flagFileOrEnv(_ envKey: String, flagPath: String) -> String? {
+    if let content = try? String(contentsOfFile: flagPath, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+       !content.isEmpty {
+        return content
+    }
+    return ProcessInfo.processInfo.environment[envKey]
 }
 
 /// Build a PolishScenario from a JSON entry, constructing an AppContext

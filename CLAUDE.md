@@ -181,15 +181,15 @@ In DEBUG builds, `OPENAI_API_KEY` in the process environment overrides the
 Keychain-stored key so local development does not trigger Keychain password
 prompts on every build.
 
-Launch in the background and capture all output to a log file:
+Launch in the background and append output to a log file:
 
 ```bash
 pkill -9 -f "FreeFlow.app/Contents/MacOS/FreeFlow" 2>/dev/null
 sleep 1
-rm -f /tmp/freeflow.log
 APP=$(find ~/Library/Developer/Xcode/DerivedData/FreeFlow-*/Build/Products/Debug -name FreeFlow.app -maxdepth 1)
+echo "=== $(date) ===" >> /tmp/freeflow.log
 OPENAI_API_KEY="sk-..." \
-"$APP/Contents/MacOS/FreeFlow" > /tmp/freeflow.log 2>&1 &
+"$APP/Contents/MacOS/FreeFlow" >> /tmp/freeflow.log 2>&1 &
 echo "Launched PID $!"
 ```
 
