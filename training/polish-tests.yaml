@@ -1285,3 +1285,24 @@
   input: Can we get the staging environment reset by tomorrow? The QA team needs a clean database to run their regression tests. I can handle the deployment if you take care of the database. Yeah.
   accepted:
   - Can we get the staging environment reset by tomorrow? The QA team needs a clean database to run their regression tests. I can handle the deployment if you take care of the database.
+# Split-word tests from live failures
+- category: parakeet-split-word
+  input: The postmortem is scheduled. for this Thursday at two PM
+  accepted:
+  - The postmortem is scheduled for this Thursday at 2 PM.
+- category: parakeet-split-word
+  input: Going forward, we absolutely must. have redundancy on every critical path.
+  accepted:
+  - Going forward, we absolutely must have redundancy on every critical path.
+- category: parakeet-split-word
+  input: The P99 latency went from 200 milliseconds to over 3 seconds. seconds under load.
+  accepted:
+  - The P99 latency went from 200 milliseconds to over 3 seconds under load.
+- category: parakeet-split-word
+  input: The main bottleneck seems to be the database query. on the user profile endpoint.
+  accepted:
+  - The main bottleneck seems to be the database query on the user profile endpoint.
+- category: parakeet-split-word
+  input: The rollout plan is to enable it for 10%. of users first, then gradually increase to 50%.
+  accepted:
+  - The rollout plan is to enable it for 10% of users first, then gradually increase to 50%.

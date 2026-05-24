@@ -199,6 +199,15 @@ public enum PolishPipeline {
                 }
             }
         } else {
+            // Rejoin split-words: Parakeet sometimes places a period
+            // mid-phrase ("scheduled. for Thursday"). Real sentence
+            // boundaries have uppercase after the period; lowercase
+            // indicates a split-word that should be rejoined.
+            result = result.replacingOccurrences(
+                of: #"\.\s+([a-z])"#,
+                with: " $1",
+                options: .regularExpression)
+
             // Capitalize first letter after sentence-ending punctuation + space.
             result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
 
