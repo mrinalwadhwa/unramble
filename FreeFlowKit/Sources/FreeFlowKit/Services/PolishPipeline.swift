@@ -790,6 +790,58 @@ public enum PolishPipeline {
         return result
     }
 
+    // MARK: - Full Polish Pipeline
+
+    /// Run the complete polish pipeline: preprocess, send to model,
+    /// postprocess. This is the single source of truth for how raw
+    /// dictated text becomes polished output. Used by both the
+    /// streaming provider and the eval test suite.
+    public static func polish(
+        _ raw: String,
+        chatClient: (any PolishChatClient)?,
+        model: String = polishModel,
+        tone: String? = nil,
+        precedingText: String? = nil
+    ) async -> String {
+        let casual = tone == "casual"
+        let substituted = substituteDictatedPunctuation(
+            raw, casual: casual, precedingText: precedingText)
+        let stripped = stripKeepTags(substituted, casual: casual)
+
+        guard let chatClient else {
+            return normalizeFormatting(stripped, casual: casual)
+        }
+
+        var prompt = systemPromptQwen
+        if let tone {
+            prompt += "\nStyle: \(tone)"
+        }
+        if let preceding = precedingText, !preceding.isEmpty {
+            let suffix = preceding.count > 80
+                ? String(preceding.suffix(80))
+                : preceding
+            prompt += "\nPreceding text: \(suffix)"
+        }
+
+        do {
+            let polished = try await chatClient.complete(
+                model: model,
+                systemPrompt: prompt,
+                userPrompt: stripped)
+            if polished.isEmpty {
+                return normalizeFormatting(stripped, casual: casual)
+            }
+            if let fallback = guardAgainstTruncation(
+                polished: polished, preprocessed: stripped) {
+                return normalizeFormatting(fallback, casual: casual)
+            }
+            return normalizeFormatting(polished, casual: casual)
+        } catch {
+            Log.debug("[PolishPipeline] Polish failed: \(error)")
+            return normalizeFormatting(stripped, casual: casual)
+        }
+    }
+
     // MARK: - Local System Prompt
 
     /// Build a dynamic system prompt for the fine-tuned Qwen model.
@@ -1069,6 +1121,35 @@ public enum PolishPipeline {
             result.replaceSubrange(letterRange, with: upper)
         }
         return result
+    }
+
+    // MARK: - Trailing Filler Stripping
+
+    /// Strip trailing standalone discourse fillers from the final
+    /// polished output. Words like "Yeah.", "Right.", "Mm." as the
+    /// last sentence are Parakeet hallucinations or meaningless
+    /// discourse closers. Only applied to the final assembled result,
+    /// not during incremental polish, to avoid cache mismatches.
+    public static func stripTrailingFiller(_ text: String) -> String {
+        let fillers: Set<String> = [
+            "yeah", "right", "mm", "mm-hmm", "mmm", "hmm",
+            "sure", "okay", "ok", "yep", "nah", "mhm",
+        ]
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Match trailing word with optional period.
+        guard let last = trimmed.split(separator: ".").last else {
+            return text
+        }
+        let candidate = last.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        if fillers.contains(candidate) {
+            let stripped = String(trimmed.dropLast(last.count + 1))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !stripped.isEmpty {
+                return stripped
+            }
+        }
+        return text
     }
 
     // MARK: - Sentence Boundary Detection

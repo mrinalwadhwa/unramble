@@ -60,18 +60,13 @@ private func runMLXDump(
     var matches = 0
     var categoryStats: [String: (match: Int, total: Int)] = [:]
     for s in evalSet {
-        let casual = s.style == "casual"
-        let substituted = PolishPipeline.substituteDictatedPunctuation(
-            s.input, casual: casual, precedingText: s.precedingText)
-        let stripped = PolishPipeline.stripKeepTags(
-            substituted, casual: casual)
         do {
-            let raw = try await client.complete(
-                model: "",
-                systemPrompt: s.systemPrompt(),
-                userPrompt: stripped)
-            let result = PolishPipeline.normalizeFormatting(
-                raw.isEmpty ? stripped : raw)
+            let polished = await PolishPipeline.polish(
+                s.input,
+                chatClient: client,
+                tone: s.style,
+                precedingText: s.precedingText)
+            let result = PolishPipeline.stripTrailingFiller(polished)
             let isMatch = s.matches(result)
             if isMatch { matches += 1 }
             var stats = categoryStats[s.category, default: (0, 0)]

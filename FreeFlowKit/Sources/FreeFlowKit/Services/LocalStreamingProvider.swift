@@ -330,50 +330,15 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private func polishWithPreceding(
         _ raw: String, preceding: String, context: AppContext
     ) async -> String {
-        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
-        let substituted = PolishPipeline.substituteDictatedPunctuation(
-            raw, casual: casual,
-            precedingText: preceding.isEmpty ? context.focusedFieldContent : preceding)
-        let stripped = PolishPipeline.stripKeepTags(
-            substituted, casual: casual)
-
-        guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(stripped, casual: casual)
-        }
-
-        var prompt = PolishPipeline.systemPromptQwen
-        if let tone = PolishPipeline.toneLabel(for: context.bundleID) {
-            prompt += "\nStyle: \(tone)"
-        }
-        if !preceding.isEmpty {
-            let suffix = preceding.count > 80
-                ? String(preceding.suffix(80))
-                : preceding
-            prompt += "\nPreceding text: \(suffix)"
-        } else if let content = context.focusedFieldContent, !content.isEmpty {
-            let suffix = content.count > 80
-                ? String(content.suffix(80))
-                : content
-            prompt += "\nPreceding text: \(PolishPipeline.sanitizeContextField(suffix))"
-        }
-
-        do {
-            let polished = try await polishChatClient.complete(
-                model: polishModel,
-                systemPrompt: prompt,
-                userPrompt: stripped)
-            if polished.isEmpty {
-                return PolishPipeline.normalizeFormatting(stripped, casual: casual)
-            }
-            if let fallback = PolishPipeline.guardAgainstTruncation(
-                polished: polished, preprocessed: stripped) {
-                return PolishPipeline.normalizeFormatting(fallback, casual: casual)
-            }
-            return PolishPipeline.normalizeFormatting(polished, casual: casual)
-        } catch {
-            Log.debug("[LocalStreaming] Polish failed: \(error)")
-            return PolishPipeline.normalizeFormatting(stripped, casual: casual)
-        }
+        let precedingText = preceding.isEmpty
+            ? context.focusedFieldContent
+            : preceding
+        return await PolishPipeline.polish(
+            raw,
+            chatClient: polishChatClient,
+            model: polishModel,
+            tone: PolishPipeline.toneLabel(for: context.bundleID),
+            precedingText: precedingText)
     }
 
     // MARK: - Sentence Splitting

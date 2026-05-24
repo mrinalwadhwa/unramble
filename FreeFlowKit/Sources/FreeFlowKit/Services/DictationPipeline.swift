@@ -916,7 +916,7 @@ public actor DictationPipeline: PipelineProviding {
         Log.debug("[Pipeline] finishing streaming session (local)")
         do {
             let text = try await streaming.finishStreaming()
-            return text
+            return PolishPipeline.stripTrailingFiller(text)
         } catch {
             Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
             await streaming.cancelStreaming()
