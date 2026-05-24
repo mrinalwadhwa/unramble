@@ -835,13 +835,15 @@ public enum PolishPipeline {
             }
             if let fallback = guardAgainstTruncation(
                 polished: polished, preprocessed: stripped) {
-                return capitalizeFirst(
+                return adjustFirstCharCasing(
                     normalizeFormatting(fallback, casual: casual),
-                    when: !casual && noPreceding)
+                    preprocessed: stripped, casual: casual,
+                    noPreceding: noPreceding)
             }
-            return capitalizeFirst(
+            return adjustFirstCharCasing(
                 normalizeFormatting(polished, casual: casual),
-                when: !casual && noPreceding)
+                preprocessed: stripped, casual: casual,
+                noPreceding: noPreceding)
         } catch {
             Log.debug("[PolishPipeline] Polish failed: \(error)")
             return normalizeFormatting(stripped, casual: casual)
@@ -1095,15 +1097,36 @@ public enum PolishPipeline {
         return text
     }
 
-    /// Capitalize the first letter if the condition is true.
-    private static func capitalizeFirst(
-        _ text: String, when condition: Bool
+    /// Adjust the first character's casing to match the preprocessed
+    /// input. If preprocessing lowercased the first word (mid-sentence
+    /// continuation) but the model uppercased it back, restore
+    /// lowercase — but only when the first word is the same in both.
+    /// If there's no preceding text and the model lowercased, capitalize.
+    private static func adjustFirstCharCasing(
+        _ text: String, preprocessed: String, casual: Bool,
+        noPreceding: Bool
     ) -> String {
-        guard condition,
-              let first = text.first,
-              first.isLetter, first.isLowercase
+        guard !casual,
+              let outFirst = text.first, outFirst.isLetter,
+              let inFirst = preprocessed.first, inFirst.isLetter
         else { return text }
-        return first.uppercased() + text.dropFirst()
+
+        if noPreceding && outFirst.isLowercase {
+            // No preceding text — capitalize.
+            return outFirst.uppercased() + text.dropFirst()
+        }
+
+        if !noPreceding && inFirst.isLowercase && outFirst.isUppercase {
+            // Preprocessing lowercased for mid-sentence continuation,
+            // model uppercased it back. Restore only if same first word.
+            let inWord = preprocessed.prefix(while: { $0.isLetter })
+            let outWord = text.prefix(while: { $0.isLetter })
+            if inWord.lowercased() == outWord.lowercased() {
+                return outFirst.lowercased() + text.dropFirst()
+            }
+        }
+
+        return text
     }
 
     // MARK: - Helpers
