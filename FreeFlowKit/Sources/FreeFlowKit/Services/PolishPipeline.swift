@@ -823,6 +823,8 @@ public enum PolishPipeline {
             prompt += "\nPreceding text: \(suffix)"
         }
 
+        let noPreceding = precedingText == nil || precedingText!.isEmpty
+
         do {
             let polished = try await chatClient.complete(
                 model: model,
@@ -833,9 +835,13 @@ public enum PolishPipeline {
             }
             if let fallback = guardAgainstTruncation(
                 polished: polished, preprocessed: stripped) {
-                return normalizeFormatting(fallback, casual: casual)
+                return capitalizeFirst(
+                    normalizeFormatting(fallback, casual: casual),
+                    when: !casual && noPreceding)
             }
-            return normalizeFormatting(polished, casual: casual)
+            return capitalizeFirst(
+                normalizeFormatting(polished, casual: casual),
+                when: !casual && noPreceding)
         } catch {
             Log.debug("[PolishPipeline] Polish failed: \(error)")
             return normalizeFormatting(stripped, casual: casual)
@@ -1087,6 +1093,17 @@ public enum PolishPipeline {
             return outputFirst.uppercased() + text.dropFirst()
         }
         return text
+    }
+
+    /// Capitalize the first letter if the condition is true.
+    private static func capitalizeFirst(
+        _ text: String, when condition: Bool
+    ) -> String {
+        guard condition,
+              let first = text.first,
+              first.isLetter, first.isLowercase
+        else { return text }
+        return first.uppercased() + text.dropFirst()
     }
 
     // MARK: - Helpers
