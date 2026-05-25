@@ -1306,3 +1306,224 @@
   input: The rollout plan is to enable it for 10%. of users first, then gradually increase to 50%.
   accepted:
   - The rollout plan is to enable it for 10% of users first, then gradually increase to 50%.
+# --- Variation tests from 60 manual samples ---
+# New inputs confirming fixed and unfixed categories.
+
+# Split-word: lowercase after period (fixed by preprocessing rejoin)
+- category: parakeet-split-word
+  input: The alert threshold is set. to 90% CPU utilization across all nodes.
+  accepted:
+  - The alert threshold is set to 90% CPU utilization across all nodes.
+- category: parakeet-split-word
+  input: The feature flag is currently. disabled in the production environment.
+  accepted:
+  - The feature flag is currently disabled in the production environment.
+
+# Backtrack: "actually no" resolved (fixed by v13 training)
+- category: parakeet-backtrack
+  input: We should deploy to staging. Actually no, deploy to production. The hotfix needs to go out immediately.
+  accepted:
+  - We should deploy to production. The hotfix needs to go out immediately.
+  - Deploy to production. The hotfix needs to go out immediately.
+
+# Trailing filler: standalone discourse closers (fixed by stripTrailingFiller)
+- category: parakeet-trailing
+  input: The database backup runs every night at midnight. Make sure the cron job is configured correctly. Sure.
+  accepted:
+  - The database backup runs every night at midnight. Make sure the cron job is configured correctly.
+- category: parakeet-trailing
+  input: We need to rotate the API keys before the end of the quarter. The current ones have been active for over six months. Okay.
+  accepted:
+  - We need to rotate the API keys before the end of the quarter. The current ones have been active for over 6 months.
+
+# Echo: polish input without echoing preceding text (fixed by v13 training)
+- category: parakeet-echo
+  preceding_text: The deployment failed twice yesterday.
+  input: The root cause was a misconfigured environment variable in the Kubernetes manifest. We've added a validation step to catch this in the CI pipeline.
+  accepted:
+  - The root cause was a misconfigured environment variable in the Kubernetes manifest. We've added a validation step to catch this in the CI pipeline.
+- category: parakeet-echo
+  preceding_text: Yesterday's incident lasted about 45 minutes.
+  input: The database connection pool was exhausted because the retry logic had no backoff. We've added exponential backoff with a maximum of thirty seconds.
+  accepted:
+  - The database connection pool was exhausted because the retry logic had no backoff. We've added exponential backoff with a maximum of 30 seconds.
+
+# Preserve: multi-sentence content without dropping (fixed by v13 training)
+- category: parakeet-preserve
+  input: The database cluster has five nodes across three availability zones. Two are configured as primaries and three as read replicas. The replication lag is consistently under 50 milliseconds. We can handle an automated failover in under ten seconds.
+  accepted:
+  - The database cluster has 5 nodes across 3 availability zones. Two are configured as primaries and 3 as read replicas. The replication lag is consistently under 50 milliseconds. We can handle an automated failover in under 10 seconds.
+
+# AM/PM: p.m./a.m. normalized before split-word rejoin (fixed by preprocessing)
+- category: parakeet-ampm
+  input: The meeting is at 3 p.m. sharp in the main conference room.
+  accepted:
+  - The meeting is at 3 PM sharp in the main conference room.
+- category: parakeet-ampm
+  input: The maintenance window starts at 2 a.m. tomorrow and ends at 6 a.m. We should have the migration done by then.
+  accepted:
+  - The maintenance window starts at 2 AM tomorrow and ends at 6 AM. We should have the migration done by then.
+- category: parakeet-ampm
+  input: The deploy went out at 4 p.m. yesterday. We started seeing errors around 5 p.m. The rollback was complete by 6 p.m.
+  accepted:
+  - The deploy went out at 4 PM yesterday. We started seeing errors around 5 PM. The rollback was complete by 6 PM.
+
+# --- More split-word variations (lowercase after period) ---
+- category: parakeet-split-word
+  input: The system is designed. to handle up to ten thousand concurrent connections.
+  accepted:
+  - The system is designed to handle up to 10,000 concurrent connections.
+- category: parakeet-split-word
+  input: The config file needs to be updated. before we restart the service.
+  accepted:
+  - The config file needs to be updated before we restart the service.
+- category: parakeet-split-word
+  input: The migration is expected. to take about two hours during the maintenance window.
+  accepted:
+  - The migration is expected to take about 2 hours during the maintenance window.
+- category: parakeet-split-word
+  input: The load balancer is configured. to distribute traffic evenly across all instances.
+  accepted:
+  - The load balancer is configured to distribute traffic evenly across all instances.
+- category: parakeet-split-word
+  input: The webhook is triggered. whenever a new pull request is opened or merged.
+  accepted:
+  - The webhook is triggered whenever a new pull request is opened or merged.
+- category: parakeet-split-word
+  input: The API response was truncated. because the payload exceeded the size limit.
+  accepted:
+  - The API response was truncated because the payload exceeded the size limit.
+
+# --- More backtrack variations ---
+- category: parakeet-backtrack
+  input: The bug is in the auth service. Wait, no, it's in the gateway. We need to check the request routing logic.
+  accepted:
+  - The bug is in the gateway. We need to check the request routing logic.
+- category: parakeet-backtrack
+  input: Let's use MySQL. Scratch that, PostgreSQL is a better fit. It has better support for JSON columns.
+  accepted:
+  - Let's use PostgreSQL. It has better support for JSON columns.
+  - PostgreSQL is a better fit. It has better support for JSON columns.
+- category: parakeet-backtrack
+  input: The cache TTL should be five minutes. Actually, make it ten minutes. We don't want to hit the database too often.
+  accepted:
+  - The cache TTL should be 10 minutes. We don't want to hit the database too often.
+
+# --- More trailing filler variations ---
+- category: parakeet-trailing
+  input: The health check endpoint should return a 200 status code when the service is running. Mm.
+  accepted:
+  - The health check endpoint should return a 200 status code when the service is running.
+- category: parakeet-trailing
+  input: We should add rate limiting to the public API endpoints. The current setup allows unlimited requests. Yep.
+  accepted:
+  - We should add rate limiting to the public API endpoints. The current setup allows unlimited requests.
+- category: parakeet-trailing
+  input: The staging environment needs to be rebuilt from scratch. The data is completely out of sync with production. Hmm.
+  accepted:
+  - The staging environment needs to be rebuilt from scratch. The data is completely out of sync with production.
+- category: parakeet-trailing
+  input: I'll update the documentation after the code review is done. Mhm.
+  accepted:
+  - I'll update the documentation after the code review is done.
+
+# --- More echo variations ---
+- category: parakeet-echo
+  preceding_text: We need to refactor the payment service.
+  input: The current implementation has too many dependencies and it's impossible to test in isolation. We should extract the payment logic into a separate module.
+  accepted:
+  - The current implementation has too many dependencies and it's impossible to test in isolation. We should extract the payment logic into a separate module.
+  - The current implementation has too many dependencies, and it's impossible to test in isolation. We should extract the payment logic into a separate module.
+- category: parakeet-echo
+  preceding_text: The Redis cluster went down at 3 AM.
+  input: All cached sessions were lost and users had to re-authenticate. We've added persistence to prevent this in the future.
+  accepted:
+  - All cached sessions were lost and users had to re-authenticate. We've added persistence to prevent this in the future.
+  - All cached sessions were lost, and users had to re-authenticate. We've added persistence to prevent this in the future.
+- category: parakeet-echo
+  preceding_text: The sprint retrospective highlighted two major issues.
+  input: First the deployment process takes too long. Second, the code review turnaround is averaging three days which is slowing everyone down.
+  accepted:
+  - First, the deployment process takes too long. Second, the code review turnaround is averaging 3 days, which is slowing everyone down.
+- category: parakeet-echo
+  preceding_text: The performance review is due next week.
+  input: Each team lead needs to submit their reports by Wednesday. HR will consolidate everything by Friday.
+  accepted:
+  - Each team lead needs to submit their reports by Wednesday. HR will consolidate everything by Friday.
+
+# --- More preserve variations ---
+- category: parakeet-preserve
+  input: The incident response plan has four stages. Detection happens through automated monitoring alerts. Triage determines the severity and assigns the on-call engineer. Mitigation focuses on reducing customer impact as quickly as possible.
+  accepted:
+  - The incident response plan has 4 stages. Detection happens through automated monitoring alerts. Triage determines the severity and assigns the on-call engineer. Mitigation focuses on reducing customer impact as quickly as possible.
+- category: parakeet-preserve
+  input: The new API gateway handles authentication, rate limiting, and request routing. It supports both REST and GraphQL endpoints. Average latency added by the gateway is under five milliseconds. We've been running it in shadow mode for two weeks with no issues.
+  accepted:
+  - The new API gateway handles authentication, rate limiting, and request routing. It supports both REST and GraphQL endpoints. Average latency added by the gateway is under 5 milliseconds. We've been running it in shadow mode for 2 weeks with no issues.
+- category: parakeet-preserve
+  input: We migrated from AWS to GCP last quarter. The main drivers were cost savings and better Kubernetes support. Total migration took about six weeks. The only issue was reconfiguring the CDN which added an extra three days.
+  accepted:
+  - We migrated from AWS to GCP last quarter. The main drivers were cost savings and better Kubernetes support. Total migration took about 6 weeks. The only issue was reconfiguring the CDN, which added an extra 3 days.
+
+# --- More AM/PM variations ---
+- category: parakeet-ampm
+  input: The on-call rotation starts at 9 a.m. Monday and ends at 9 a.m. the following Monday.
+  accepted:
+  - The on-call rotation starts at 9 AM Monday and ends at 9 AM the following Monday.
+- category: parakeet-ampm
+  input: We noticed the CPU spike at 11 p.m. last night. By 1 a.m. the service had fully recovered.
+  accepted:
+  - We noticed the CPU spike at 11 PM last night. By 1 AM the service had fully recovered.
+- category: parakeet-ampm
+  input: The batch job runs at 4 a.m. daily and processes about fifty thousand records.
+  accepted:
+  - The batch job runs at 4 AM daily and processes about 50,000 records.
+
+# --- Simple corrections that should resolve (3 sentences) ---
+- category: parakeet-correction
+  input: The timeout is set to thirty seconds. I mean thirty minutes. That's way too long for a health check.
+  accepted:
+  - The timeout is set to 30 minutes. That's way too long for a health check.
+- category: parakeet-correction
+  input: We deployed to the staging region. Sorry I mean the production region. The latency requirements are different for live traffic.
+  accepted:
+  - We deployed to the production region. The latency requirements are different for live traffic.
+
+# --- Uppercase split-word (NOT fixed — Parakeet capitalizes after period) ---
+- category: parakeet-uppercase-split
+  input: The system is completely. Broken and needs to be restarted immediately.
+  accepted:
+  - The system is completely broken and needs to be restarted immediately.
+- category: parakeet-uppercase-split
+  input: The test suite passed. Successfully after the config change was applied.
+  accepted:
+  - The test suite passed successfully after the config change was applied.
+- category: parakeet-uppercase-split
+  input: The auto scaler is currently. Disabled because of the cost limits we set last week.
+  accepted:
+  - The auto scaler is currently disabled because of the cost limits we set last week.
+  - The auto-scaler is currently disabled because of the cost limits we set last week.
+
+# --- Discourse fillers at sentence start (NOT fixed — model keeps them) ---
+- category: parakeet-discourse
+  input: Like, the main issue is that the database queries are not optimized. We need to add proper indexing.
+  accepted:
+  - The main issue is that the database queries are not optimized. We need to add proper indexing.
+- category: parakeet-discourse
+  input: So basically, the authentication flow is broken because the token refresh endpoint returns a 500 error.
+  accepted:
+  - The authentication flow is broken because the token refresh endpoint returns a 500 error.
+- category: parakeet-discourse
+  input: You know, the real problem is that we don't have enough monitoring in place. We need better observability.
+  accepted:
+  - The real problem is that we don't have enough monitoring in place. We need better observability.
+
+- category: parakeet-correction-long
+  input: The cluster has eight nodes. I mean sixteen nodes. We doubled the capacity after the holiday traffic spike. The auto scaling policy triggers at 70% memory utilization.
+  accepted:
+  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike. The auto scaling policy triggers at 70% memory utilization.
+  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike. The auto-scaling policy triggers at 70% memory utilization.
+- category: parakeet-correction-long
+  input: The database has about two hundred tables. Sorry I mean two thousand tables. Most of them are legacy and haven't been accessed in months. We need to audit and clean up the unused ones.
+  accepted:
+  - The database has about 2,000 tables. Most of them are legacy and haven't been accessed in months. We need to audit and clean up the unused ones.

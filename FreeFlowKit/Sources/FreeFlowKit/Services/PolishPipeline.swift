@@ -199,6 +199,36 @@ public enum PolishPipeline {
                 }
             }
         } else {
+            // Normalize a.m./p.m. to AM/PM before split-word rejoin,
+            // so the trailing period in "p.m." isn't eaten by the
+            // split-word regex matching "\.\s+([a-z])".
+            // Day/month names first — no sentence boundary period.
+            result = result.replacingOccurrences(
+                of: #"\ba\.m\.(?= (?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day)"#,
+                with: "AM", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\bp\.m\.(?= (?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day)"#,
+                with: "PM", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\ba\.m\.(?= (?:January|February|March|April|May|June|July|August|September|October|November|December))"#,
+                with: "AM", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\bp\.m\.(?= (?:January|February|March|April|May|June|July|August|September|October|November|December))"#,
+                with: "PM", options: .regularExpression)
+            // General uppercase — sentence boundary, preserve period.
+            result = result.replacingOccurrences(
+                of: #"\ba\.m\.(?= [A-Z])"#, with: "AM.", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\bp\.m\.(?= [A-Z])"#, with: "PM.", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\ba\.m\.(?= )"#, with: "AM", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\bp\.m\.(?= )"#, with: "PM", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\ba\.m\.(?=$|\n)"#, with: "AM.", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\bp\.m\.(?=$|\n)"#, with: "PM.", options: .regularExpression)
+
             // Rejoin split-words: Parakeet sometimes places a period
             // mid-phrase ("scheduled. for Thursday"). Real sentence
             // boundaries have uppercase after the period; lowercase
@@ -513,9 +543,9 @@ public enum PolishPipeline {
             options: .regularExpression)
 
         // Normalize a.m./p.m. to AM/PM.
-        // When followed by a space + uppercase letter, the final dot did
-        // double duty as abbreviation period AND sentence terminator —
-        // restore the period. Otherwise just drop the dots.
+        // Primary conversion happens in substituteDictatedPunctuation
+        // (before split-word rejoin). This is a safety net for any
+        // a.m./p.m. that the model re-introduces in its output.
         result = result.replacingOccurrences(
             of: #"\ba\.m\.(?= [A-Z])"#, with: "AM.", options: .regularExpression)
         result = result.replacingOccurrences(
