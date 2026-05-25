@@ -261,6 +261,11 @@ public enum PolishPipeline {
         // Strip pure filler sounds (um, uh, ah, hmm, etc.).
         result = stripFillerSounds(result)
 
+        // Convert "X point Y million/billion/thousand" to decimal form
+        // before the model sees it. Prevents hallucinated conversions
+        // like "one point two million" → "200,000".
+        result = convertDecimalScale(result)
+
         return result.trimmingCharacters(in: .whitespaces)
     }
 
@@ -375,6 +380,62 @@ public enum PolishPipeline {
             of: " {2,}", with: " ", options: .regularExpression)
 
         return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    // MARK: - Decimal Scale Number Conversion
+
+    /// Map single-digit number words to their digit form.
+    private static let digitWords: [String: String] = [
+        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    ]
+
+    /// Convert spoken decimal scale numbers to numeric form.
+    ///
+    /// "one point two million" → "1.2 million"
+    /// "3 point 5 billion" → "3.5 billion"
+    ///
+    /// Handles both word and digit forms. Only matches single-digit
+    /// values on each side of "point" to avoid false positives.
+    static func convertDecimalScale(_ text: String) -> String {
+        var result = text
+
+        // Word form: "one point two million"
+        let wordPattern = #"(?i)\b(zero|one|two|three|four|five|six|seven|eight|nine)\s+point\s+(zero|one|two|three|four|five|six|seven|eight|nine)\s+(million|billion|thousand|trillion)\b"#
+        if let regex = try? NSRegularExpression(pattern: wordPattern) {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let r1 = Range(match.range(at: 1), in: result),
+                      let r2 = Range(match.range(at: 2), in: result),
+                      let r3 = Range(match.range(at: 3), in: result),
+                      let d1 = digitWords[result[r1].lowercased()],
+                      let d2 = digitWords[result[r2].lowercased()]
+                else { continue }
+                let scale = result[r3].lowercased()
+                result.replaceSubrange(fullRange, with: "\(d1).\(d2) \(scale)")
+            }
+        }
+
+        // Digit form: "3 point 5 million"
+        let digitPattern = #"\b(\d+)\s+point\s+(\d+)\s+(million|billion|thousand|trillion)\b"#
+        if let regex = try? NSRegularExpression(
+            pattern: digitPattern, options: .caseInsensitive) {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let r1 = Range(match.range(at: 1), in: result),
+                      let r2 = Range(match.range(at: 2), in: result),
+                      let r3 = Range(match.range(at: 3), in: result)
+                else { continue }
+                let replacement = "\(result[r1]).\(result[r2]) \(result[r3].lowercased())"
+                result.replaceSubrange(fullRange, with: replacement)
+            }
+        }
+
+        return result
     }
 
     // MARK: - Spurious Comma Cleanup
@@ -863,15 +924,17 @@ public enum PolishPipeline {
             if polished.isEmpty {
                 return normalizeFormatting(stripped, casual: casual)
             }
+            let cleaned = guardAgainstEcho(
+                polished: polished, precedingText: precedingText)
             if let fallback = guardAgainstTruncation(
-                polished: polished, preprocessed: stripped) {
+                polished: cleaned, preprocessed: stripped) {
                 return adjustFirstCharCasing(
                     normalizeFormatting(fallback, casual: casual),
                     preprocessed: stripped, casual: casual,
                     noPreceding: noPreceding)
             }
             return adjustFirstCharCasing(
-                normalizeFormatting(polished, casual: casual),
+                normalizeFormatting(cleaned, casual: casual),
                 preprocessed: stripped, casual: casual,
                 noPreceding: noPreceding)
         } catch {
@@ -1234,6 +1297,42 @@ public enum PolishPipeline {
             return false
         }
         return last == "." || last == "?" || last == "!"
+    }
+
+    /// Strip echoed preceding text from model output.
+    ///
+    /// The model sometimes echoes the preceding text at the start of
+    /// its output instead of polishing only the new input. If the
+    /// output begins with the preceding text, strip the echoed prefix
+    /// and return the remainder.
+    ///
+    /// Only triggers when the preceding text is 15+ characters (short
+    /// preceding text like "OK." is too likely to match coincidentally)
+    /// and the remainder after stripping is non-empty.
+    static func guardAgainstEcho(
+        polished: String, precedingText: String?
+    ) -> String {
+        guard let preceding = precedingText,
+              preceding.count >= 15
+        else { return polished }
+
+        let trimmed = preceding.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        guard polished.hasPrefix(trimmed) else { return polished }
+
+        let remainder = String(polished.dropFirst(trimmed.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Strip leading punctuation left from the echo boundary.
+            .drop(while: { $0 == "." || $0 == "," || $0 == ";" })
+            .trimmingCharacters(in: .whitespaces)
+
+        guard !remainder.isEmpty else { return polished }
+
+        Log.debug(
+            "[ECHO_GUARD] Stripped echoed preceding text"
+            + " (\(trimmed.count) chars)"
+            + " | remainder=\"\(remainder.prefix(80))\"")
+        return String(remainder)
     }
 
     /// Check whether the model aggressively truncated input by

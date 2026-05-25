@@ -4877,11 +4877,13 @@
   accepted:
   - I think the approach is solid. The design doc covers the edge cases. The implementation plan is realistic. The timeline accounts for testing. So I would say we are ready to start.
 - category: preserve-long
-  input: the results from the benchmark are um really promising the throughput increased by forty percent memory usage dropped by twenty percent and the cold start time went from eight seconds to under two
+  input: the results from the benchmark are um really promising the throughput increased by forty percent memory usage dropped by twenty percent and the cold start time went from eight seconds to under
+    two
   accepted:
   - The results from the benchmark are really promising. The throughput increased by 40%. Memory usage dropped by 20%. The cold start time went from 8 seconds to under 2.
 - category: preserve-long
-  input: before we do that um we should consider whether the current architecture can handle the load the existing service handles about ten thousand requests per second and the new feature would roughly double that
+  input: before we do that um we should consider whether the current architecture can handle the load the existing service handles about ten thousand requests per second and the new feature would roughly
+    double that
   accepted:
   - Before we do that, we should consider whether the current architecture can handle the load. The existing service handles about 10,000 requests per second, and the new feature would roughly double that.
 - category: preserve-long
@@ -4893,9 +4895,11 @@
   accepted:
   - What happened was the deploy script ran fine, but the health check timed out, so the rollback triggered automatically. Then we found out the health check endpoint had a bug in it.
 - category: preserve-long
-  input: the way I see it we have two options either we rewrite the module from scratch which would take about three weeks or we patch the existing code and live with some tech debt for now I think the patch makes more sense given the deadline
+  input: the way I see it we have two options either we rewrite the module from scratch which would take about three weeks or we patch the existing code and live with some tech debt for now I think the
+    patch makes more sense given the deadline
   accepted:
-  - The way I see it, we have 2 options. Either we rewrite the module from scratch, which would take about 3 weeks, or we patch the existing code and live with some tech debt for now. I think the patch makes more sense given the deadline.
+  - The way I see it, we have 2 options. Either we rewrite the module from scratch, which would take about 3 weeks, or we patch the existing code and live with some tech debt for now. I think the patch
+    makes more sense given the deadline.
 - category: preserve-long
   input: yeah so I had a call with the client this morning they are happy with the progress but they want us to add a dark mode option and they also asked about the mobile app timeline
   accepted:
@@ -4905,7 +4909,8 @@
   accepted:
   - A couple of updates from my side. I finished the PR for the auth flow. I started looking into the caching issue. I also reviewed Sarah's pull request on the dashboard.
 - category: preserve-long
-  input: so I was looking at the metrics from last week and the conversion rate is up by twelve percent the bounce rate dropped and the average session duration increased by about thirty seconds which is a good sign
+  input: so I was looking at the metrics from last week and the conversion rate is up by twelve percent the bounce rate dropped and the average session duration increased by about thirty seconds which is
+    a good sign
   accepted:
   - I was looking at the metrics from last week. The conversion rate is up by 12%. The bounce rate dropped. The average session duration increased by about 30 seconds, which is a good sign.
 - category: preserve-long
@@ -4920,101 +4925,39 @@
   input: here is my take on it the architecture is fine for now but once we hit fifty thousand concurrent users we will need to shard the database and add a caching layer that is probably a Q3 project
   accepted:
   - Here is my take on it. The architecture is fine for now, but once we hit 50,000 concurrent users, we will need to shard the database and add a caching layer. That is probably a Q3 project.
-# --- Parakeet-style backtrack examples (punctuated, multi-sentence) ---
 - category: backtrack
   input: The server is in us-east. No wait it's in us-west. Check the config file for the exact region.
   accepted:
   - The server is in us-west. Check the config file for the exact region.
 - category: backtrack
-  input: The timeout is set to 30 seconds. Uh no 60 seconds. We increased it last week.
-  accepted:
-  - The timeout is set to 60 seconds. We increased it last week.
-- category: backtrack
   input: We're deploying on Thursday. No wait Friday morning. Make sure the team is ready.
   accepted:
   - We're deploying on Friday morning. Make sure the team is ready.
-- category: backtrack
-  input: The endpoint is on port 8080. Uh no 8443. The SSL port is different from the HTTP port.
-  accepted:
-  - The endpoint is on port 8443. The SSL port is different from the HTTP port.
 - category: backtrack
   input: We have three replicas. No wait four. We added one after the last outage.
   accepted:
   - We have 4 replicas. We added one after the last outage.
 - category: backtrack
-  input: The cache TTL is five minutes. No ten minutes. We changed it to reduce database load.
-  accepted:
-  - The cache TTL is 10 minutes. We changed it to reduce database load.
-- category: backtrack
   input: Send it to the marketing team. No actually send it to engineering. They need to review it first.
   accepted:
   - Send it to engineering. They need to review it first.
-- category: backtrack
-  input: The build takes about ten minutes. Wait no twenty minutes since we added the integration tests.
-  accepted:
-  - The build takes about 20 minutes since we added the integration tests.
 - category: backtrack
   input: The retry limit is three. Uh no five. We bumped it up after the network issues.
   accepted:
   - The retry limit is 5. We bumped it up after the network issues.
 - category: backtrack
-  input: The database is on the primary server. No wait the secondary. We moved it during maintenance.
-  accepted:
-  - The database is on the secondary server. We moved it during maintenance.
-- category: backtrack
   input: The release is scheduled for Monday. No actually Tuesday. We pushed it back a day.
   accepted:
   - The release is scheduled for Tuesday. We pushed it back a day.
-- category: backtrack
-  input: We need to update the staging environment. Uh no the production environment. Staging is already done.
+- category: split-word
+  input: The server is completely. Overloaded and we need to scale up immediately.
   accepted:
-  - We need to update the production environment. Staging is already done.
-# --- Parakeet-style correction examples (punctuated, multi-sentence) ---
-- category: correction
-  input: The latency is about 500 milliseconds. I mean 5 seconds. That's way too slow for production.
+  - The server is completely overloaded and we need to scale up immediately.
+- category: split-word
+  input: The deployment finished. Successfully and all health checks are passing.
   accepted:
-  - The latency is about 5 seconds. That's way too slow for production.
-- category: correction
-  input: We had twelve hundred users last month. Sorry I mean twelve thousand. The growth has been really strong.
+  - The deployment finished successfully and all health checks are passing.
+- category: split-word
+  input: The cache is currently. Disabled because we found a consistency bug.
   accepted:
-  - We had 12,000 users last month. The growth has been really strong.
-- category: correction
-  input: Deploy to the staging server. I mean the production server. The fix needs to go out today.
-  accepted:
-  - Deploy to the production server. The fix needs to go out today.
-- category: correction
-  input: The pool size is twenty. Sorry I mean twenty five. We bumped it up after the load test.
-  accepted:
-  - The pool size is 25. We bumped it up after the load test.
-- category: correction
-  input: Talk to the frontend team. I mean the backend team. They own the authentication service.
-  accepted:
-  - Talk to the backend team. They own the authentication service.
-- category: correction
-  input: The cluster has three nodes. Um I mean five nodes. We scaled up for the holiday traffic.
-  accepted:
-  - The cluster has 5 nodes. We scaled up for the holiday traffic.
-- category: correction
-  input: The response time is under 100 milliseconds. I mean 100 seconds. Something is seriously wrong with the database.
-  accepted:
-  - The response time is under 100 seconds. Something is seriously wrong with the database.
-- category: correction
-  input: The error rate is about two percent. Uh sorry I mean five percent. We need to investigate immediately.
-  accepted:
-  - The error rate is about 5%. We need to investigate immediately.
-- category: correction
-  input: Use the REST API. I mean the GraphQL API. It has better support for nested queries.
-  accepted:
-  - Use the GraphQL API. It has better support for nested queries.
-- category: correction
-  input: The SLA is ninety nine percent. Sorry I mean ninety nine point nine percent. We upgraded the tier last month.
-  accepted:
-  - The SLA is 99.9%. We upgraded the tier last month.
-- category: correction
-  input: We need three more engineers. Um I mean four. The scope increased after the latest requirements.
-  accepted:
-  - We need 4 more engineers. The scope increased after the latest requirements.
-- category: correction
-  input: The migration took two hours. I mean two days. It was much more complex than we expected.
-  accepted:
-  - The migration took 2 days. It was much more complex than we expected.
+  - The cache is currently disabled because we found a consistency bug.

@@ -1503,6 +1503,47 @@
   accepted:
   - The auto scaler is currently disabled because of the cost limits we set last week.
   - The auto-scaler is currently disabled because of the cost limits we set last week.
+# More uppercase split-word variations
+- category: parakeet-uppercase-split
+  input: The migration was successfully. Completed before the maintenance window closed.
+  accepted:
+  - The migration was successfully completed before the maintenance window closed.
+- category: parakeet-uppercase-split
+  input: The service has been temporarily. Suspended pending the security audit.
+  accepted:
+  - The service has been temporarily suspended pending the security audit.
+- category: parakeet-uppercase-split
+  input: The rollback was immediately. Triggered after the error rate spiked.
+  accepted:
+  - The rollback was immediately triggered after the error rate spiked.
+- category: parakeet-uppercase-split
+  input: The connection pool is almost. Exhausted and requests are starting to queue.
+  accepted:
+  - The connection pool is almost exhausted and requests are starting to queue.
+- category: parakeet-uppercase-split
+  input: The pipeline was previously. Running on Jenkins but we moved it to GitHub Actions.
+  accepted:
+  - The pipeline was previously running on Jenkins but we moved it to GitHub Actions.
+- category: parakeet-uppercase-split
+  input: The logs are automatically. Rotated every seven days to save disk space.
+  accepted:
+  - The logs are automatically rotated every 7 days to save disk space.
+- category: parakeet-uppercase-split
+  input: The database needs to be manually. Restarted after the config change takes effect.
+  accepted:
+  - The database needs to be manually restarted after the config change takes effect.
+- category: parakeet-uppercase-split
+  input: The endpoint was recently. Deprecated and will be removed in the next release.
+  accepted:
+  - The endpoint was recently deprecated and will be removed in the next release.
+- category: parakeet-uppercase-split
+  input: The tests are consistently. Failing on the CI server but passing locally.
+  accepted:
+  - The tests are consistently failing on the CI server but passing locally.
+- category: parakeet-uppercase-split
+  input: The certificate was properly. Configured but the intermediate chain was missing.
+  accepted:
+  - The certificate was properly configured but the intermediate chain was missing.
 
 # --- Discourse fillers at sentence start (NOT fixed — model keeps them) ---
 - category: parakeet-discourse
