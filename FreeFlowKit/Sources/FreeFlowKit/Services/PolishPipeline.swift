@@ -251,9 +251,6 @@ public enum PolishPipeline {
             }
         }
 
-        // Remove spurious commas from Apple STT artifacts.
-        result = cleanSpuriousCommas(result)
-
         // Strip multi-word noise phrases (uh huh, mm hmm) as units
         // before single filler sounds, so they aren't split by L1.
         result = stripNoisePhrases(result)
@@ -441,39 +438,6 @@ public enum PolishPipeline {
     // MARK: - Spurious Comma Cleanup
 
     /// Remove spurious commas inserted by Apple's speech-to-text engine.
-    ///
-    /// Apple's dictation sometimes inserts commas before or after words
-    /// where they don't belong: "I will be there at 3, PM,, tomorrow,"
-    /// becomes "I will be there at 3 PM tomorrow".
-    public static func cleanSpuriousCommas(_ text: String) -> String {
-        var result = text
-
-        // Collapse doubled/tripled commas: ",," or ",,," → ","
-        result = result.replacingOccurrences(
-            of: #",{2,}"#, with: ",", options: .regularExpression)
-
-        // Remove comma before AM/PM (case insensitive).
-        result = result.replacingOccurrences(
-            of: #",\s*(AM|PM|a\.m\.|p\.m\.)"#, with: " $1",
-            options: .regularExpression)
-
-        // Remove trailing comma at end of sentence (before period or end).
-        result = result.replacingOccurrences(
-            of: #",(\s*[.!?])"#, with: "$1", options: .regularExpression)
-        result = result.replacingOccurrences(
-            of: #",\s*$"#, with: "", options: .regularExpression)
-
-        // Remove comma-space-comma patterns.
-        result = result.replacingOccurrences(
-            of: #",\s*,"#, with: ",", options: .regularExpression)
-
-        // Collapse multiple spaces left behind.
-        result = result.replacingOccurrences(
-            of: " {2,}", with: " ", options: .regularExpression)
-
-        return result.trimmingCharacters(in: .whitespaces)
-    }
-
     // MARK: - Cloud System Prompt
 
     /// Build a dynamic system prompt for cloud polish models.

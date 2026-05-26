@@ -253,16 +253,6 @@ struct PolishScenarioCloudTests {
         }
     }
 
-    @Test("Apple dictation comma bugs cleaned up")
-    func appleBugs() async throws {
-        for s in allScenarios where s.category == "apple-bug" {
-            let result = try await polishWithCloud(s.input)
-            #expect(
-                !result.contains(",,"),
-                "Double commas should be cleaned: \(s.input), got: \(result)")
-        }
-    }
-
     @Test("URLs and email addresses formatted")
     func urls() async throws {
         for s in allScenarios where s.category == "url" {
