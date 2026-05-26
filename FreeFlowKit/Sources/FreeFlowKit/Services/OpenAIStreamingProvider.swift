@@ -176,7 +176,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     public init(
         apiKey: @autoclosure @escaping @Sendable () -> String,
         realtimeModel: String = "gpt-realtime",
-        sttModel: String = "gpt-realtime-whisper",
+        sttModel: String = "gpt-4o-mini-transcribe",
         polishChatClient: (any PolishChatClient)?,
         polishModel: String = PolishPipeline.polishModel,
         chunkingStrategy: ChunkingStrategy = TimeAndSilenceChunkingStrategy()

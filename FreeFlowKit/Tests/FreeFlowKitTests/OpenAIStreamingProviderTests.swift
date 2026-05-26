@@ -40,7 +40,7 @@ struct OpenAIRealtimeMessageTests {
     @Test("session.update has required transcription fields")
     func sessionUpdate() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
-            sttModel: "gpt-realtime-whisper",
+            sttModel: "gpt-4o-mini-transcribe",
             language: "en",
             micProximity: .nearField)
         let data = json.data(using: .utf8)!
@@ -58,7 +58,7 @@ struct OpenAIRealtimeMessageTests {
         #expect(format["rate"] as? Int == 24000)
 
         let transcription = try #require(input["transcription"] as? [String: Any])
-        #expect(transcription["model"] as? String == "gpt-realtime-whisper")
+        #expect(transcription["model"] as? String == "gpt-4o-mini-transcribe")
         #expect(transcription["language"] as? String == "en")
 
         // turn_detection must be NSNull so the server does not auto-commit.
@@ -68,7 +68,7 @@ struct OpenAIRealtimeMessageTests {
     @Test("session.update omits language when nil")
     func sessionUpdateNoLanguage() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
-            sttModel: "gpt-realtime-whisper",
+            sttModel: "gpt-4o-mini-transcribe",
             language: nil,
             micProximity: .farField)
         let obj = try JSONSerialization.jsonObject(
