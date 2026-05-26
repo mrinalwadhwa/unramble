@@ -175,8 +175,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     public init(
         apiKey: @autoclosure @escaping @Sendable () -> String,
-        realtimeModel: String = "gpt-4o-realtime-preview",
-        sttModel: String = "gpt-4o-mini-transcribe",
+        realtimeModel: String = "gpt-realtime",
+        sttModel: String = "gpt-realtime-whisper",
         polishChatClient: (any PolishChatClient)?,
         polishModel: String = PolishPipeline.polishModel,
         chunkingStrategy: ChunkingStrategy = TimeAndSilenceChunkingStrategy()
@@ -969,7 +969,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         let url = buildWebSocketURL(model: model)
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
 
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 300
@@ -1007,7 +1006,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     }
 
     /// Build the `session.update` message to configure transcription-only
-    /// mode with manual commit and mic-specific noise reduction.
+    /// mode with manual commit.
     static func buildSessionUpdate(
         sttModel: String,
         language: String?,
@@ -1020,21 +1019,20 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             transcription["language"] = language
         }
 
-        let noiseReductionType: String
-        switch micProximity {
-        case .nearField: noiseReductionType = "near_field"
-        case .farField: noiseReductionType = "far_field"
-        }
-
         let session: [String: Any] = [
-            "modalities": ["text"],
-            "input_audio_format": "pcm16",
-            "input_audio_transcription": transcription,
-            // NSNull serializes as JSON null, which disables server VAD
-            // so the client controls when audio ends via commit.
-            "turn_detection": NSNull(),
-            "input_audio_noise_reduction": [
-                "type": noiseReductionType
+            "type": "realtime",
+            "audio": [
+                "input": [
+                    "format": [
+                        "type": "audio/pcm",
+                        "rate": 24000,
+                    ],
+                    "transcription": transcription,
+                    // NSNull serializes as JSON null, which disables
+                    // server VAD so the client controls when audio
+                    // ends via commit.
+                    "turn_detection": NSNull(),
+                ],
             ],
         ]
 

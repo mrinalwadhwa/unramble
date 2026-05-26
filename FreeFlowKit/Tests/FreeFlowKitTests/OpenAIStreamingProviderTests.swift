@@ -40,7 +40,7 @@ struct OpenAIRealtimeMessageTests {
     @Test("session.update has required transcription fields")
     func sessionUpdate() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
-            sttModel: "gpt-4o-mini-transcribe",
+            sttModel: "gpt-realtime-whisper",
             language: "en",
             micProximity: .nearField)
         let data = json.data(using: .utf8)!
@@ -49,47 +49,45 @@ struct OpenAIRealtimeMessageTests {
         #expect(obj["type"] as? String == "session.update")
 
         let session = try #require(obj["session"] as? [String: Any])
-        // The session should request text-only modalities. Including
-        // "audio" causes the Realtime API to generate audio responses,
-        // wasting bandwidth — we only need input transcription.
-        #expect(session["modalities"] as? [String] == ["text"])
-        #expect(session["input_audio_format"] as? String == "pcm16")
+        #expect(session["type"] as? String == "realtime")
 
-        let transcription = try #require(
-            session["input_audio_transcription"] as? [String: Any])
-        #expect(transcription["model"] as? String == "gpt-4o-mini-transcribe")
+        let audio = try #require(session["audio"] as? [String: Any])
+        let input = try #require(audio["input"] as? [String: Any])
+        let format = try #require(input["format"] as? [String: Any])
+        #expect(format["type"] as? String == "audio/pcm")
+        #expect(format["rate"] as? Int == 24000)
+
+        let transcription = try #require(input["transcription"] as? [String: Any])
+        #expect(transcription["model"] as? String == "gpt-realtime-whisper")
         #expect(transcription["language"] as? String == "en")
 
         // turn_detection must be NSNull so the server does not auto-commit.
-        #expect(session["turn_detection"] is NSNull)
-
-        let noiseReduction = try #require(
-            session["input_audio_noise_reduction"] as? [String: Any])
-        #expect(noiseReduction["type"] as? String == "near_field")
+        #expect(input["turn_detection"] is NSNull)
     }
 
     @Test("session.update omits language when nil")
     func sessionUpdateNoLanguage() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
-            sttModel: "gpt-4o-mini-transcribe",
+            sttModel: "gpt-realtime-whisper",
             language: nil,
             micProximity: .farField)
         let obj = try JSONSerialization.jsonObject(
             with: json.data(using: .utf8)!) as! [String: Any]
         let session = obj["session"] as! [String: Any]
-        let transcription = session["input_audio_transcription"] as! [String: Any]
+        let audio = session["audio"] as! [String: Any]
+        let input = audio["input"] as! [String: Any]
+        let transcription = input["transcription"] as! [String: Any]
         #expect(transcription["language"] == nil)
     }
 
-    @Test("session.update uses far_field for far-field mic")
+    @Test("session.update sets realtime type for far-field mic")
     func sessionUpdateFarField() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
             sttModel: "m", language: nil, micProximity: .farField)
         let obj = try JSONSerialization.jsonObject(
             with: json.data(using: .utf8)!) as! [String: Any]
         let session = obj["session"] as! [String: Any]
-        let noiseReduction = session["input_audio_noise_reduction"] as! [String: Any]
-        #expect(noiseReduction["type"] as? String == "far_field")
+        #expect(session["type"] as? String == "realtime")
     }
 
     @Test("audio append message contains base64 audio")
@@ -115,9 +113,8 @@ struct OpenAIRealtimeMessageTests {
 
     @Test("websocket URL has model parameter")
     func websocketURL() {
-        let url = OpenAIStreamingProvider.buildWebSocketURL(model: "gpt-4o-realtime-preview")
-        #expect(url.absoluteString.hasPrefix("wss://api.openai.com/v1/realtime"))
-        #expect(url.absoluteString.contains("model=gpt-4o-realtime-preview"))
+        let url = OpenAIStreamingProvider.buildWebSocketURL(model: "gpt-realtime")
+        #expect(url.absoluteString == "wss://api.openai.com/v1/realtime?model=gpt-realtime")
     }
 
     @Test("websocket URL scheme is wss")
