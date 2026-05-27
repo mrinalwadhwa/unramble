@@ -33,7 +33,17 @@ private func runCloudPipeline(
         if raw.isEmpty {
             return "[empty] \(PolishPipeline.normalizeFormatting(stripped, casual: casual))"
         }
-        let untagged = PolishPipeline.stripKeepTags(raw, casual: casual)
+        let cleaned = PolishPipeline.guardAgainstEcho(
+            polished: raw,
+            precedingText: scenario.precedingText)
+        let guarded: String
+        if let fallback = PolishPipeline.guardAgainstTruncation(
+            polished: cleaned, preprocessed: stripped) {
+            guarded = fallback
+        } else {
+            guarded = cleaned
+        }
+        let untagged = PolishPipeline.stripKeepTags(guarded, casual: casual)
         let normalized = PolishPipeline.normalizeFormatting(
             untagged, casual: casual)
         return PolishPipeline.matchInputCasing(

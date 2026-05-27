@@ -1213,8 +1213,18 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     self.currentTiming?.polishFinishedAt = Date()
                 }
             }
+            let cleaned = PolishPipeline.guardAgainstEcho(
+                polished: polished,
+                precedingText: context.focusedFieldContent)
+            let guarded: String
+            if let fallback = PolishPipeline.guardAgainstTruncation(
+                polished: cleaned, preprocessed: stripped) {
+                guarded = fallback
+            } else {
+                guarded = cleaned
+            }
             let untagged = PolishPipeline.stripKeepTags(
-                polished, casual: casual)
+                guarded, casual: casual)
             let normalized = PolishPipeline.normalizeFormatting(
                 untagged, casual: casual)
             let result = PolishPipeline.matchInputCasing(
