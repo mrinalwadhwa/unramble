@@ -1227,9 +1227,14 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 guarded, casual: casual)
             let normalized = PolishPipeline.normalizeFormatting(
                 untagged, casual: casual)
-            let result = PolishPipeline.matchInputCasing(
+            let cased = PolishPipeline.matchInputCasing(
                 normalized, preprocessedInput: substituted,
                 casual: casual)
+            let noPreceding = context.focusedFieldContent == nil
+                || context.focusedFieldContent!.isEmpty
+            let result = PolishPipeline.adjustFirstCharCasing(
+                cased, preprocessed: stripped, casual: casual,
+                noPreceding: noPreceding)
             if stripped != result {
                 Log.debug("[Polish] CHANGED: \"\(stripped)\" → \"\(result)\"")
             }

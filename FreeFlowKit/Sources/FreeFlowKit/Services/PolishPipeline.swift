@@ -1159,7 +1159,7 @@ public enum PolishPipeline {
     /// continuation) but the model uppercased it back, restore
     /// lowercase — but only when the first word is the same in both.
     /// If there's no preceding text and the model lowercased, capitalize.
-    private static func adjustFirstCharCasing(
+    public static func adjustFirstCharCasing(
         _ text: String, preprocessed: String, casual: Bool,
         noPreceding: Bool
     ) -> String {

@@ -46,9 +46,14 @@ private func runCloudPipeline(
         let untagged = PolishPipeline.stripKeepTags(guarded, casual: casual)
         let normalized = PolishPipeline.normalizeFormatting(
             untagged, casual: casual)
-        return PolishPipeline.matchInputCasing(
+        let cased = PolishPipeline.matchInputCasing(
             normalized, preprocessedInput: substituted,
             casual: casual)
+        let noPreceding = scenario.precedingText == nil
+            || scenario.precedingText!.isEmpty
+        return PolishPipeline.adjustFirstCharCasing(
+            cased, preprocessed: stripped, casual: casual,
+            noPreceding: noPreceding)
     } catch {
         return "[error] \(error)"
     }
