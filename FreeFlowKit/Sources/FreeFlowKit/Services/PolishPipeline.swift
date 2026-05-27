@@ -584,6 +584,10 @@ public enum PolishPipeline {
         result = result.replacingOccurrences(
             of: #"\bp\.m\.(?=$|\n)"#, with: "PM.", options: .regularExpression)
 
+        // Collapse redundant terminal punctuation (e.g. "!." → "!").
+        result = result.replacingOccurrences(
+            of: #"([!?])\."#, with: "$1", options: .regularExpression)
+
         // Process line by line.
         // Strip trailing whitespace, normalize bullets, and strip
         // trailing periods from list items for consistent style.

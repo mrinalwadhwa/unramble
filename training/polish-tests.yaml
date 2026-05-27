@@ -1245,6 +1245,7 @@
   - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
   - Here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
   - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then, once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
 # Sample 26: 5-sentence preserve (last sentence was dropped in v11)
 - category: parakeet-preserve
   input: The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
@@ -1497,10 +1498,12 @@
   input: The connection pool is almost. Exhausted and requests are starting to queue.
   accepted:
   - The connection pool is almost exhausted and requests are starting to queue.
+  - The connection pool is almost exhausted, and requests are starting to queue.
 - category: parakeet-uppercase-split
   input: The pipeline was previously. Running on Jenkins but we moved it to GitHub Actions.
   accepted:
   - The pipeline was previously running on Jenkins but we moved it to GitHub Actions.
+  - The pipeline was previously running on Jenkins, but we moved it to GitHub Actions.
 - category: parakeet-uppercase-split
   input: The logs are automatically. Rotated every seven days to save disk space.
   accepted:
@@ -1521,6 +1524,7 @@
   input: The certificate was properly. Configured but the intermediate chain was missing.
   accepted:
   - The certificate was properly configured but the intermediate chain was missing.
+  - The certificate was properly configured, but the intermediate chain was missing.
 
 # --- Discourse fillers at sentence start (NOT fixed — model keeps them) ---
 - category: parakeet-discourse
