@@ -701,6 +701,11 @@ public enum PolishPipeline {
         result = result.replacingOccurrences(
             of: #"([!?])\."#, with: "$1", options: .regularExpression)
 
+        // Convert "X percent" → "X%" when preceded by a number.
+        result = result.replacingOccurrences(
+            of: #"\b(\d+(?:\.\d+)?) percent\b"#,
+            with: "$1%", options: .regularExpression)
+
         // Process line by line.
         // Strip trailing whitespace, normalize bullets, and strip
         // trailing periods from list items for consistent style.

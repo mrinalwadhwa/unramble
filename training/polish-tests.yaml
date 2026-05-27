@@ -828,7 +828,6 @@
   input: the cache hit rate is sixty percent
   accepted:
   - The cache hit rate is 60%.
-  - The cache hit rate is 60 percent.
 - category: number
   input: we have fifty active connections right now
   accepted:
@@ -841,7 +840,6 @@
   input: the CPU usage spiked to ninety percent during the deploy
   accepted:
   - The CPU usage spiked to 90% during the deploy.
-  - The CPU usage spiked to 90 percent during the deploy.
 # Teens (Parakeet sometimes outputs these as words)
 - category: number
   input: we have thirteen servers in the cluster
@@ -851,7 +849,6 @@
   input: about fifteen percent of requests are failing
   accepted:
   - About 15% of requests are failing.
-  - About 15 percent of requests are failing.
 - category: number
   input: the build takes seventeen minutes to complete
   accepted:
@@ -890,7 +887,6 @@
   input: the error rate is twenty-three percent
   accepted:
   - The error rate is 23%.
-  - The error rate is 23 percent.
 - category: number
   input: the cluster has forty-eight nodes
   accepted:
@@ -1313,7 +1309,6 @@
   input: The churn rate stayed. Flat at around three point five percent.
   accepted:
   - The churn rate stayed flat at around 3.5%.
-  - The churn rate stayed flat at around three point five percent.
 # --- Preceding-context echo tests ---
 # The model receives tail sentences with preceding context.
 # It must polish the input without echoing the preceding text.

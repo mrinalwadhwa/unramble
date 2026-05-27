@@ -703,6 +703,42 @@ struct NormalizeFormattingTests {
         #expect(PolishPipeline.normalizeFormatting(
             "The call is at 3 PM.") == "The call is at 3 PM.")
     }
+
+    @Test("percent converted to % after integer")
+    func percentInteger() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "Usage is at 85 percent.") == "Usage is at 85%.")
+    }
+
+    @Test("percent converted to % after decimal")
+    func percentDecimal() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "The rate is 3.5 percent.") == "The rate is 3.5%.")
+    }
+
+    @Test("percent not converted without preceding number")
+    func percentNoNumber() {
+        let input = "The percent sign is used."
+        #expect(PolishPipeline.normalizeFormatting(input) == input)
+    }
+
+    @Test("percentage not affected")
+    func percentageUnchanged() {
+        let input = "The percentage is high."
+        #expect(PolishPipeline.normalizeFormatting(input) == input)
+    }
+
+    @Test("percentile not affected")
+    func percentileUnchanged() {
+        let input = "The P99 percentile is 200ms."
+        #expect(PolishPipeline.normalizeFormatting(input) == input)
+    }
+
+    @Test("already % passes through")
+    func alreadySymbol() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "Usage is at 85%.") == "Usage is at 85%.")
+    }
 }
 
 // MARK: - buildUserPrompt
