@@ -807,6 +807,147 @@
   input: we processed one point two million requests yesterday
   accepted:
   - We processed 1.2 million requests yesterday.
+# --- Number word conversion (hyphenated compounds + standalone tens) ---
+- category: number
+  input: the latency dropped from two fifty milliseconds to eighty milliseconds
+  accepted:
+  - The latency dropped from 250 milliseconds to 80 milliseconds.
+- category: number
+  input: we need twenty-seven servers for the new cluster
+  accepted:
+  - We need 27 servers for the new cluster.
+- category: number
+  input: the response time is forty-five milliseconds on average
+  accepted:
+  - The response time is 45 milliseconds on average.
+- category: number
+  input: there were ninety-nine failures in the last batch
+  accepted:
+  - There were 99 failures in the last batch.
+- category: number
+  input: the cache hit rate is sixty percent
+  accepted:
+  - The cache hit rate is 60%.
+  - The cache hit rate is 60 percent.
+- category: number
+  input: we have fifty active connections right now
+  accepted:
+  - We have 50 active connections right now.
+- category: number
+  input: the timeout is set to thirty seconds
+  accepted:
+  - The timeout is set to 30 seconds.
+- category: number
+  input: the CPU usage spiked to ninety percent during the deploy
+  accepted:
+  - The CPU usage spiked to 90% during the deploy.
+  - The CPU usage spiked to 90 percent during the deploy.
+# Teens (Parakeet sometimes outputs these as words)
+- category: number
+  input: we have thirteen servers in the cluster
+  accepted:
+  - We have 13 servers in the cluster.
+- category: number
+  input: about fifteen percent of requests are failing
+  accepted:
+  - About 15% of requests are failing.
+  - About 15 percent of requests are failing.
+- category: number
+  input: the build takes seventeen minutes to complete
+  accepted:
+  - The build takes 17 minutes to complete.
+- category: number
+  input: nineteen nodes are currently active
+  accepted:
+  - 19 nodes are currently active.
+  - Nineteen nodes are currently active.
+# Teens that must NOT be converted (before scale words)
+- category: number
+  input: we have fifteen million active users
+  accepted:
+  - We have 15 million active users.
+- category: number
+  input: there are thirteen thousand records in the table
+  accepted:
+  - There are 13,000 records in the table.
+# Edge cases: words that must NOT be converted
+- category: preserve
+  input: One of the servers is down and we need to restart it.
+  accepted:
+  - One of the servers is down and we need to restart it.
+  - One of the servers is down, and we need to restart it.
+- category: preserve
+  input: That's one approach we could take.
+  accepted:
+  - That's one approach we could take.
+# --- Parakeet number patterns (real STT outputs) ---
+# Parakeet outputs hyphenated compounds for two-word numbers
+- category: number
+  input: we have ninety-nine servers running in production
+  accepted:
+  - We have 99 servers running in production.
+- category: number
+  input: the error rate is twenty-three percent
+  accepted:
+  - The error rate is 23%.
+  - The error rate is 23 percent.
+- category: number
+  input: the cluster has forty-eight nodes
+  accepted:
+  - The cluster has 48 nodes.
+- category: number
+  input: it costs sixty-five dollars per month
+  accepted:
+  - It costs $65 per month.
+  - It costs $65 dollars per month.
+# Parakeet outputs word-form years
+- category: number
+  input: the deadline is January fifteenth, twenty twenty-seven
+  accepted:
+  - The deadline is January 15th, 2027.
+  - The deadline is January 15, 2027.
+# Parakeet outputs word-form for some standalone numbers
+- category: number
+  input: the response time is eighty milliseconds
+  accepted:
+  - The response time is 80 milliseconds.
+  - The response time is 80 ms.
+- category: number
+  input: we need thirty more days
+  accepted:
+  - We need 30 more days.
+- category: number
+  input: the cache TTL is sixty seconds
+  accepted:
+  - The cache TTL is 60 seconds.
+# Hyphenated ordinals — must NOT be converted to digits
+- category: number
+  input: she's the twenty-first employee we hired this year
+  accepted:
+  - She's the 21st employee we hired this year.
+  - She's the twenty-first employee we hired this year.
+# Compound numbers Parakeet keeps as words
+- category: number
+  input: there are two hundred and fifty nodes in the cluster
+  accepted:
+  - There are 250 nodes in the cluster.
+- category: number
+  input: the salary is ninety thousand dollars per year
+  accepted:
+  - The salary is $90,000 per year.
+  - The salary is $90,000 dollars per year.
+# Mixed: digit from Parakeet + word-form in same sentence
+- category: number
+  input: the latency dropped from 250 milliseconds to eighty milliseconds
+  accepted:
+  - The latency dropped from 250 milliseconds to 80 milliseconds.
+  - The latency dropped from 250 ms to 80 ms.
+- category: preserve
+  input: First we deploy the changes then we run the tests.
+  accepted:
+  - First we deploy the changes then we run the tests.
+  - First, we deploy the changes, then we run the tests.
+  - First, we deploy the changes. Then we run the tests.
 - category: preserve
   input: He mentioned that the deadline might slip.
   accepted:

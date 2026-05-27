@@ -263,6 +263,9 @@ public enum PolishPipeline {
         // like "one point two million" → "200,000".
         result = convertDecimalScale(result)
 
+        // Convert unambiguous number words to digits.
+        result = convertNumberWords(result)
+
         return result.trimmingCharacters(in: .whitespaces)
     }
 
@@ -435,9 +438,119 @@ public enum PolishPipeline {
         return result
     }
 
-    // MARK: - Spurious Comma Cleanup
+    // MARK: - Number Word Conversion
 
-    /// Remove spurious commas inserted by Apple's speech-to-text engine.
+    private static let tens: [(String, Int)] = [
+        ("twenty", 20), ("thirty", 30), ("forty", 40),
+        ("fifty", 50), ("sixty", 60), ("seventy", 70),
+        ("eighty", 80), ("ninety", 90),
+    ]
+
+    private static let teens: [(String, Int)] = [
+        ("thirteen", 13), ("fourteen", 14), ("fifteen", 15),
+        ("sixteen", 16), ("seventeen", 17), ("eighteen", 18),
+        ("nineteen", 19),
+    ]
+
+    private static let onesValues: [String: Int] = [
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    ]
+
+    private static let onesWords = [
+        "one", "two", "three", "four", "five",
+        "six", "seven", "eight", "nine",
+    ]
+
+    /// Convert unambiguous number words to digits.
+    ///
+    /// Handles hyphenated compounds ("twenty-seven" → "27"),
+    /// space-separated compounds ("ninety nine" → "99"), and
+    /// standalone tens ("eighty" → "80"). Avoids ambiguous words
+    /// like "one", "two", or ordinals.
+    static func convertNumberWords(_ text: String) -> String {
+        var result = text
+
+        // Step 0: Year patterns — "twenty twenty-seven" → "2027"
+        // Must run before compound conversion so the year is consumed
+        // as a whole unit.
+        for (unit, digit) in digitWords {
+            result = result.replacingOccurrences(
+                of: "(?i)\\btwenty twenty-\(unit)\\b",
+                with: "202\(digit)", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: "(?i)\\btwenty twenty \(unit)\\b",
+                with: "202\(digit)", options: .regularExpression)
+        }
+        result = result.replacingOccurrences(
+            of: "(?i)\\btwenty twenty\\b",
+            with: "2020", options: .regularExpression)
+
+        // Step 1: Hyphenated compounds — "twenty-seven" → "27"
+        // Skip when preceded by a tens word (year pattern like
+        // "twenty twenty-seven" should stay for the model).
+        let tensPattern = tens.map(\.0).joined(separator: "|")
+        for (ten, tenVal) in tens {
+            for (unit, unitVal) in onesValues {
+                let compound = "\(ten)-\(unit)"
+                let digit = "\(tenVal + unitVal)"
+                result = result.replacingOccurrences(
+                    of: "(?i)(?<!(?:\(tensPattern)) )\\b\(compound)\\b",
+                    with: digit,
+                    options: .regularExpression)
+            }
+        }
+
+        // Step 2: Space-separated compounds — "ninety nine" → "99"
+        // Must run before standalone tens to avoid "ninety" → "90"
+        // leaving "nine" orphaned. Skip when preceded by a tens word
+        // (year pattern like "twenty twenty seven").
+        for (ten, tenVal) in tens {
+            for (unit, unitVal) in onesValues {
+                let compound = "\(ten) \(unit)"
+                let digit = "\(tenVal + unitVal)"
+                result = result.replacingOccurrences(
+                    of: "(?i)(?<!(?:\(tensPattern)) )\\b\(compound)\\b",
+                    with: digit,
+                    options: .regularExpression)
+            }
+        }
+
+        // Step 3: Standalone tens — "eighty" → "80"
+        // Guards:
+        // - Not followed by a ones word ("ninety nine" handled in step 2)
+        // - Not followed by scale/ordinal words that form compounds
+        // - Not preceded by a number word or "and" after "hundred"
+        //   (e.g., "two thirty" = 2:30, "two hundred and fifty" = 250)
+        let tensWords = tens.map(\.0)
+        let skipAfter = (onesWords + tensWords + [
+            "hundred", "thousand", "million", "billion", "trillion",
+            "first", "second", "third", "fourth", "fifth",
+            "sixth", "seventh", "eighth", "ninth",
+        ]).joined(separator: "|")
+        let skipBefore = (onesWords + tensWords + [
+            "hundred",
+        ]).joined(separator: "|")
+        for (ten, tenVal) in tens {
+            result = result.replacingOccurrences(
+                of: "(?i)(?<!(?:\(skipBefore)) )(?<!hundred and )\\b\(ten)\\b(?![ -](?:\(skipAfter))\\b)(?! \\d)",
+                with: "\(tenVal)",
+                options: .regularExpression)
+        }
+
+        // Step 4: Standalone teens — "thirteen" → "13"
+        // Same guards as tens: not before scale/ordinal words,
+        // not after "hundred" (e.g., "one hundred thirteen").
+        for (teen, teenVal) in teens {
+            result = result.replacingOccurrences(
+                of: "(?i)(?<!hundred )(?<!hundred and )\\b\(teen)\\b(?![ -](?:\(skipAfter))\\b)(?! \\d)",
+                with: "\(teenVal)",
+                options: .regularExpression)
+        }
+
+        return result
+    }
+
     // MARK: - Cloud System Prompt
 
     /// Build a dynamic system prompt for cloud polish models.

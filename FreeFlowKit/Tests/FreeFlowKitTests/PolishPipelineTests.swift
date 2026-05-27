@@ -1112,3 +1112,133 @@ struct StripFillerSoundsTests {
         #expect(PolishPipeline.stripFillerSounds(input) == input)
     }
 }
+
+@Suite("PolishPipeline – convertNumberWords")
+struct ConvertNumberWordsTests {
+
+    // MARK: - Hyphenated compounds (step 1)
+
+    @Test("Hyphenated compound converts")
+    func hyphenatedCompound() {
+        #expect(PolishPipeline.convertNumberWords("twenty-seven servers") == "27 servers")
+        #expect(PolishPipeline.convertNumberWords("forty-five milliseconds") == "45 milliseconds")
+        #expect(PolishPipeline.convertNumberWords("ninety-nine problems") == "99 problems")
+    }
+
+    @Test("Hyphenated ordinals are NOT converted")
+    func hyphenatedOrdinals() {
+        #expect(PolishPipeline.convertNumberWords("the twenty-first employee") == "the twenty-first employee")
+        #expect(PolishPipeline.convertNumberWords("her forty-fifth birthday") == "her forty-fifth birthday")
+        #expect(PolishPipeline.convertNumberWords("the thirty-second timeout") == "the thirty-second timeout")
+    }
+
+    // MARK: - Space-separated compounds (step 2)
+
+    @Test("Space-separated compound converts")
+    func spaceSeparatedCompound() {
+        #expect(PolishPipeline.convertNumberWords("sixty five dollars") == "65 dollars")
+        #expect(PolishPipeline.convertNumberWords("ninety nine problems") == "99 problems")
+        #expect(PolishPipeline.convertNumberWords("twenty three nodes") == "23 nodes")
+    }
+
+    // MARK: - Standalone tens (step 3)
+
+    @Test("Standalone tens convert")
+    func standaloneTens() {
+        #expect(PolishPipeline.convertNumberWords("eighty degrees") == "80 degrees")
+        #expect(PolishPipeline.convertNumberWords("the count is ninety") == "the count is 90")
+        #expect(PolishPipeline.convertNumberWords("about forty requests") == "about 40 requests")
+        #expect(PolishPipeline.convertNumberWords("thirty seconds left") == "30 seconds left")
+    }
+
+    @Test("Two standalone tens in one sentence")
+    func twoTens() {
+        #expect(PolishPipeline.convertNumberWords("Between forty and sixty servers") == "Between 40 and 60 servers")
+    }
+
+    @Test("Tens before scale words are NOT converted")
+    func tensBeforeScale() {
+        #expect(PolishPipeline.convertNumberWords("twenty thousand users") == "twenty thousand users")
+        #expect(PolishPipeline.convertNumberWords("fifty million dollars") == "fifty million dollars")
+        #expect(PolishPipeline.convertNumberWords("ninety billion requests") == "ninety billion requests")
+    }
+
+    @Test("Tens before ordinals are NOT converted")
+    func tensBeforeOrdinals() {
+        #expect(PolishPipeline.convertNumberWords("twenty first century") == "twenty first century")
+        #expect(PolishPipeline.convertNumberWords("the twenty first employee") == "the twenty first employee")
+    }
+
+    @Test("Tens after hundred are NOT converted")
+    func tensAfterHundred() {
+        #expect(PolishPipeline.convertNumberWords("two hundred and fifty seats") == "two hundred and fifty seats")
+        #expect(PolishPipeline.convertNumberWords("three hundred fifty seats") == "three hundred fifty seats")
+    }
+
+    @Test("Tens preceded by number word are NOT converted")
+    func tensAfterNumberWord() {
+        // "two thirty" is a time format (2:30)
+        let input = "the meeting is at two thirty PM"
+        #expect(PolishPipeline.convertNumberWords(input).contains("thirty"))
+    }
+
+    @Test("Tens before digits are NOT converted")
+    func tensBeforeDigits() {
+        // After step 1 converts "twenty-seven" to "27", "twenty" should not convert
+        #expect(PolishPipeline.convertNumberWords("twenty 27") == "twenty 27")
+    }
+
+    @Test("Pluralized tens are NOT matched")
+    func pluralTens() {
+        #expect(PolishPipeline.convertNumberWords("in her thirties") == "in her thirties")
+        #expect(PolishPipeline.convertNumberWords("the nineties") == "the nineties")
+        #expect(PolishPipeline.convertNumberWords("the roaring twenties") == "the roaring twenties")
+    }
+
+    // MARK: - Teens (step 4)
+
+    @Test("Standalone teens convert")
+    func standaloneTeens() {
+        #expect(PolishPipeline.convertNumberWords("thirteen servers") == "13 servers")
+        #expect(PolishPipeline.convertNumberWords("fifteen percent") == "15 percent")
+        #expect(PolishPipeline.convertNumberWords("seventeen bugs") == "17 bugs")
+        #expect(PolishPipeline.convertNumberWords("the count is nineteen") == "the count is 19")
+    }
+
+    @Test("Teens before scale words are NOT converted")
+    func teensBeforeScale() {
+        #expect(PolishPipeline.convertNumberWords("thirteen thousand users") == "thirteen thousand users")
+        #expect(PolishPipeline.convertNumberWords("fifteen million records") == "fifteen million records")
+    }
+
+    @Test("Teens after hundred are NOT converted")
+    func teensAfterHundred() {
+        #expect(PolishPipeline.convertNumberWords("one hundred thirteen items") == "one hundred thirteen items")
+        #expect(PolishPipeline.convertNumberWords("two hundred and fifteen seats") == "two hundred and fifteen seats")
+    }
+
+    // MARK: - Year patterns (step 0)
+
+    @Test("Twenty twenty-X year patterns convert")
+    func yearPatterns() {
+        #expect(PolishPipeline.convertNumberWords("in twenty twenty") == "in 2020")
+        #expect(PolishPipeline.convertNumberWords("since twenty twenty-one") == "since 2021")
+        #expect(PolishPipeline.convertNumberWords("deadline is twenty twenty-seven") == "deadline is 2027")
+        #expect(PolishPipeline.convertNumberWords("deadline is twenty twenty seven") == "deadline is 2027")
+    }
+
+    // MARK: - Mixed patterns
+
+    @Test("Teens and tens in same sentence")
+    func mixedTeensAndTens() {
+        #expect(PolishPipeline.convertNumberWords("between thirteen and forty items") == "between 13 and 40 items")
+        #expect(PolishPipeline.convertNumberWords("from nineteen to ninety-five percent") == "from 19 to 95 percent")
+    }
+
+    @Test("Already-digit input is unchanged")
+    func digitsPassThrough() {
+        #expect(PolishPipeline.convertNumberWords("85% CPU") == "85% CPU")
+        #expect(PolishPipeline.convertNumberWords("250 milliseconds") == "250 milliseconds")
+        #expect(PolishPipeline.convertNumberWords("$49 per month") == "$49 per month")
+    }
+}
