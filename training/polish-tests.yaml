@@ -1143,6 +1143,7 @@
   accepted:
   - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
   - The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
 - category: parakeet-false-start
   input: We should probably actually know let me think rethink this. The best approach would be to add a retry mechanism with exponential back off. That way we It won't overwhelm the server during peak hours.
   accepted:
@@ -1180,6 +1181,7 @@
   accepted:
   - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
   - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+  - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
 - category: parakeet-echo
   preceding_text: Here's the plan for tomorrow.
   input: First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
@@ -1215,6 +1217,7 @@
   accepted:
   - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
   - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+  - First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
 - category: parakeet-echo
   preceding_text: Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window.
   input: Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
@@ -1447,6 +1450,7 @@
   input: We noticed the CPU spike at 11 p.m. last night. By 1 a.m. the service had fully recovered.
   accepted:
   - We noticed the CPU spike at 11 PM last night. By 1 AM the service had fully recovered.
+  - We noticed the CPU spike at 11 PM last night. By 1 AM, the service had fully recovered.
 - category: parakeet-ampm
   input: The batch job runs at 4 a.m. daily and processes about fifty thousand records.
   accepted:
