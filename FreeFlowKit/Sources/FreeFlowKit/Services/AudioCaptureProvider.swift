@@ -727,11 +727,25 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
                 return
             }
             if _isRecording {
-                // Defer teardown until the next startRecording().
+                // Check if the hardware format actually changed before
+                // deferring a rebuild. AVAudioEngine fires spurious
+                // config change notifications during BT negotiation
+                // that don't indicate a real device change.
+                if let engine, let tapFmt = tapFormat {
+                    let hwFormat = engine.inputNode.outputFormat(forBus: 0)
+                    if hwFormat.sampleRate == tapFmt.sampleRate
+                        && hwFormat.channelCount == tapFmt.channelCount
+                    {
+                        Log.debug(
+                            "[AudioCapture] Config change during recording ignored"
+                                + " (format unchanged: \(hwFormat.sampleRate)Hz)")
+                        return
+                    }
+                }
                 _needsEngineRebuild = true
                 Log.debug(
                     "[AudioCapture] Config change during recording, deferring rebuild"
-                )
+                        + " (format changed)")
                 return
             }
             tearDownEngineLocked()

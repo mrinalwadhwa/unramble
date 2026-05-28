@@ -89,18 +89,19 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             guard devices.contains(where: { $0.id == id }) else {
                 throw CoreAudioDeviceError.deviceNotFound(id)
             }
-            // If the selected device is the current system default,
-            // clear the explicit selection instead of storing an ID.
-            // This lets macOS manage audio routing (important for
-            // Bluetooth devices like AirPods whose SCO channel may
-            // not re-establish properly via explicit AudioUnit
-            // device selection after switching away and back).
+            // For Bluetooth devices that match the current system
+            // default, clear the explicit selection so macOS manages
+            // audio routing. BT SCO channels don't re-establish
+            // reliably via explicit AudioUnit device selection.
+            // For wired/built-in devices, keep the explicit selection
+            // to shield the engine from unrelated device changes.
+            let device = devices.first(where: { $0.id == id })
             let defaultDevice = devices.first(where: { $0.isDefault })
-            if defaultDevice?.id == id {
+            if device?.transportType == .bluetooth && defaultDevice?.id == id {
                 lock.withLock { _selectedDeviceID = nil }
                 Log.debug(
-                    "[CoreAudioDeviceProvider] Selected device id=\(id) is system default, clearing explicit selection"
-                )
+                    "[CoreAudioDeviceProvider] Selected BT device id=\(id)"
+                        + " is system default, using default routing")
             } else {
                 lock.withLock { _selectedDeviceID = id }
                 Log.debug("[CoreAudioDeviceProvider] Selected device id=\(id)")
@@ -352,7 +353,6 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             let devicesBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 guard let self else { return }
                 Log.debug("[CoreAudioDeviceProvider] Device list changed")
-                // If the selected device was disconnected, clear the selection.
                 let (selectedID, captureProvider): (UInt32?, AudioCaptureProvider?) = self.lock
                     .withLock {
                         (self._selectedDeviceID, self._audioCaptureProvider)
@@ -364,9 +364,13 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
                         Log.debug(
                             "[CoreAudioDeviceProvider] Selected device \(selectedID) disconnected, reverting to default"
                         )
+                        captureProvider?.markNeedsRebuild()
                     }
+                    // Selected device still present — skip rebuild.
+                } else {
+                    // Using system default — rebuild to pick up changes.
+                    captureProvider?.markNeedsRebuild()
                 }
-                captureProvider?.markNeedsRebuild()
             }
 
             let devicesStatus = AudioObjectAddPropertyListenerBlock(
@@ -388,10 +392,13 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
 
             let defaultBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 Log.debug("[CoreAudioDeviceProvider] Default input device changed")
-                let captureProvider: AudioCaptureProvider? = self?.lock.withLock {
-                    self?._audioCaptureProvider
+                let (selectedID, captureProvider): (UInt32?, AudioCaptureProvider?) =
+                    self?.lock.withLock {
+                        (self?._selectedDeviceID, self?._audioCaptureProvider)
+                    } ?? (nil, nil)
+                if selectedID == nil {
+                    captureProvider?.markNeedsRebuild()
                 }
-                captureProvider?.markNeedsRebuild()
             }
 
             let defaultStatus = AudioObjectAddPropertyListenerBlock(
