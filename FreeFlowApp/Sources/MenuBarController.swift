@@ -471,6 +471,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         Task {
             let devices = await audioDeviceProvider.availableDevices()
             let current = await audioDeviceProvider.currentDevice()
+            let isAutoDetect = audioDeviceProvider.isAutoDetect
 
             submenu.removeAllItems()
 
@@ -485,16 +486,56 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 return
             }
 
+            // Auto-detect at the top.
+            let defaultDevice = devices.first(where: { $0.isDefault })
+            let defaultName: String
+            if defaultDevice?.transportType == .builtIn {
+                defaultName = "Built-in mic"
+            } else {
+                defaultName = defaultDevice?.name ?? "System Default"
+            }
+            let autoItem = NSMenuItem(
+                title: "Auto-detect (\(defaultName))",
+                action: #selector(selectAutoDetect(_:)),
+                keyEquivalent: ""
+            )
+            autoItem.target = self
+            autoItem.state = isAutoDetect ? .on : .off
+            submenu.addItem(autoItem)
+
+            submenu.addItem(.separator())
+
+            // Explicit device options.
             for device in devices {
+                var title: String
+                if device.transportType == .builtIn {
+                    title = "Built-in mic (recommended)"
+                } else {
+                    title = device.name
+                }
                 let item = NSMenuItem(
-                    title: device.name,
+                    title: title,
                     action: #selector(selectMicrophone(_:)),
                     keyEquivalent: ""
                 )
                 item.target = self
                 item.tag = Int(device.id)
-                item.state = (device.id == current?.id) ? .on : .off
+                item.state = (!isAutoDetect && device.id == current?.id) ? .on : .off
                 submenu.addItem(item)
+            }
+
+            // Clamshell warning.
+            if let current, current.transportType == .builtIn,
+               audioDeviceProvider.isClamshellClosed
+            {
+                submenu.addItem(.separator())
+                let warning = NSMenuItem(
+                    title: "⚠ Lid closed — built-in mic may not work well",
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                warning.isEnabled = false
+                submenu.addItem(warning)
             }
         }
     }
@@ -585,6 +626,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 Log.debug("[MenuBar] Failed to select microphone: \(error)")
             }
         }
+    }
+
+    @objc private func selectAutoDetect(_ sender: NSMenuItem) {
+        guard let audioDeviceProvider else { return }
+        audioDeviceProvider.clearSelection()
+        Log.debug("[MenuBar] Selected auto-detect")
     }
 
     @objc private func contributeMicData() {

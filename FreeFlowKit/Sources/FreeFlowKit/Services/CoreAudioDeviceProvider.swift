@@ -4,6 +4,10 @@ import Foundation
     import CoreAudio
 #endif
 
+#if canImport(IOKit)
+    import IOKit
+#endif
+
 /// Enumerate and select audio input devices using Core Audio.
 ///
 /// Uses `AudioObjectGetPropertyData` to list physical and virtual input
@@ -89,23 +93,8 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             guard devices.contains(where: { $0.id == id }) else {
                 throw CoreAudioDeviceError.deviceNotFound(id)
             }
-            // For Bluetooth devices that match the current system
-            // default, clear the explicit selection so macOS manages
-            // audio routing. BT SCO channels don't re-establish
-            // reliably via explicit AudioUnit device selection.
-            // For wired/built-in devices, keep the explicit selection
-            // to shield the engine from unrelated device changes.
-            let device = devices.first(where: { $0.id == id })
-            let defaultDevice = devices.first(where: { $0.isDefault })
-            if device?.transportType == .bluetooth && defaultDevice?.id == id {
-                lock.withLock { _selectedDeviceID = nil }
-                Log.debug(
-                    "[CoreAudioDeviceProvider] Selected BT device id=\(id)"
-                        + " is system default, using default routing")
-            } else {
-                lock.withLock { _selectedDeviceID = id }
-                Log.debug("[CoreAudioDeviceProvider] Selected device id=\(id)")
-            }
+            lock.withLock { _selectedDeviceID = id }
+            Log.debug("[CoreAudioDeviceProvider] Selected device id=\(id)")
         #else
             throw CoreAudioDeviceError.coreAudioUnavailable
         #endif
@@ -120,10 +109,46 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
         lock.withLock { _selectedDeviceID }
     }
 
-    /// Clear the explicit device selection, reverting to the system default.
+    /// Whether the user is in auto-detect mode (no explicit selection).
+    public var isAutoDetect: Bool {
+        lock.withLock { _selectedDeviceID == nil }
+    }
+
+    /// Clear the explicit device selection, reverting to auto-detect.
     public func clearSelection() {
         lock.withLock { _selectedDeviceID = nil }
-        Log.debug("[CoreAudioDeviceProvider] Cleared selection, using system default")
+        Log.debug("[CoreAudioDeviceProvider] Cleared selection, using auto-detect")
+    }
+
+    /// Whether the MacBook lid is closed (clamshell mode).
+    ///
+    /// When true and the built-in mic is selected, audio quality
+    /// will be poor because the mic is behind the closed lid.
+    public var isClamshellClosed: Bool {
+        #if canImport(IOKit)
+            var iterator: io_iterator_t = 0
+            let result = IOServiceGetMatchingServices(
+                kIOMainPortDefault,
+                IOServiceMatching("IOPMrootDomain"),
+                &iterator)
+            guard result == KERN_SUCCESS else { return false }
+            defer { IOObjectRelease(iterator) }
+
+            let service = IOIteratorNext(iterator)
+            guard service != 0 else { return false }
+            defer { IOObjectRelease(service) }
+
+            guard let prop = IORegistryEntryCreateCFProperty(
+                service,
+                "AppleClamshellState" as CFString,
+                kCFAllocatorDefault,
+                0)?.takeRetainedValue()
+            else { return false }
+
+            return (prop as? Bool) ?? false
+        #else
+            return false
+        #endif
     }
 
     /// Return the mic proximity for a device ID.
@@ -177,7 +202,8 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
 
     #if canImport(CoreAudio)
 
-        /// List all audio input devices currently connected to the system.
+        /// List audio input devices, filtering out virtual and
+        /// aggregate devices that aren't real microphones.
         private func listInputDevices() -> [AudioDevice] {
             let allDeviceIDs = getAllAudioDeviceIDs()
             let defaultInputID = getDefaultInputDeviceID()
@@ -188,11 +214,18 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
                 guard hasInputStreams(deviceID: deviceID) else { continue }
                 guard let name = getDeviceName(deviceID: deviceID) else { continue }
 
+                let transport = getTransportType(deviceID: deviceID)
+
+                // Skip virtual and aggregate devices (e.g.
+                // "CADefaultDeviceAggregate", "ZoomAudioDevice").
+                // Only show real hardware: built-in, BT, and USB.
+                if transport == .other { continue }
+
                 let device = AudioDevice(
                     id: deviceID,
                     name: name,
                     isDefault: deviceID == defaultInputID,
-                    transportType: getTransportType(deviceID: deviceID)
+                    transportType: transport
                 )
                 inputDevices.append(device)
             }

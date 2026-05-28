@@ -19,4 +19,13 @@ public protocol AudioDeviceProviding: Sendable {
     /// The next recording session uses the selected device. Does not affect
     /// a recording that is already in progress.
     func selectDevice(id: UInt32) async throws
+
+    /// Whether the user is in auto-detect mode (no explicit selection).
+    var isAutoDetect: Bool { get }
+
+    /// Clear the explicit device selection, reverting to auto-detect.
+    func clearSelection()
+
+    /// Whether the MacBook lid is closed (clamshell mode).
+    var isClamshellClosed: Bool { get }
 }

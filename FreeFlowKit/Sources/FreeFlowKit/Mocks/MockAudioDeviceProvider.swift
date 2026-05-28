@@ -63,6 +63,16 @@ public final class MockAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             _selectedDeviceID = id
         }
     }
+
+    public var isAutoDetect: Bool {
+        lock.withLock { _selectedDeviceID == nil }
+    }
+
+    public func clearSelection() {
+        lock.withLock { _selectedDeviceID = nil }
+    }
+
+    public var isClamshellClosed: Bool { false }
 }
 
 /// Errors thrown by `MockAudioDeviceProvider`.

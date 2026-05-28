@@ -188,18 +188,31 @@ final class OnboardingController {
         Task {
             let devices = await audioDeviceProvider.availableDevices()
             let current = await audioDeviceProvider.currentDevice()
+            let isAutoDetect = audioDeviceProvider.isAutoDetect
 
-            let deviceList: [[String: Any]] = devices.map { device in
-                [
+            let defaultDevice = devices.first(where: { $0.isDefault })
+            let defaultLabel = defaultDevice?.transportType == .builtIn
+                ? "Built-in mic" : (defaultDevice?.name ?? "System Default")
+
+            var deviceList: [[String: Any]] = [[
+                "id": 0,
+                "name": "Auto-detect (\(defaultLabel))",
+                "isSelected": isAutoDetect,
+            ]]
+
+            for device in devices {
+                let name = device.transportType == .builtIn
+                    ? "Built-in mic (recommended)" : device.name
+                deviceList.append([
                     "id": device.id,
-                    "name": device.name,
-                    "isDefault": device.isDefault,
-                ]
+                    "name": name,
+                    "isSelected": !isAutoDetect && device.id == current?.id,
+                ])
             }
 
             bridge.pushMicrophoneList(
                 devices: deviceList,
-                currentId: current?.id
+                currentId: isAutoDetect ? 0 : current?.id
             )
         }
     }
@@ -213,8 +226,12 @@ final class OnboardingController {
                 // Stop current preview and wait for it to complete.
                 await stopMicPreviewAsync()
 
-                // Select the new device.
-                try await audioDeviceProvider.selectDevice(id: id)
+                // Select the device, or clear to auto-detect.
+                if id == 0 {
+                    audioDeviceProvider.clearSelection()
+                } else {
+                    try await audioDeviceProvider.selectDevice(id: id)
+                }
                 bridge.pushMicrophoneSelected(id: id)
 
                 // Small delay to let the audio system settle after device change.
