@@ -329,6 +329,88 @@ struct LocalStreamingPreprocessingTests {
             "a.m./p.m. period should not be stripped: \(result)")
     }
 
+    @Test("Filler across background cache boundary is stripped")
+    func fillerAcrossCacheBoundary() async throws {
+        // Background cycle 1 sees: "Think about the key areas."
+        // Background cycle 2 sees: "Think about the key areas. Um for CTO roles."
+        // The "Um" starts a new sentence after the cache boundary.
+        let engine = ProgressiveSTTEngine(results: [
+            "Think about the key areas.",
+            "Think about the key areas. Um for CTO roles and AI roles.",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            cycleInterval: 0.05)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let result = try await provider.finishStreaming()
+        #expect(
+            !result.contains("Um ") && !result.contains(" um "),
+            "Filler should be stripped across cache boundary but got: \(result)")
+    }
+
+    @Test("Mid-sentence filler stripped in background polish")
+    func midSentenceFillerInBackground() async throws {
+        let engine = ProgressiveSTTEngine(results: [
+            "I did all of those things, um but I think the details are too much.",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            cycleInterval: 0.05)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let result = try await provider.finishStreaming()
+        #expect(
+            !result.contains(" um "),
+            "Mid-sentence filler should be stripped but got: \(result)")
+    }
+
+    @Test("Filler stripped when echo model is used")
+    func fillerStrippedWithEchoModel() async throws {
+        // Echo model returns its input unchanged — fillers should
+        // still be stripped by preprocessing before the model sees them.
+        let engine = MockLocalSTTEngine()
+        engine.stubbedTranscription = "I did all of those things, um but I think the details are too much."
+        let echoClient = EchoPolishClient()
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: echoClient)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 64))
+        let result = try await provider.finishStreaming()
+        print("[TEST] Filler with echo model: \"\(result)\"")
+        #expect(
+            !result.contains(" um "),
+            "Filler should be stripped before model sees it but got: \(result)")
+    }
+
+    @Test("Multiple fillers stripped with echo model")
+    func multipleFillerWithEchoModel() async throws {
+        let engine = MockLocalSTTEngine()
+        engine.stubbedTranscription = "Read the first page of um autonomy docs. Um I think that gives us better vocabulary. Um The term is harness."
+        let echoClient = EchoPolishClient()
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: echoClient)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 64))
+        let result = try await provider.finishStreaming()
+        print("[TEST] Multiple fillers with echo: \"\(result)\"")
+        #expect(
+            !result.lowercased().contains(" um ") && !result.contains("Um "),
+            "All fillers should be stripped but got: \(result)")
+    }
+
     @Test("Split-word across background cache boundary is rejoined")
     func splitWordAcrossCacheBoundary() async throws {
         // Background cycle 1 sees: "I set core cultural aspects."
