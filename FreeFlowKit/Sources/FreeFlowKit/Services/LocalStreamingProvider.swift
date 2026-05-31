@@ -113,7 +113,11 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "" }
 
-        let finalSentences = splitIntoSentences(trimmed)
+        // Rejoin split-words before sentence splitting so that
+        // Parakeet mid-phrase periods (". lowercase") don't get
+        // broken across sentences or cache boundaries.
+        let rejoined = PolishPipeline.rejoinSplitWords(trimmed)
+        let finalSentences = splitIntoSentences(rejoined)
 
         // Verify cache against the final transcript. Later cache
         // entries had more audio context and are more likely to match.
@@ -194,7 +198,13 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             }
 
             let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
-            let result = parts.joined(separator: " ")
+            let assembled = parts.joined(separator: " ")
+            // Rejoin split-words and strip fillers that span cache
+            // boundaries. Each cached entry was polished in isolation,
+            // so a Parakeet mid-phrase period at a cache boundary
+            // (e.g. "aspects. around") was not caught by per-entry
+            // preprocessing.
+            let result = PolishPipeline.repairCacheBoundaries(assembled)
             Log.debug("[LocalStreaming] Incremental (head=\(headSentences.count) cached=\(cachedSentenceCount) tail=\(tailSentences.count) stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
             return result
         }
@@ -251,7 +261,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
         Log.debug("[LocalStreaming] Background STT: '\(trimmed)' (stt=\(String(format: "%.2f", sttElapsed))s)")
 
-        let allSentences = splitIntoSentences(trimmed)
+        let rejoined = PolishPipeline.rejoinSplitWords(trimmed)
+        let allSentences = splitIntoSentences(rejoined)
 
         // Count complete sentences (last may be incomplete if text
         // doesn't end with punctuation).

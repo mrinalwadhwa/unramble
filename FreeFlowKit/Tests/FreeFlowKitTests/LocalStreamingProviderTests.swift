@@ -196,3 +196,166 @@ private final class StreamingMockPolishClient: PolishChatClient, @unchecked Send
         return stubbedResult
     }
 }
+
+/// A polish client that echoes back its input unchanged.
+/// Simulates a model that doesn't improve the text.
+private final class EchoPolishClient: PolishChatClient, @unchecked Sendable {
+    func complete(
+        model: String, systemPrompt: String, userPrompt: String
+    ) async throws -> String {
+        return userPrompt
+    }
+}
+
+/// An STT engine that returns different results on successive calls.
+/// Simulates Parakeet progressively transcribing more audio.
+private final class ProgressiveSTTEngine: LocalSTTEngine, @unchecked Sendable {
+    let name = "ProgressiveSTT"
+    var isReady: Bool = true
+
+    private let lock = NSLock()
+    private var _callIndex = 0
+    private let _results: [String]
+
+    init(results: [String]) {
+        self._results = results
+    }
+
+    func load() async throws {}
+    func unload() async {}
+
+    func transcribe(audio: Data) async throws -> String {
+        lock.withLock {
+            let idx = min(_callIndex, _results.count - 1)
+            _callIndex += 1
+            return _results[idx]
+        }
+    }
+}
+
+// MARK: - Preprocessing with sentence splitting
+
+@Suite("LocalStreamingProvider – preprocessing")
+struct LocalStreamingPreprocessingTests {
+
+    private func makeProvider(
+        sttResult: String
+    ) -> (LocalStreamingProvider, MockLocalSTTEngine) {
+        let engine = MockLocalSTTEngine()
+        engine.stubbedTranscription = sttResult
+        let provider = LocalStreamingProvider(
+            sttEngine: engine, polishChatClient: nil)
+        return (provider, engine)
+    }
+
+    private func makePCM(bytes: Int = 64) -> Data {
+        Data(repeating: 0x42, count: bytes)
+    }
+
+    private func runPipeline(_ sttResult: String) async throws -> String {
+        let (provider, _) = makeProvider(sttResult: sttResult)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 64))
+        return try await provider.finishStreaming()
+    }
+
+    private func runPipelineWithEchoModel(_ sttResult: String) async throws -> String {
+        let engine = MockLocalSTTEngine()
+        engine.stubbedTranscription = sttResult
+        let echoClient = EchoPolishClient()
+        let provider = LocalStreamingProvider(
+            sttEngine: engine, polishChatClient: echoClient)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 64))
+        return try await provider.finishStreaming()
+    }
+
+    @Test("Split-word is rejoined in finishStreaming output (no model)")
+    func splitWordRejoined() async throws {
+        let result = try await runPipeline(
+            "I was responsible for setting core cultural aspects. around engineering processes.")
+        #expect(
+            result.contains("aspects around"),
+            "Split-word should be rejoined but got: \(result)")
+    }
+
+    @Test("Split-word is rejoined when model echoes input")
+    func splitWordRejoinedWithModel() async throws {
+        let result = try await runPipelineWithEchoModel(
+            "I was responsible for setting core cultural aspects. around engineering processes.")
+        #expect(
+            result.contains("aspects around"),
+            "Split-word should be rejoined but got: \(result)")
+    }
+
+    @Test("Filler um is stripped in finishStreaming output")
+    func fillerUmStripped() async throws {
+        let result = try await runPipeline(
+            "Think about the key areas. Um for CTO roles and AI roles.")
+        #expect(
+            !result.contains("Um ") && !result.contains(" um "),
+            "Filler 'um' should be stripped but got: \(result)")
+    }
+
+    @Test("Filler uh is stripped in finishStreaming output")
+    func fillerUhStripped() async throws {
+        let result = try await runPipeline(
+            "I like the beginning of uh A but I want the product statement.")
+        #expect(
+            !result.contains(" uh "),
+            "Filler 'uh' should be stripped but got: \(result)")
+    }
+
+    @Test("Trailing Mm-hmm is stripped in finishStreaming output")
+    func trailingMmHmmStripped() async throws {
+        let result = try await runPipeline(
+            "We should add rate limiting to the API. Mm-hmm.")
+        #expect(
+            !result.contains("Mm-hmm"),
+            "Trailing 'Mm-hmm' should be stripped but got: \(result)")
+    }
+
+    @Test("a.m./p.m. period is not treated as split-word")
+    func ampmNotRejoined() async throws {
+        let result = try await runPipeline(
+            "The meeting is at 3 p.m. in the large conference room.")
+        #expect(
+            result.contains("PM") || result.contains("p.m."),
+            "a.m./p.m. should be preserved but got: \(result)")
+        #expect(
+            !result.contains("p.m in"),
+            "a.m./p.m. period should not be stripped: \(result)")
+    }
+
+    @Test("Split-word across background cache boundary is rejoined")
+    func splitWordAcrossCacheBoundary() async throws {
+        // Background cycle 1 sees: "I set core cultural aspects."
+        // Background cycle 2 sees: "I set core cultural aspects. around engineering."
+        // The split-word spans the cache boundary.
+        let engine = ProgressiveSTTEngine(results: [
+            "I set core cultural aspects.",
+            "I set core cultural aspects. around engineering processes.",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            cycleInterval: 0.05)
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        // Send enough audio to trigger background cycles
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        // Wait for background cycle to cache first sentence
+        try await Task.sleep(nanoseconds: 150_000_000) // 150ms
+        // Send more audio
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        // Wait for second background cycle
+        try await Task.sleep(nanoseconds: 150_000_000)
+        // Finish — should rejoin the split-word
+        let result = try await provider.finishStreaming()
+        #expect(
+            result.contains("aspects around") || result.contains("aspects Around"),
+            "Split-word across cache boundary should be rejoined but got: \(result)")
+    }
+}

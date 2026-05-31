@@ -1278,3 +1278,4 @@ struct ConvertNumberWordsTests {
         #expect(PolishPipeline.convertNumberWords("$49 per month") == "$49 per month")
     }
 }
+
