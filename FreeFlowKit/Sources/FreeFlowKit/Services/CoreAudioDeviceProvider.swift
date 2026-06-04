@@ -216,10 +216,16 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
 
                 let transport = getTransportType(deviceID: deviceID)
 
-                // Skip virtual and aggregate devices (e.g.
-                // "CADefaultDeviceAggregate", "ZoomAudioDevice").
-                // Only show real hardware: built-in, BT, and USB.
-                if transport == .other { continue }
+                Log.debug(
+                    "[CoreAudioDeviceProvider] Input device: \"\(name)\" "
+                    + "id=\(deviceID) transport=\(transport)"
+                    + (deviceID == defaultInputID ? " (default)" : "")
+                )
+
+                // Skip known virtual and aggregate devices.
+                // Allow transport=other for real hardware like
+                // iPhone Continuity Microphone.
+                if isVirtualDevice(name: name) { continue }
 
                 let device = AudioDevice(
                     id: deviceID,
@@ -347,6 +353,18 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             default:
                 return .other
             }
+        }
+
+        /// Check if a device is a known virtual/aggregate device that
+        /// should be hidden from the mic menu.
+        private func isVirtualDevice(name: String) -> Bool {
+            let lower = name.lowercased()
+            return lower.contains("aggregate")
+                || lower.contains("zoomaudiodevice")
+                || lower.contains("screencastaudio")
+                || lower.contains("blackhole")
+                || lower.contains("loopback")
+                || lower.contains("soundflower")
         }
 
         /// Get the human-readable name of a device.

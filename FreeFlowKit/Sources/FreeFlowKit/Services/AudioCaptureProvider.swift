@@ -414,6 +414,31 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
         #endif
     }
 
+    /// Force-reset the audio engine after a timeout.
+    ///
+    /// When `startRecording()` hangs inside `engine.start()` (BT SCO
+    /// negotiation), it holds the lock indefinitely. This method uses
+    /// `lock.try()` — if the lock is available, it tears down normally.
+    /// If the lock is held (stuck `startRecording`), it stops the engine
+    /// directly to unblock `engine.start()`, then marks for rebuild so
+    /// the next session creates a fresh engine.
+    public func forceReset() {
+        #if canImport(AVFoundation)
+            if lock.try() {
+                tearDownEngineLocked()
+                _isRecording = false
+                lock.unlock()
+                Log.debug("[AudioCapture] Force reset (lock available)")
+            } else {
+                // Lock is held — startRecording() is stuck. Stop the
+                // engine directly to unblock engine.start().
+                engine?.stop()
+                _needsEngineRebuild = true
+                Log.debug("[AudioCapture] Force reset (lock held, engine stopped)")
+            }
+        #endif
+    }
+
     /// Mark the engine for rebuild on the next recording session.
     ///
     /// Called by `CoreAudioDeviceProvider` when the device list or

@@ -1045,6 +1045,7 @@ public enum PolishPipeline {
                 ? String(preceding.suffix(80))
                 : preceding
             prompt += "\nPreceding text: \(suffix)"
+            Log.debug("[PolishPipeline] preceding: \"\(suffix)\"")
         }
 
         let noPreceding = precedingText == nil || precedingText!.isEmpty
@@ -1059,6 +1060,13 @@ public enum PolishPipeline {
             }
             let cleaned = guardAgainstEcho(
                 polished: polished, precedingText: precedingText)
+            if let fallback = guardAgainstHallucination(
+                polished: cleaned, preprocessed: stripped) {
+                return adjustFirstCharCasing(
+                    normalizeFormatting(fallback, casual: casual),
+                    preprocessed: stripped, casual: casual,
+                    noPreceding: noPreceding)
+            }
             if let fallback = guardAgainstTruncation(
                 polished: cleaned, preprocessed: stripped) {
                 return adjustFirstCharCasing(
@@ -1514,6 +1522,55 @@ public enum PolishPipeline {
         }
 
         return nil
+    }
+
+    /// Detect when the model hallucinated unrelated text.
+    ///
+    /// Extract content words (3+ chars) from input and output. If they
+    /// share fewer than 30% of input words, the model likely hallucinated
+    /// and we fall back to the preprocessed input.
+    static func guardAgainstHallucination(
+        polished: String, preprocessed: String
+    ) -> String? {
+        // For short inputs, detect hallucination by length explosion.
+        // A polished "Okay." should never become 80+ characters.
+        if preprocessed.count < 20 && polished.count > preprocessed.count * 4 {
+            Log.debug(
+                "[HALLUCINATION_GUARD] length explosion"
+                + " input=\(preprocessed.count)chars"
+                + " output=\(polished.count)chars"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+
+        let inputWords = contentWords(preprocessed)
+        guard inputWords.count >= 3 else { return nil }
+
+        let outputWords = contentWords(polished)
+        let shared = inputWords.intersection(outputWords)
+        let overlap = Double(shared.count) / Double(inputWords.count)
+
+        if overlap < 0.3 {
+            Log.debug(
+                "[HALLUCINATION_GUARD] overlap=\(String(format: "%.0f", overlap * 100))%"
+                + " shared=\(shared.count)/\(inputWords.count) words"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+        return nil
+    }
+
+    /// Extract lowercased content words (3+ characters, letters only).
+    private static func contentWords(_ text: String) -> Set<String> {
+        Set(
+            text.lowercased()
+                .components(separatedBy: .alphanumerics.inverted)
+                .filter { $0.count >= 3 }
+        )
     }
 
     /// Count sentence-ending punctuation marks in text.

@@ -79,6 +79,14 @@ public protocol AudioProviding: Sendable {
     /// Call on app termination. Implementations that do not hold persistent
     /// resources can use the default no-op implementation.
     func shutdown()
+
+    /// Force-reset the audio engine after a timeout.
+    ///
+    /// When `startRecording()` hangs (e.g. BT SCO negotiation blocking
+    /// `engine.start()`), it holds the lock. This method stops the
+    /// engine without waiting for the lock, unblocking the hung call
+    /// so the next session can start fresh.
+    func forceReset()
 }
 
 extension AudioProviding {
@@ -105,4 +113,7 @@ extension AudioProviding {
 
     /// Default implementation is a no-op.
     public func shutdown() {}
+
+    /// Default implementation is a no-op.
+    public func forceReset() {}
 }

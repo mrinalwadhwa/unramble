@@ -314,9 +314,11 @@ public actor DictationPipeline: PipelineProviding {
             break
         case .failure(let error):
             Log.debug("[Pipeline] Failed to start recording: \(error)")
-            // If startRecording() timed out, the background task may
-            // finish and leave _isRecording=true permanently. Stop it
-            // so the next session can start cleanly.
+            // If startRecording() timed out, engine.start() may be
+            // blocking inside the lock. Force-reset stops the engine
+            // without the lock to unblock the hung call, then marks
+            // for rebuild so the next session gets a fresh engine.
+            audioProvider.forceReset()
             Task { [audioProvider] in
                 _ = try? await audioProvider.stopRecording()
             }
