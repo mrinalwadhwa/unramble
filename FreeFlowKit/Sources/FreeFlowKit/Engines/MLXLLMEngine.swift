@@ -83,7 +83,14 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
             generateParameters: params)
 
         let result = try await session.respond(to: userPrompt)
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        var cleaned = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The Qwen3 adapter sometimes appends a trailing quote.
+        // Strip it so it doesn't leak into injected text.
+        while cleaned.hasSuffix("\"") {
+            cleaned = String(cleaned.dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return cleaned
     }
 }
 
