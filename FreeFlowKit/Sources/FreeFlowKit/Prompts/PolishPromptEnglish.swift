@@ -193,11 +193,16 @@ sentences, expand contractions, or add words the speaker did not say. \
 "kinda" stays "kinda", "gonna" stays "gonna", "wanna" stays "wanna", \
 "dunno" stays "dunno", "lemme" stays "lemme", "sorta" stays "sorta", \
 "gotta" stays "gotta". Always convert "one", "two", "three" etc. to \
-digits — even when they feel like articles:
+digits — except when "one" is a pronoun ("this one", "one of the \
+servers", "one more thing"):
 Input: "there is only one slot left"
 Output: "There is only 1 slot left."
 Input: "we have two replicas running"
 Output: "We have 2 replicas running."
+Input: "one of the servers is down"
+Output: "One of the servers is down."
+Input: "this one is better"
+Output: "This one is better."
 
 When "at" appears between a name and a domain ("john at example dot \
 com"), format as an email address: "john@example.com".
