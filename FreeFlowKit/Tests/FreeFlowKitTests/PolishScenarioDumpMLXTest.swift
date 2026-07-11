@@ -38,13 +38,29 @@ private final class EvalLogger {
     deinit { try? handle.close() }
 }
 
+private func logTag() -> String {
+    if let tag = ProcessInfo.processInfo.environment["FREEFLOW_EVAL_TAG"],
+       !tag.isEmpty {
+        return "-" + tag
+    }
+    let path = "/tmp/freeflow-test-log-tag"
+    guard let tag = try? String(contentsOfFile: path, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+          !tag.isEmpty
+    else { return "" }
+    return "-" + tag
+}
+
 private func runMLXDump(
     name: String,
     modelID: String,
     adapterPath: String? = nil,
     logPath: String = "/tmp/freeflow-mlx-eval.log"
 ) async throws {
-    let log = EvalLogger(path: logPath)
+    let tag = logTag()
+    let taggedPath = tag.isEmpty ? logPath : logPath.replacingOccurrences(
+        of: ".log", with: "\(tag).log")
+    let log = EvalLogger(path: taggedPath)
     let engine: MLXLLMEngine
     if let adapterPath {
         engine = MLXLLMEngine(

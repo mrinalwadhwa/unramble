@@ -70,6 +70,10 @@ let allScenarios: [PolishScenario] = loadScenarios(from: "polish-tests.json")
 /// through the full Swift pipeline (preprocessing → model → postprocessing).
 let allTrainingScenarios: [PolishScenario] = loadScenarios(from: "polish-training-eval.json")
 
+/// P1 eval scenarios — curated set of cases that must be 100% correct.
+/// Covers: don't lose content, pass through clean input, handle Parakeet artifacts.
+let allP1Scenarios: [PolishScenario] = loadScenarios(from: "p1-eval-set.json")
+
 /// Load scenarios from a JSON file, applying environment-based filters.
 ///
 /// - `FREEFLOW_TEST_CATEGORIES=list,meeting` — run only these categories
@@ -108,6 +112,10 @@ private func loadScenarios(from filename: String) -> [PolishScenario] {
 /// return training scenarios. Otherwise return test scenarios. Applies
 /// the same category and casual filters.
 func evalScenarios() -> [PolishScenario] {
+    if ProcessInfo.processInfo.environment["FREEFLOW_TEST_P1"] == "1"
+        || FileManager.default.fileExists(atPath: "/tmp/freeflow-test-p1") {
+        return allP1Scenarios
+    }
     if ProcessInfo.processInfo.environment["FREEFLOW_TEST_TRAINING"] == "1"
         || FileManager.default.fileExists(atPath: "/tmp/freeflow-test-training") {
         return allTrainingScenarios
