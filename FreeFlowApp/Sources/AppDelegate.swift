@@ -290,12 +290,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "qwen3-0.6b-4bit-polish-adapter", file: "adapters.safetensors",
                 modelManager: modelManager)
 
-            let parakeetPath = Self.resolveModelPath(
-                "parakeet-tdt-0.6b-v3-coreml", file: "tokens.txt",
-                modelManager: modelManager)
-            let sttEngine = ParakeetEngine(
-                modelManager: modelManager,
-                modelPath: parakeetPath)
+            let sttEngine: any LocalSTTEngine
+            let nemotronDir = modelManager.modelPath(
+                for: "nemotron-speech-streaming-en-0.6b-coreml")
+            let nemotronVariant = nemotronDir.appendingPathComponent(
+                "nemotron_coreml_560ms")
+            if FileManager.default.fileExists(
+                atPath: nemotronVariant.appendingPathComponent(
+                    "tokenizer.json").path) {
+                Log.debug("[AppDelegate] Nemotron model found, using NemotronEngine")
+                sttEngine = NemotronEngine(
+                    modelManager: modelManager,
+                    modelPath: nemotronDir.path)
+            } else {
+                let parakeetPath = Self.resolveModelPath(
+                    "parakeet-tdt-0.6b-v3-coreml", file: "tokens.txt",
+                    modelManager: modelManager)
+                sttEngine = ParakeetEngine(
+                    modelManager: modelManager,
+                    modelPath: parakeetPath)
+            }
             let llmEngine = MLXLLMEngine(
                 name: "Qwen3 0.6B Polish",
                 modelID: qwenModelPath ?? "mlx-community/Qwen3-0.6B-4bit",
