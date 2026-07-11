@@ -989,6 +989,7 @@ public actor DictationPipeline: PipelineProviding {
 
         if text == nil {
             Log.debug("[Pipeline] Both streaming and batch failed")
+            await coordinator.reset()
         }
         return text
     }
@@ -1034,7 +1035,7 @@ public actor DictationPipeline: PipelineProviding {
             }
 
             recoveryBox.set(audio: tailWAV, context: context)
-            await coordinator.failDictation()
+            await coordinator.reset()
             return nil
         }
     }
@@ -1059,7 +1060,7 @@ public actor DictationPipeline: PipelineProviding {
         completeEnteredAt: CFAbsoluteTime,
         mode: String
     ) async {
-        Log.debug("[Pipeline] dictation returned, injecting text")
+        Log.debug("[Pipeline] dictation returned, injecting text: \"\(text)\"")
 
         let finalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !finalText.isEmpty else {

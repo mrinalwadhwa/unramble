@@ -882,7 +882,7 @@ final class StreamingPipelineTests: XCTestCase {
         emitTask.cancel()
 
         let state = await coordinator.state
-        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(state, .idle)
         XCTAssertEqual(
             injector.injectionCount, 0,
             "No text should be injected when both paths fail")
