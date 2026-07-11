@@ -33,9 +33,17 @@ Output: "Great news! The release is done."
 Input: "The options are: A; B; and C"
 Output: "The options are: A; B; and C."
 
+When the sentence is a question — starts with "can you", "could you", \
+"should we", "is the", "are we", "do we", "what", "how" — end with \
+"?" even if the input has no question mark:
+Input: "can you check the logs"
+Output: "Can you check the logs?"
+Input: "can you deploy it to production"
+Output: "Can you deploy it to production?"
+
 When "period" appears at the end of a clause and doesn't make sense as \
-a noun (like "billing period"), treat it as a punctuation command and \
-replace with ".":
+a noun (like "billing period", "trial period", "grace period"), treat \
+it as a punctuation command and replace with ".":
 Input: "send the report period"
 Output: "Send the report."
 Input: "close the issue period move on"
@@ -45,9 +53,14 @@ Remove filler words (um, uh, like, you know, I mean, basically, so, \
 yeah, okay, right, literally, well, ah, hmm) and throat-clearing \
 preambles that add no content (I just wanted to say that, so the thing \
 is, let me think, let me see, hold on, how do I put this, let me \
-recall). \
+recall). Keep "so" and "well" when part of a phrase: "so be it", "well \
+done", "so far", "as well", "oh well". \
 Also strip verbal confirmations after thinking pauses ("ah yes", "okay \
 yes", "mm right") — go straight to the actual content. Examples:
+Input: "so be it we'll go with plan B"
+Output: "So be it, we'll go with plan B."
+Input: "well done on closing the deal"
+Output: "Well done on closing the deal."
 Input: "hold on let me check yes the config is correct"
 Output: "The config is correct."
 Input: "how do I put this the timeline is too aggressive"
@@ -85,14 +98,18 @@ Output: "Just keep the current setup."
 
 Remove unintentional stuttered repetitions where a word or phrase is \
 accidentally doubled mid-sentence ("I think I think we should" → "I \
-think we should", "the the client" → "the client"). But when a word \
-is repeated 3 or more times deliberately for emphasis — especially at \
-the start of a sentence — keep all instances and separate with commas: \
-"wait wait wait hold on" → "Wait, wait, wait, hold on." Use a \
-comma (not a period) after the emphasis to keep it as one sentence: \
-"no no no we can't do that" → "No, no, no, we can't do that." Also \
-keep 2-word emphasis: "please please", "never ever", "now now", "yes \
-yes", "no no".
+think we should", "the the client" → "the client"). After removing a \
+repetition, check if the result is a question — if it starts with \
+"can you", "could you", "should we", "is the", etc., end with "?":
+Input: "can you can you send me the report"
+Output: "Can you send me the report?"
+But when a word is repeated 3 or more times deliberately for \
+emphasis — especially at the start of a sentence — keep all instances \
+and separate with commas: "wait wait wait hold on" → "Wait, wait, \
+wait, hold on." Use a comma (not a period) after the emphasis to keep \
+it as one sentence: "no no no we can't do that" → "No, no, no, we \
+can't do that." Also keep 2-word emphasis: "please please", "never \
+ever", "now now", "yes yes", "no no".
 
 Convert all spelled-out numbers to digits, including small ones: \
 "twenty three" → "23", "third" → "3rd", "two thirty \
@@ -192,7 +209,9 @@ Keep the speaker's word choices — do not substitute synonyms, rephrase \
 sentences, expand contractions, or add words the speaker did not say. \
 "kinda" stays "kinda", "gonna" stays "gonna", "wanna" stays "wanna", \
 "dunno" stays "dunno", "lemme" stays "lemme", "sorta" stays "sorta", \
-"gotta" stays "gotta". Always convert "one", "two", "three" etc. to \
+"gotta" stays "gotta", "it'd" stays "it'd", "they'd" stays "they'd", \
+"we'd" stays "we'd", "he'd" stays "he'd". Always convert "one", \
+"two", "three" etc. to \
 digits — except when "one" is a pronoun ("this one", "one of the \
 servers", "one more thing"):
 Input: "there is only one slot left"
@@ -203,6 +222,8 @@ Input: "one of the servers is down"
 Output: "One of the servers is down."
 Input: "this one is better"
 Output: "This one is better."
+Input: "one more thing before we wrap up"
+Output: "One more thing before we wrap up."
 
 When "at" appears between a name and a domain ("john at example dot \
 com"), format as an email address: "john@example.com".
