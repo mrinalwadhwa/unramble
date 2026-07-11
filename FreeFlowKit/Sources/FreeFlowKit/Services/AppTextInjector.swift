@@ -98,19 +98,6 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
         .accessibility, .pasteboard, .keystroke,
     ]
 
-    /// Terminal apps where AX text content is unreliable (reports visible
-    /// buffer, not logical user input). Must match AXAppContextProvider.
-    private static let terminalBundleIDs: Set<String> = [
-        "com.apple.Terminal",
-        "com.googlecode.iterm2",
-        "dev.warp.Warp-Stable",
-        "net.kovidgoyal.kitty",
-        "io.alacritty",
-        "com.github.wez.wezterm",
-        "co.zeit.hyper",
-        "com.mitchellh.ghostty",
-    ]
-
     public init() {}
 
     // MARK: - TextInjecting
@@ -121,7 +108,7 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
         // does not add another, preventing double spaces.
         let text = text.hasSuffix(" ") || text.hasSuffix("\n") ? text : text + " "
 
-        let isTerminal = Self.terminalBundleIDs.contains(context.bundleID)
+        let isTerminal = context.isTerminal
         let strategies = AppTextInjector.strategies(for: context.bundleID)
         var lastError: Error?
 

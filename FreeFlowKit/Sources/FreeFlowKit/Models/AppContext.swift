@@ -52,4 +52,21 @@ public struct AppContext: Sendable, Equatable {
         appName: "",
         windowTitle: ""
     )
+
+    /// Terminal apps where the AX text area reports visible buffer
+    /// content instead of logical user input.
+    public static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.github.wez.wezterm",
+        "co.zeit.hyper",
+        "com.mitchellh.ghostty",
+    ]
+
+    public var isTerminal: Bool {
+        Self.terminalBundleIDs.contains(bundleID)
+    }
 }
