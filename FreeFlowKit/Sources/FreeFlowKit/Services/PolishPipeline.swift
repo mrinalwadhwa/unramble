@@ -772,6 +772,7 @@ public enum PolishPipeline {
             ("prometheus", "Prometheus"),
             ("datadog", "Datadog"),
             ("splunk", "Splunk"),
+            ("istio", "Istio"),
             ("pagerduty", "PagerDuty"),
             ("cloudflare", "Cloudflare"),
             ("vercel", "Vercel"),
@@ -785,6 +786,7 @@ public enum PolishPipeline {
             ("typescript", "TypeScript"),
             ("python", "Python"),
             ("kotlin", "Kotlin"),
+            ("java", "Java"),
             ("swift", "Swift"),
             ("rust", "Rust"),
             ("golang", "Golang"),
@@ -1058,8 +1060,12 @@ public enum PolishPipeline {
             if polished.isEmpty {
                 return normalizeFormatting(stripped, casual: casual)
             }
-            let cleaned = guardAgainstEcho(
+            var cleaned = guardAgainstEcho(
                 polished: polished, precedingText: precedingText)
+            if stripped.contains("\u{2026}") {
+                cleaned = cleaned.replacingOccurrences(
+                    of: "...", with: "\u{2026}")
+            }
             if let fallback = guardAgainstHallucination(
                 polished: cleaned, preprocessed: stripped) {
                 return adjustFirstCharCasing(
@@ -1532,8 +1538,22 @@ public enum PolishPipeline {
     static func guardAgainstHallucination(
         polished: String, preprocessed: String
     ) -> String? {
-        // For short inputs, detect hallucination by length explosion.
-        // A polished "Okay." should never become 80+ characters.
+        // Length explosion: polished output should never be dramatically
+        // longer than input. Polish adds punctuation and fixes casing but
+        // does not add content. A 2x ratio is generous — legitimate
+        // expansions (number words → digits don't grow, abbreviations
+        // stay similar). Anything beyond that is the model incorporating
+        // context or hallucinating.
+        if preprocessed.count >= 20 && polished.count > preprocessed.count * 2 {
+            Log.debug(
+                "[HALLUCINATION_GUARD] length inflation"
+                + " input=\(preprocessed.count)chars"
+                + " output=\(polished.count)chars"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished.prefix(200))\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
         if preprocessed.count < 20 && polished.count > preprocessed.count * 4 {
             Log.debug(
                 "[HALLUCINATION_GUARD] length explosion"
