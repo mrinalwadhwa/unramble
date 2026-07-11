@@ -272,24 +272,6 @@ struct LocalStreamingPreprocessingTests {
         return try await provider.finishStreaming()
     }
 
-    @Test("Split-word is rejoined in finishStreaming output (no model)")
-    func splitWordRejoined() async throws {
-        let result = try await runPipeline(
-            "I was responsible for setting core cultural aspects. around engineering processes.")
-        #expect(
-            result.contains("aspects around"),
-            "Split-word should be rejoined but got: \(result)")
-    }
-
-    @Test("Split-word is rejoined when model echoes input")
-    func splitWordRejoinedWithModel() async throws {
-        let result = try await runPipelineWithEchoModel(
-            "I was responsible for setting core cultural aspects. around engineering processes.")
-        #expect(
-            result.contains("aspects around"),
-            "Split-word should be rejoined but got: \(result)")
-    }
-
     @Test("Filler um is stripped in finishStreaming output")
     func fillerUmStripped() async throws {
         let result = try await runPipeline(
@@ -317,8 +299,8 @@ struct LocalStreamingPreprocessingTests {
             "Trailing 'Mm-hmm' should be stripped but got: \(result)")
     }
 
-    @Test("a.m./p.m. period is not treated as split-word")
-    func ampmNotRejoined() async throws {
+    @Test("a.m./p.m. is preserved in finishStreaming output")
+    func ampmPreserved() async throws {
         let result = try await runPipeline(
             "The meeting is at 3 p.m. in the large conference room.")
         #expect(
@@ -411,33 +393,4 @@ struct LocalStreamingPreprocessingTests {
             "All fillers should be stripped but got: \(result)")
     }
 
-    @Test("Split-word across background cache boundary is rejoined")
-    func splitWordAcrossCacheBoundary() async throws {
-        // Background cycle 1 sees: "I set core cultural aspects."
-        // Background cycle 2 sees: "I set core cultural aspects. around engineering."
-        // The split-word spans the cache boundary.
-        let engine = ProgressiveSTTEngine(results: [
-            "I set core cultural aspects.",
-            "I set core cultural aspects. around engineering processes.",
-        ])
-        let provider = LocalStreamingProvider(
-            sttEngine: engine,
-            polishChatClient: nil,
-            cycleInterval: 0.05)
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        // Send enough audio to trigger background cycles
-        try await provider.sendAudio(makePCM(bytes: 32_000))
-        // Wait for background cycle to cache first sentence
-        try await Task.sleep(nanoseconds: 150_000_000) // 150ms
-        // Send more audio
-        try await provider.sendAudio(makePCM(bytes: 32_000))
-        // Wait for second background cycle
-        try await Task.sleep(nanoseconds: 150_000_000)
-        // Finish — should rejoin the split-word
-        let result = try await provider.finishStreaming()
-        #expect(
-            result.contains("aspects around") || result.contains("aspects Around"),
-            "Split-word across cache boundary should be rejoined but got: \(result)")
-    }
 }

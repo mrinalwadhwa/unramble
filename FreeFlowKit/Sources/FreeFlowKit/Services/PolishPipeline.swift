@@ -229,12 +229,6 @@ public enum PolishPipeline {
             result = result.replacingOccurrences(
                 of: #"\bp\.m\.(?=$|\n)"#, with: "PM.", options: .regularExpression)
 
-            // Rejoin split-words: Parakeet sometimes places a period
-            // mid-phrase ("scheduled. for Thursday"). Real sentence
-            // boundaries have uppercase after the period; lowercase
-            // indicates a split-word that should be rejoined.
-            result = rejoinSplitWords(result)
-
             // Capitalize first letter after sentence-ending punctuation + space.
             result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
 
@@ -967,57 +961,6 @@ public enum PolishPipeline {
     }
 
     // MARK: - Full Polish Pipeline
-
-    /// Run the complete polish pipeline: preprocess, send to model,
-    /// Rejoin Parakeet split-words: period + space + lowercase
-    /// indicates a mid-phrase period, not a sentence boundary.
-    /// Skips abbreviations where the trailing period is
-    /// legitimate: multi-period (a.m., p.m., e.g., i.e., U.S.)
-    /// and common single-period (etc., vs.).
-    public static func rejoinSplitWords(_ text: String) -> String {
-        guard let regex = try? NSRegularExpression(
-            pattern: #"(?<!\.\w)(?<!\betc)(?<!\bvs)\.\s+([a-z])"#
-        ) else { return text }
-        return regex.stringByReplacingMatches(
-            in: text,
-            range: NSRange(text.startIndex..., in: text),
-            withTemplate: " $1")
-    }
-
-    /// Rejoin split-words and strip fillers that span cache
-    /// boundaries in incrementally polished text.
-    ///
-    /// Each cache entry is polished independently, so a Parakeet
-    /// mid-phrase period at a cache boundary (e.g. "aspects. Around")
-    /// is not caught by per-entry preprocessing. This function runs
-    /// the same fixes on the assembled result.
-    public static func repairCacheBoundaries(_ text: String) -> String {
-        var result = text
-
-        // Rejoin split-words: period + space + lowercase.
-        // The per-entry polish may have capitalized the fragment,
-        // so also match period + space + uppercase when the next
-        // word is not a sentence start (heuristic: preceded by a
-        // word that doesn't end a sentence naturally).
-        result = result.replacingOccurrences(
-            of: #"\.\s+([a-z])"#,
-            with: " $1",
-            options: .regularExpression)
-
-        // Strip filler sounds that ended up at sentence starts
-        // after cache boundary splitting.
-        result = stripFillerSounds(result)
-        result = stripNoisePhrases(result)
-
-        // Re-capitalize after sentence-ending punctuation since
-        // the rejoin may have introduced lowercase mid-text.
-        result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
-
-        // Strip trailing fillers.
-        result = stripTrailingFiller(result)
-
-        return result.trimmingCharacters(in: .whitespaces)
-    }
 
     /// postprocess. This is the single source of truth for how raw
     /// dictated text becomes polished output. Used by both the
