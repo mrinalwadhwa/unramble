@@ -98,6 +98,19 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
         .accessibility, .pasteboard, .keystroke,
     ]
 
+    /// Terminal apps where AX text content is unreliable (reports visible
+    /// buffer, not logical user input). Must match AXAppContextProvider.
+    private static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.github.wez.wezterm",
+        "co.zeit.hyper",
+        "com.mitchellh.ghostty",
+    ]
+
     public init() {}
 
     // MARK: - TextInjecting
@@ -108,6 +121,7 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
         // does not add another, preventing double spaces.
         let text = text.hasSuffix(" ") || text.hasSuffix("\n") ? text : text + " "
 
+        let isTerminal = Self.terminalBundleIDs.contains(context.bundleID)
         let strategies = AppTextInjector.strategies(for: context.bundleID)
         var lastError: Error?
 
@@ -118,10 +132,10 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
                     try injectViaAccessibility(text: text, into: context)
                     return
                 case .pasteboard:
-                    try injectViaPasteboard(text: text)
+                    try injectViaPasteboard(text: text, skipLeadingSpace: isTerminal)
                     return
                 case .keystroke:
-                    try injectViaKeystrokes(text: text)
+                    try injectViaKeystrokes(text: text, skipLeadingSpace: isTerminal)
                     return
                 }
             } catch let error as InjectionError where error.isTerminal {
@@ -158,15 +172,17 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
             throw InjectionError.noFocusedElement
         }
 
-        let textToInject = addLeadingSpaceIfNeeded(
-            text: text,
-            fieldContent: context.focusedFieldContent,
-            cursorPosition: context.cursorPosition
-        )
-
-        // Read current value and cursor position to splice text in
+        // Read current value and cursor position to splice text in.
+        // Use fresh state (not stale context from recording start) so
+        // addLeadingSpaceIfNeeded sees where the cursor actually is now.
         let currentValue = AXElementHelper.textContent(of: focused) ?? ""
         let cursorPos = AXElementHelper.cursorPosition(of: focused)
+
+        let textToInject = addLeadingSpaceIfNeeded(
+            text: text,
+            fieldContent: currentValue,
+            cursorPosition: cursorPos
+        )
         let selectedRange = AXElementHelper.rangeValue(
             of: kAXSelectedTextRangeAttribute, from: focused)
 
@@ -258,9 +274,10 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
     /// the app reads it, falls back to eager `setString` + re-paste. If
     /// neither occurs within the timeout, no text target exists and
     /// `pasteNotConsumed` is thrown.
-    private func injectViaPasteboard(text: String) throws {
+    private func injectViaPasteboard(text: String, skipLeadingSpace: Bool = false) throws {
         #if canImport(AppKit)
-            let textToInject = addLeadingSpaceIfNeededFromFocused(text: text)
+            let textToInject = skipLeadingSpace
+                ? text : addLeadingSpaceIfNeededFromFocused(text: text)
 
             // The pasteboard provider callback fires on the main thread.
             // The entire sequence (save, lazy provider setup, Cmd+V, run
@@ -380,8 +397,9 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
     /// This is the slowest strategy but works for apps that do not respond to
     /// accessibility value writes or paste commands. Each character is sent as
     /// a key-down/key-up pair using CGEvent with Unicode input.
-    private func injectViaKeystrokes(text: String) throws {
-        let textToInject = addLeadingSpaceIfNeededFromFocused(text: text)
+    private func injectViaKeystrokes(text: String, skipLeadingSpace: Bool = false) throws {
+        let textToInject = skipLeadingSpace
+            ? text : addLeadingSpaceIfNeededFromFocused(text: text)
 
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw InjectionError.allStrategiesFailed(bundleID: "cgevent-source-failed")
