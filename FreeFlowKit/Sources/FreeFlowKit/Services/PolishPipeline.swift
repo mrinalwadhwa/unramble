@@ -225,6 +225,10 @@ public enum PolishPipeline {
             result = result.replacingOccurrences(
                 of: #"\bp\.m\.(?= )"#, with: "PM", options: .regularExpression)
             result = result.replacingOccurrences(
+                of: #"\ba\.m\.(?=[,;])"#, with: "AM", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: #"\bp\.m\.(?=[,;])"#, with: "PM", options: .regularExpression)
+            result = result.replacingOccurrences(
                 of: #"\ba\.m\.(?=$|\n)"#, with: "AM.", options: .regularExpression)
             result = result.replacingOccurrences(
                 of: #"\bp\.m\.(?=$|\n)"#, with: "PM.", options: .regularExpression)
