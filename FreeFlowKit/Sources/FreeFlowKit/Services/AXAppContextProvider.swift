@@ -16,6 +16,19 @@ import Foundation
 /// partial context is returned.
 public final class AXAppContextProvider: AppContextProviding, @unchecked Sendable {
 
+    /// Terminal apps where the AX text area reports visible buffer
+    /// content instead of logical user input.
+    private static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "dev.warp.Warp-Stable",
+        "net.kovidgoyal.kitty",
+        "io.alacritty",
+        "com.github.wez.wezterm",
+        "co.zeit.hyper",
+        "com.mitchellh.ghostty",
+    ]
+
     /// Maximum time in seconds for the entire context assembly.
     private let totalBudget: TimeInterval
 
@@ -62,12 +75,18 @@ public final class AXAppContextProvider: AppContextProviding, @unchecked Sendabl
             let appElement = AXElementHelper.applicationElement(pid: pid)
 
             async let windowTitleResult = readWindowTitle(appElement: appElement)
-            async let fieldResult = readFocusedFieldInfo()
             async let browserURLResult = readBrowserURL(bundleID: bundleID, pid: pid)
 
             let windowTitle = await windowTitleResult
-            let fieldInfo = await fieldResult
             let browserURL = await browserURLResult
+
+            let fieldInfo: FocusedFieldInfo
+            if Self.terminalBundleIDs.contains(bundleID) {
+                Log.debug("[AXContext] Terminal app — skipping field content read")
+                fieldInfo = .empty
+            } else {
+                fieldInfo = await readFocusedFieldInfo()
+            }
 
             return AppContext(
                 bundleID: bundleID,
