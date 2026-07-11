@@ -30,12 +30,23 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     // MARK: - Configuration
 
+    /// How the cloud pipeline polishes transcribed audio.
+    public enum CloudPolishMode {
+        /// Transcribe via Realtime API, then polish via a separate chat
+        /// completion call (2 round-trips).
+        case chatCompletion
+        /// Configure the Realtime API session with polish instructions
+        /// and receive polished text directly (1 round-trip).
+        case realtimeResponse
+    }
+
     private let apiKeyProvider: @Sendable () -> String
     private let realtimeModel: String
     private let sttModel: String
     private let polishChatClient: (any PolishChatClient)?
     private let polishModel: String
     private let chunkingStrategy: ChunkingStrategy
+    private let cloudPolishMode: CloudPolishMode
 
     /// How long after the last detected speech to keep reporting the
     /// speaker as "still speaking". Set high (10 s) so only a genuine
@@ -167,9 +178,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     /// Background task that refreshes the backup before it goes stale.
     private var backupRefreshTask: Task<Void, Never>?
 
-    /// Maximum age for an idle backup connection. After this, the backup
-    /// is discarded on use and a fresh one is opened.
-    private let maxBackupAge: TimeInterval = 180
+    /// Maximum age for an idle backup connection. OpenAI closes idle
+    /// WebSockets after ~60-90s, so keep this well under that threshold.
+    private let maxBackupAge: TimeInterval = 45
 
     // MARK: - Init
 
@@ -179,7 +190,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         sttModel: String = "gpt-4o-mini-transcribe",
         polishChatClient: (any PolishChatClient)?,
         polishModel: String = PolishPipeline.polishModel,
-        chunkingStrategy: ChunkingStrategy = TimeAndSilenceChunkingStrategy()
+        chunkingStrategy: ChunkingStrategy = TimeAndSilenceChunkingStrategy(),
+        cloudPolishMode: CloudPolishMode = .chatCompletion
     ) {
         self.apiKeyProvider = apiKey
         self.realtimeModel = realtimeModel
@@ -187,6 +199,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         self.polishChatClient = polishChatClient
         self.polishModel = polishModel
         self.chunkingStrategy = chunkingStrategy
+        self.cloudPolishMode = cloudPolishMode
     }
 
     deinit {
@@ -268,6 +281,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         let freshModel = realtimeModel
         let freshAPIKey = apiKeyProvider()
         let freshSTTModel = sttModel
+        let freshPolishMode = cloudPolishMode
 
         let setup = Task { [weak self] in
             try Task.checkCancellation()
@@ -304,11 +318,12 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 self.urlSession = session
             }
 
-            // Send session.update to configure transcription-only mode.
             let update = Self.buildSessionUpdate(
                 sttModel: freshSTTModel,
                 language: language,
-                micProximity: micProximity)
+                micProximity: micProximity,
+                polishMode: freshPolishMode,
+                context: context)
             try await task.send(.string(update))
 
             // Record setup completion for the diagnostic summary.
@@ -320,14 +335,14 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         }
         lock.withLock { self.setupTask = setup }
 
-        // Spawn a reader that processes transcription.completed events
-        // for the lifetime of the session. Intermediate chunks (commits
-        // from sendAudio) go to the chunk handler; the final chunk
-        // (commit from finishStreaming) goes to the finalChunkStream.
+        // Spawn a reader that processes events for the lifetime of the
+        // session. In chatCompletion mode, reads transcription.completed
+        // events. In realtimeResponse mode, reads response.text.done
+        // for the final result after response.create is sent.
+        let readerPolishMode = cloudPolishMode
         let reader = Task { [weak self] in
             guard let self else { return }
             do {
-                // Wait for the WS to be ready before reading.
                 try await self.awaitSetup()
             } catch {
                 continuation.finish(throwing: error)
@@ -340,6 +355,43 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 return
             }
 
+            if readerPolishMode == .realtimeResponse {
+                // Response mode: wait for transcript, then send it as
+                // text for polishing on the same connection.
+                do {
+                    let transcript = try await Self.readTranscriptUntilCompleted(
+                        on: task)
+                    Log.debug("[RealtimeResponse] transcript: \"\(transcript.prefix(200))\"")
+                    self.lock.withLock {
+                        self.currentTiming?.transcriptCompletedAt = Date()
+                    }
+                    guard !transcript.isEmpty else {
+                        continuation.yield("")
+                        continuation.finish()
+                        return
+                    }
+                    try await task.send(.string(
+                        Self.buildPolishRequest(transcript: transcript)))
+                    try await task.send(.string(Self.buildResponseCreate()))
+                    Log.debug("[RealtimeResponse] sent polish request + response.create")
+                    let firstDeltaCb: @Sendable () -> Void = { [weak self] in
+                        self?.lock.withLock {
+                            if self?.currentTiming?.firstDeltaAt == nil {
+                                self?.currentTiming?.firstDeltaAt = Date()
+                            }
+                        }
+                    }
+                    let polished = try await Self.readResponseUntilDone(
+                        on: task, onFirstDelta: firstDeltaCb)
+                    continuation.yield(polished)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+                return
+            }
+
+            // chatCompletion mode: read transcription.completed events.
             var chunksRead = 0
             do {
                 while !Task.isCancelled {
@@ -537,6 +589,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     self.finalCommitSent = true
                     self.currentTiming?.commitSentAt = Date()
                 }
+                // In response mode, the reader sends response.create
+                // after receiving the transcript.
             } catch {
                 throw await fail(error)
             }
@@ -613,7 +667,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             fullTranscript = bufferedRaw + " " + transcript
         }
 
-        // Polish the raw transcript locally.
         if fullTranscript.isEmpty {
             lock.withLock {
                 self.currentTiming?.polishKind = .skip
@@ -622,6 +675,22 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             emitSessionSummary()
             return ""
         }
+
+        // In response mode, the Realtime API already returned polished
+        // text — apply lightweight post-processing only.
+        if cloudPolishMode == .realtimeResponse {
+            lock.withLock {
+                self.currentTiming?.polishKind = .llmOK
+                self.currentTiming?.endedAt = Date()
+            }
+            emitSessionSummary()
+            let trimmed = fullTranscript
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            Log.debug("[Pipeline] realtime-polished: \"\(trimmed)\"")
+            return trimmed
+        }
+
+        // chatCompletion mode: polish via separate chat API call.
         let polished = await polish(fullTranscript)
         lock.withLock {
             self.currentTiming?.endedAt = Date()
@@ -1012,6 +1081,22 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         language: String?,
         micProximity: MicProximity
     ) -> String {
+        buildSessionUpdate(
+            sttModel: sttModel, language: language,
+            micProximity: micProximity,
+            polishMode: .chatCompletion, context: nil)
+    }
+
+    /// Build the `session.update` message. In `.realtimeResponse` mode,
+    /// includes polish instructions and sets text-only output so the
+    /// model returns polished text directly from audio.
+    static func buildSessionUpdate(
+        sttModel: String,
+        language: String?,
+        micProximity: MicProximity,
+        polishMode: CloudPolishMode,
+        context: AppContext?
+    ) -> String {
         var transcription: [String: Any] = [
             "model": sttModel,
         ]
@@ -1019,7 +1104,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             transcription["language"] = language
         }
 
-        let session: [String: Any] = [
+        var session: [String: Any] = [
             "type": "realtime",
             "audio": [
                 "input": [
@@ -1028,17 +1113,51 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                         "rate": 24000,
                     ],
                     "transcription": transcription,
-                    // NSNull serializes as JSON null, which disables
-                    // server VAD so the client controls when audio
-                    // ends via commit.
                     "turn_detection": NSNull(),
                 ],
             ],
         ]
 
-        return jsonString([
+        if polishMode == .realtimeResponse {
+            let instructions = PolishPipeline.buildCloudSystemPrompt(
+                context: context ?? .empty, language: language)
+            session["instructions"] = instructions
+            session["reasoning"] = ["effort": "minimal"]
+        }
+
+        let json = jsonString([
             "type": "session.update",
             "session": session,
+        ])
+        Log.debug("[RealtimeResponse] session.update JSON: \(json.prefix(500))")
+        return json
+    }
+
+    /// Build the `response.create` message to trigger a text response.
+    static func buildResponseCreate() -> String {
+        jsonString([
+            "type": "response.create",
+            "response": [
+                "output_modalities": ["text"],
+            ],
+        ])
+    }
+
+    /// Build a `conversation.item.create` message to add a user text
+    /// message containing the raw transcript for polishing.
+    static func buildPolishRequest(transcript: String) -> String {
+        jsonString([
+            "type": "conversation.item.create",
+            "item": [
+                "type": "message",
+                "role": "user",
+                "content": [
+                    [
+                        "type": "input_text",
+                        "text": transcript,
+                    ],
+                ],
+            ],
         ])
     }
 
@@ -1060,6 +1179,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     enum ParsedEvent: Equatable {
         case transcriptionDelta(String)
         case transcriptionCompleted(String)
+        case responseTextDelta(String)
+        case responseTextDone(String)
+        case responseDone
         case error(String)
         case other
     }
@@ -1080,6 +1202,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         case "conversation.item.input_audio_transcription.delta":
             let delta = obj["delta"] as? String ?? ""
             return .transcriptionDelta(delta)
+        case "response.text.delta", "response.output_text.delta":
+            let delta = obj["delta"] as? String ?? ""
+            return .responseTextDelta(delta)
+        case "response.text.done", "response.output_text.done":
+            let text = obj["text"] as? String ?? ""
+            return .responseTextDone(text)
+        case "response.done":
+            Log.debug("[RealtimeResponse] raw response.done: \(text.prefix(1000))")
+            return .responseDone
         case "error":
             if let error = obj["error"] as? [String: Any],
                 let message = error["message"] as? String
@@ -1088,6 +1219,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             }
             return .error("unknown error")
         default:
+            Log.debug("[RealtimeResponse] event type=\(type)")
             return .other
         }
     }
@@ -1137,7 +1269,59 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     onFirstDelta?()
                 }
                 continue
-            case .other:
+            case .responseTextDelta, .responseTextDone, .responseDone,
+                 .other:
+                continue
+            }
+        }
+    }
+
+    /// Read events until `response.text.done` delivers the polished
+    /// text, or `response.done` signals completion.
+    static func readResponseUntilDone(
+        on task: URLSessionWebSocketTask,
+        onFirstDelta: (@Sendable () -> Void)? = nil
+    ) async throws -> String {
+        var firstDeltaReported = false
+        while true {
+            try Task.checkCancellation()
+            let message: URLSessionWebSocketTask.Message
+            do {
+                message = try await task.receive()
+            } catch {
+                throw DictationError.networkError(
+                    "WebSocket receive failed: \(error.localizedDescription)")
+            }
+
+            let text: String
+            switch message {
+            case .string(let s): text = s
+            case .data(let d): text = String(data: d, encoding: .utf8) ?? ""
+            @unknown default: continue
+            }
+
+            let event = parseEvent(text)
+            switch event {
+            case .responseTextDone(let polished):
+                Log.debug("[RealtimeResponse] text.done: \"\(polished.prefix(200))\"")
+                return polished
+            case .responseDone:
+                Log.debug("[RealtimeResponse] response.done (no text)")
+                return ""
+            case .error(let message):
+                Log.debug("[RealtimeResponse] error: \(message)")
+                throw DictationError.networkError(
+                    "Realtime API error: \(message)")
+            case .responseTextDelta:
+                if !firstDeltaReported {
+                    firstDeltaReported = true
+                    onFirstDelta?()
+                }
+                continue
+            case .transcriptionCompleted(let t):
+                Log.debug("[RealtimeResponse] ignoring transcription: \"\(t.prefix(80))\"")
+                continue
+            case .transcriptionDelta, .other:
                 continue
             }
         }
@@ -1217,7 +1401,10 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 polished: polished,
                 precedingText: context.focusedFieldContent)
             let guarded: String
-            if let fallback = PolishPipeline.guardAgainstTruncation(
+            if let fallback = PolishPipeline.guardAgainstHallucination(
+                polished: cleaned, preprocessed: stripped) {
+                guarded = fallback
+            } else if let fallback = PolishPipeline.guardAgainstTruncation(
                 polished: cleaned, preprocessed: stripped) {
                 guarded = fallback
             } else {
