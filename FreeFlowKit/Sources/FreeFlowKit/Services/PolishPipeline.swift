@@ -237,7 +237,9 @@ public enum PolishPipeline {
             let midSentence = precedingText.map {
                 !$0.isEmpty && !endsAtSentenceBoundary($0)
             } ?? false
-            if !midSentence, let first = result.first, first.isLetter {
+            if midSentence, let first = result.first, first.isUppercase {
+                result = first.lowercased() + result.dropFirst()
+            } else if !midSentence, let first = result.first, first.isLetter {
                 result = first.uppercased() + result.dropFirst()
             }
         }
