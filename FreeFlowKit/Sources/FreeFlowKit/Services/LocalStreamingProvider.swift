@@ -1,17 +1,21 @@
 import Foundation
 
-/// On-device streaming dictation with incremental transcription.
+/// On-device streaming dictation with committed, rolling injection.
 ///
-/// Accumulate PCM audio during recording. Every `cycleInterval`
-/// seconds, re-transcribe accumulated audio with the STT engine
-/// and polish new complete sentences in the background. By the
-/// time the user releases the key, most text is already polished
-/// and only the tail needs processing.
+/// Accumulate PCM audio during recording. Every `cycleInterval` seconds,
+/// re-transcribe the accumulated audio and hand it to a `CommitTracker`,
+/// which returns the sentences that have become stable (unchanged since
+/// the previous cycle and followed by more text). Those committed
+/// sentences are polished and emitted through the chunk handler, so they
+/// are injected at the cursor while the user keeps talking. This gives
+/// hands-free rolling injection for long dictations.
 ///
-/// On key release, the final transcript is authoritative. Cached
-/// polish is reused only when the corresponding raw sentences
-/// match the final transcript exactly. From the first mismatch
-/// onward, everything is re-polished as one batch.
+/// Because streaming recognition revises text near the live edge, only
+/// sentences that have stopped changing are committed — never the
+/// volatile tail. At finish, the remaining tail is polished and returned
+/// as the final chunk. When no chunk handler is set (single-commit
+/// callers and unit tests), nothing is emitted mid-session and the whole
+/// polished transcript is returned from `finishStreaming`.
 public final class LocalStreamingProvider: StreamingDictationProviding,
     @unchecked Sendable
 {
@@ -29,11 +33,31 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private var accumulatedAudio = Data()
     private var currentContext: AppContext = .empty
 
-    /// Each entry is a (rawSentences, polishedText) pair from one
-    /// background cycle. rawSentences is the exact text the cycle
-    /// saw before polishing — used to verify against the final
-    /// transcript.
-    private var cache: [(raw: [String], polished: String)] = []
+    /// Raw STT transcript from the last `finishStreaming()` call.
+    public private(set) var lastRawTranscript: String = ""
+
+    /// Full polished transcript (committed chunks plus final tail) from
+    /// the last `finishStreaming()` call. Useful for diagnostics and
+    /// sample collection even when `finishStreaming` returns only the
+    /// tail because chunks were injected live.
+    public private(set) var lastPolishedTranscript: String = ""
+
+    /// Tracks which sentences have stabilized and been committed.
+    private var commitTracker = CommitTracker()
+
+    /// Accumulated polished text for all committed sentences. Used as
+    /// preceding context for later chunks and as the full result when no
+    /// chunk handler is set.
+    private var committedPolished = ""
+
+    /// Receives each committed chunk's polished text for live injection.
+    private var chunkHandler: (@Sendable (String) async -> Void)?
+
+    /// Whether any committed chunk was emitted through the handler this
+    /// session. The pipeline clears the handler before `finishStreaming`,
+    /// so this — not the current handler — decides whether committed text
+    /// was already injected and thus must be omitted from the return.
+    private var didEmitChunks = false
 
     private var finishing = false
     private var backgroundTask: Task<Void, Never>?
@@ -44,7 +68,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         sttEngine: any LocalSTTEngine,
         polishChatClient: (any PolishChatClient)?,
         polishModel: String = PolishPipeline.polishModel,
-        cycleInterval: TimeInterval = 10
+        cycleInterval: TimeInterval = 3
     ) {
         self.sttEngine = sttEngine
         self.polishChatClient = polishChatClient
@@ -59,6 +83,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         return Double(bytes) / 32_000.0
     }
 
+    public func setChunkHandler(
+        _ handler: (@Sendable (String) async -> Void)?
+    ) {
+        lock.withLock { chunkHandler = handler }
+    }
+
     public func startStreaming(
         context: AppContext, language: String?, micProximity: MicProximity
     ) async throws {
@@ -70,7 +100,11 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         lock.withLock {
             accumulatedAudio = Data()
             currentContext = context
-            cache = []
+            commitTracker = CommitTracker()
+            committedPolished = ""
+            lastRawTranscript = ""
+            lastPolishedTranscript = ""
+            didEmitChunks = false
             finishing = false
         }
 
@@ -89,17 +123,14 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         await backgroundTask?.value
         backgroundTask = nil
 
-        let (audio, context, cachedEntries) = lock.withLock {
-            let d = accumulatedAudio
-            accumulatedAudio = Data()
-            let result = (d, currentContext, cache)
-            cache = []
-            return result
+        let (audio, context, rolling, committedSoFar) = lock.withLock {
+            (accumulatedAudio, currentContext, didEmitChunks, committedPolished)
         }
 
         guard !audio.isEmpty else {
             Log.debug("[LocalStreaming] No audio accumulated")
-            return ""
+            lock.withLock { lastPolishedTranscript = committedSoFar }
+            return rolling ? "" : committedSoFar
         }
 
         // Final authoritative transcription.
@@ -108,109 +139,50 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let sttStart = CFAbsoluteTimeGetCurrent()
         let raw = try await sttEngine.transcribe(audio: wav)
         let sttElapsed = CFAbsoluteTimeGetCurrent() - sttStart
-        Log.debug("[LocalStreaming] Final transcription: '\(raw)' (stt=\(String(format: "%.2f", sttElapsed))s)")
 
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "" }
-
-        let finalSentences = splitIntoSentences(trimmed)
-
-        // Verify cache against the final transcript. Later cache
-        // entries had more audio context and are more likely to match.
-        // Find the first cache entry (scanning forward) where ALL its
-        // sentences match the final transcript. Everything before it
-        // is re-polished. Everything from it onward uses cached polish.
-        //
-        // Example: 5 cache entries covering sentences 0-1, 2-4, 5-7, 8-9, 10-11
-        // Entry 0 (t=10s): sentence 1 differs → skip
-        // Entry 1 (t=20s): sentences 2-4 all match → use entries 1-4
-        // Result: re-polish sentences 0-4 from final, use cache for 5-11
-
-        // Find the longest contiguous run of matching entries,
-        // scanning forward. Early entries may mismatch (Parakeet
-        // revision with partial audio). Later entries may also
-        // mismatch if Parakeet extended a sentence boundary.
-        // Only use entries that are verified against the final.
-        var firstMatchEntry = -1
-        var lastMatchEntry = -1
-        var sentenceOffset = 0
-        for (entryIdx, entry) in cachedEntries.enumerated() {
-            let entryEnd = sentenceOffset + entry.raw.count
-            if entryEnd <= finalSentences.count {
-                let finalSlice = Array(finalSentences[sentenceOffset..<entryEnd])
-                if entrySentencesMatch(cached: entry.raw, final: finalSlice) {
-                    if firstMatchEntry < 0 {
-                        firstMatchEntry = entryIdx
-                    }
-                    lastMatchEntry = entryIdx
-                } else if firstMatchEntry >= 0 {
-                    // Contiguous run broken — stop here.
-                    break
-                }
-            } else {
-                // Cache extends beyond final sentence count — stop.
-                break
-            }
-            sentenceOffset = entryEnd
+        lock.withLock { lastRawTranscript = trimmed }
+        guard !trimmed.isEmpty else {
+            lock.withLock { lastPolishedTranscript = committedSoFar }
+            return rolling ? "" : committedSoFar
         }
 
-        if firstMatchEntry >= 0 {
-            let matchedEntries = Array(cachedEntries[firstMatchEntry...lastMatchEntry])
-            let cachedPolished = matchedEntries.map { $0.polished }.joined(separator: " ")
-            let cachedSentenceCount = matchedEntries.flatMap { $0.raw }.count
-
-            // Head: sentences before the first match.
-            var firstMatchSentence = 0
-            for i in 0..<firstMatchEntry {
-                firstMatchSentence += cachedEntries[i].raw.count
-            }
-            let headSentences = Array(finalSentences[0..<firstMatchSentence])
-            let head = headSentences.joined(separator: " ")
-                .trimmingCharacters(in: .whitespaces)
-
-            // Tail: sentences after the last verified entry.
-            let cachedEnd = firstMatchSentence + cachedSentenceCount
-            let tailSentences = cachedEnd < finalSentences.count
-                ? Array(finalSentences[cachedEnd...])
-                : []
-            let tail = tailSentences.joined(separator: " ")
-                .trimmingCharacters(in: .whitespaces)
-
-            let polishStart = CFAbsoluteTimeGetCurrent()
-
-            // Polish head (if any) and tail (if any).
-            var parts: [String] = []
-            if !head.isEmpty {
-                let polishedHead = await polishWithPreceding(
-                    head, preceding: "", context: context)
-                parts.append(polishedHead)
-            }
-            parts.append(cachedPolished)
-            if !tail.isEmpty {
-                let preceding = parts.joined(separator: " ")
-                let polishedTail = await polishWithPreceding(
-                    tail, preceding: preceding, context: context)
-                parts.append(polishedTail)
-            }
-
-            let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
-            let result = parts.joined(separator: " ")
-            Log.debug("[LocalStreaming] Incremental (head=\(headSentences.count) cached=\(cachedSentenceCount) tail=\(tailSentences.count) stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
-            return result
+        // Commit and polish everything not yet committed as one tail unit
+        // so it gets full cross-sentence context.
+        let tailSentences = lock.withLock {
+            commitTracker.commitRemaining(trimmed)
         }
+        let tailText = tailSentences.joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
 
-        // No cache entry matched — polish everything.
         let polishStart = CFAbsoluteTimeGetCurrent()
-        let result = await polishWithPreceding(
-            trimmed, preceding: "", context: context)
+        var tailPolished = ""
+        if !tailText.isEmpty {
+            tailPolished = await polishWithPreceding(
+                tailText, preceding: committedSoFar, context: context)
+        }
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
-        Log.debug("[LocalStreaming] Full polish (\(finalSentences.count) sentences, stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
-        return result
+
+        let full = [committedSoFar, tailPolished]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        lock.withLock {
+            lastPolishedTranscript = full
+            accumulatedAudio = Data()
+        }
+
+        Log.debug("[LocalStreaming] Finish (committed=\(commitTracker.committed) tailSentences=\(tailSentences.count) rolling=\(rolling) stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
+
+        // When committed chunks were injected live, return only the tail.
+        // Otherwise return the whole transcript.
+        return rolling ? tailPolished : full
     }
 
     public func cancelStreaming() async {
         lock.withLock {
             accumulatedAudio = Data()
+            didEmitChunks = false
             finishing = true
         }
         backgroundTask?.cancel()
@@ -234,9 +206,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     }
 
     private func runOneCycle() async {
-        let (audio, context, cachedSentenceCount) = lock.withLock {
-            let count = cache.flatMap({ $0.raw }).count
-            return (accumulatedAudio, currentContext, count)
+        let (audio, context) = lock.withLock {
+            (accumulatedAudio, currentContext)
         }
 
         guard audio.count > 16_000 else { return }
@@ -249,80 +220,35 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        Log.debug("[LocalStreaming] Background STT: '\(trimmed)' (stt=\(String(format: "%.2f", sttElapsed))s)")
-
-        let allSentences = splitIntoSentences(trimmed)
-
-        // Count complete sentences (last may be incomplete if text
-        // doesn't end with punctuation).
-        let completeCount: Int
-        if PolishPipeline.endsAtSentenceBoundary(trimmed) {
-            completeCount = allSentences.count
-        } else {
-            completeCount = max(0, allSentences.count - 1)
+        // Commit any sentences that have stabilized since the last cycle.
+        let (newly, preceding, isFinishing) = lock.withLock {
+            (commitTracker.ingest(trimmed), committedPolished, finishing)
         }
-
-        guard completeCount > cachedSentenceCount else {
-            Log.debug("[LocalStreaming] Background: no new sentences (have=\(completeCount), cached=\(cachedSentenceCount))")
+        if isFinishing { return }
+        guard !newly.isEmpty else {
+            Log.debug("[LocalStreaming] Cycle: no new committed sentences (committed=\(commitTracker.committed), stt=\(String(format: "%.2f", sttElapsed))s)")
             return
         }
 
-        let isFinishing = lock.withLock { finishing }
-        if isFinishing { return }
-
-        let newSentences = Array(allSentences[cachedSentenceCount..<completeCount])
-        let newText = newSentences.joined(separator: " ")
-
+        let text = newly.joined(separator: " ")
         let polishStart = CFAbsoluteTimeGetCurrent()
-        let precedingPolished = lock.withLock {
-            cache.map { $0.polished }.joined(separator: " ")
-        }
         let polished = await polishWithPreceding(
-            newText, preceding: precedingPolished, context: context)
+            text, preceding: preceding, context: context)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
 
-        lock.withLock {
-            cache.append((raw: newSentences, polished: polished))
+        let handler = lock.withLock {
+            committedPolished = committedPolished.isEmpty
+                ? polished : committedPolished + " " + polished
+            return chunkHandler
         }
 
-        Log.debug("[LocalStreaming] Background: +\(newSentences.count) sentences (total=\(completeCount), stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
-    }
+        Log.debug("[LocalStreaming] Committed +\(newly.count) sentences (total=\(commitTracker.committed), stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
-    // MARK: - Cache Verification
-
-    /// Compare cached raw sentences against the final transcript.
-    /// Return the number of leading sentences that match after
-    /// normalization. Ignores capitalization, punctuation, and
-    /// extra whitespace so minor Parakeet revisions don't
-    /// invalidate the cache.
-    /// Check whether all sentences in a cache entry match the
-    /// corresponding sentences in the final transcript.
-    private func entrySentencesMatch(
-        cached: [String], final: [String]
-    ) -> Bool {
-        guard cached.count == final.count else { return false }
-        for i in 0..<cached.count {
-            if normalizeForComparison(cached[i])
-                != normalizeForComparison(final[i]) {
-                Log.debug("[LocalStreaming] Mismatch at sentence \(i):")
-                Log.debug("  cached: \(cached[i])")
-                Log.debug("  final:  \(final[i])")
-                return false
-            }
+        // Emit for live injection. Skipped when no handler is set.
+        if let handler {
+            lock.withLock { didEmitChunks = true }
+            await handler(polished)
         }
-        return true
-    }
-
-    /// Strip punctuation, lowercase, and collapse whitespace for
-    /// fuzzy sentence comparison.
-    private func normalizeForComparison(_ text: String) -> String {
-        text.lowercased()
-            .unicodeScalars
-            .filter { CharacterSet.letters.contains($0) || CharacterSet.whitespaces.contains($0) || CharacterSet.decimalDigits.contains($0) }
-            .map { String($0) }
-            .joined()
-            .split(separator: " ")
-            .joined(separator: " ")
     }
 
     // MARK: - Polishing
@@ -339,28 +265,5 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             model: polishModel,
             tone: PolishPipeline.toneLabel(for: context.bundleID),
             precedingText: precedingText)
-    }
-
-    // MARK: - Sentence Splitting
-
-    /// Split text into sentences at sentence-ending punctuation.
-    private func splitIntoSentences(_ text: String) -> [String] {
-        var sentences: [String] = []
-        var current = ""
-        for char in text {
-            current.append(char)
-            if char == "." || char == "!" || char == "?" {
-                let trimmed = current.trimmingCharacters(in: .whitespaces)
-                if !trimmed.isEmpty {
-                    sentences.append(trimmed)
-                }
-                current = ""
-            }
-        }
-        let trailing = current.trimmingCharacters(in: .whitespaces)
-        if !trailing.isEmpty {
-            sentences.append(trailing)
-        }
-        return sentences
     }
 }

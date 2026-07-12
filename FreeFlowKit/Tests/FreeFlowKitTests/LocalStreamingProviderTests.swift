@@ -153,6 +153,51 @@ struct LocalStreamingProviderTests {
         #expect(polishClient.completeCallCount == 1)
     }
 
+    // MARK: - Rolling injection
+
+    @Test("Emits committed chunks live and returns only the tail")
+    func rollingInjection() async throws {
+        let engine = ProgressiveSTTEngine(results: [
+            "Hi there.",
+            "Hi there. This is a test.",
+            "Hi there. This is a test. Almost done.",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            cycleInterval: 0.05)
+
+        let collector = ChunkCollector()
+        provider.setChunkHandler { text in await collector.append(text) }
+
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        // The pipeline clears the handler before finishing so late chunks
+        // cannot inject during finishStreaming. The provider must still
+        // return only the tail, not re-return the already-injected text.
+        provider.setChunkHandler(nil)
+        let tail = try await provider.finishStreaming()
+
+        let chunks = await collector.all()
+
+        // Rolling injection happened: at least one chunk was emitted.
+        #expect(!chunks.isEmpty)
+        // Chunks plus the returned tail reconstruct the full text, with
+        // each sentence appearing exactly once (forward-only).
+        let full = (chunks + [tail])
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        #expect(full == "Hi there. This is a test. Almost done.")
+        // The committed text is not re-returned from finishStreaming.
+        #expect(!tail.contains("Hi there"))
+    }
+
     // MARK: - Polish failure fallback
 
     @Test("Falls back to deterministic polish when client throws")
@@ -171,6 +216,14 @@ struct LocalStreamingProviderTests {
 
         #expect(result == "Hello world")
     }
+}
+
+/// Collects chunks emitted through the streaming provider's chunk
+/// handler for assertions.
+private actor ChunkCollector {
+    private var chunks: [String] = []
+    func append(_ text: String) { chunks.append(text) }
+    func all() -> [String] { chunks }
 }
 
 // MARK: - StreamingMockPolishClient

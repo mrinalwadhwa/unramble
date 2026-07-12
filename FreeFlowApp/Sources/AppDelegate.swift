@@ -317,8 +317,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
             batchProvider = nil
+            // Allow overriding the streaming cycle interval for tuning.
+            let cycleInterval: TimeInterval = {
+                if let raw = ProcessInfo.processInfo.environment[
+                    "FREEFLOW_CYCLE_INTERVAL"], let value = Double(raw),
+                    value > 0 { return value }
+                return 3
+            }()
             streamingProvider = LocalStreamingProvider(
-                sttEngine: sttEngine, polishChatClient: polisher)
+                sttEngine: sttEngine, polishChatClient: polisher,
+                cycleInterval: cycleInterval)
             onSessionExpired = nil
 
             // Preload models in the background so the first dictation is fast.
