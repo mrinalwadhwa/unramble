@@ -67,10 +67,10 @@
   accepted:
   - The deployment went smoothly.
 - category: clean
-  input: "The meeting is scheduled for March 15th at 2:30 PM."
+  input: The meeting is scheduled for March 15th at 2:30 PM.
   accepted:
-  - "The meeting is scheduled for March 15th at 2:30 PM."
-  - "The meeting is scheduled for March 15th at 2:30 p.m."
+  - The meeting is scheduled for March 15th at 2:30 PM.
+  - The meeting is scheduled for March 15th at 2:30 p.m.
 - category: clean
   input: The server responded with a 200 status code.
   accepted:
@@ -216,7 +216,8 @@
   - You see, the problem is that we don't have enough test coverage.
   - The problem is that we don't have enough test coverage.
 - category: email
-  input: hey can you um send me the thing we talked about yesterday like the report or whatever
+  input: hey can you um send me the thing we talked about yesterday like the report
+    or whatever
   accepted:
   - Hey, can you send me the report we talked about yesterday?
   - Hi, could you send me the report we discussed yesterday?
@@ -234,9 +235,11 @@
   - LGTM merge it
   - LGTM. Merge it.
 - category: email
-  input: thanks for getting back to me so I wanted to follow up on the proposal we sent last week
+  input: thanks for getting back to me so I wanted to follow up on the proposal we
+    sent last week
   accepted:
-  - Thanks for getting back to me. I wanted to follow up on the proposal we sent last week.
+  - Thanks for getting back to me. I wanted to follow up on the proposal we sent last
+    week.
 - category: emphasis
   input: never ever deploy on a Friday afternoon
   accepted:
@@ -271,9 +274,11 @@
   accepted:
   - We must fix this before release.
 - category: false-start
-  input: I think we should try to hmm actually you know what let me come back to this later
+  input: I think we should try to hmm actually you know what let me come back to this
+    later
   accepted:
-  - I think we should try to... actually, you know what, let me come back to this later.
+  - I think we should try to... actually, you know what, let me come back to this
+    later.
 - category: false-start
   input: I was going to say but never mind the point is we need more testing
   accepted:
@@ -305,7 +310,8 @@
   - The server crashed at 3 AM.
   - The server crashed at 3 a.m.
 - category: filler
-  input: so yeah I mean the deployment went fine right but we should still monitor it
+  input: so yeah I mean the deployment went fine right but we should still monitor
+    it
   accepted:
   - The deployment went fine, but we should still monitor it.
 - category: filler
@@ -329,13 +335,15 @@
 - category: keep-tag
   input: check the hashtag trending topic
   accepted:
-  - Check the #trending topic.
+  - 'Check the #trending topic.'
 - category: keep-tag
-  input: the deadline was moved to Friday new paragraph please update your tickets accordingly
+  input: the deadline was moved to Friday new paragraph please update your tickets
+    accordingly
   accepted:
-  - "The deadline was moved to Friday.
+  - 'The deadline was moved to Friday.
 
-Please update your tickets accordingly."
+
+    Please update your tickets accordingly.'
 - category: keep-tag
   input: research ampersand development is our focus
   accepted:
@@ -343,8 +351,9 @@ Please update your tickets accordingly."
 - category: keep-tag
   input: see the summary new line details are below
   accepted:
-  - "See the summary.
-Details are below."
+  - 'See the summary.
+
+    Details are below.'
 - category: keep-tag
   input: the price is dollar sign fifty with a ten percent sign discount
   accepted:
@@ -371,122 +380,186 @@ Details are below."
 - category: list
   input: I need to buy eggs milk bread butter and cheese
   accepted:
-  - "I need to buy:
-- Eggs
-- Milk
-- Bread
-- Butter
-- Cheese"
+  - 'I need to buy:
+
+    - Eggs
+
+    - Milk
+
+    - Bread
+
+    - Butter
+
+    - Cheese'
 - category: list
   input: here's what I picked up at the store apples bananas grapes and strawberries
   accepted:
-  - "Here's what I picked up at the store:
-- Apples
-- Bananas
-- Grapes
-- Strawberries"
+  - 'Here''s what I picked up at the store:
+
+    - Apples
+
+    - Bananas
+
+    - Grapes
+
+    - Strawberries'
 - category: list
-  input: my focus areas are one refactor the auth module and two improve the error handling
+  input: my focus areas are one refactor the auth module and two improve the error
+    handling
   accepted:
-  - "My focus areas are:
-1. Refactor the auth module
-2. Improve the error handling"
-  - "My focus areas are:
-1. Refactor the auth module.
-2. Improve the error handling."
+  - 'My focus areas are:
+
+    1. Refactor the auth module
+
+    2. Improve the error handling'
+  - 'My focus areas are:
+
+    1. Refactor the auth module.
+
+    2. Improve the error handling.'
 - category: list
-  input: my focus areas are one refactor the auth module two improve the error handling and three add request logging
+  input: my focus areas are one refactor the auth module two improve the error handling
+    and three add request logging
   accepted:
-  - "My focus areas are:
-1. Refactor the auth module
-2. Improve the error handling
-3. Add request logging"
-  - "My focus areas are:
-1. Refactor the auth module.
-2. Improve the error handling.
-3. Add request logging."
+  - 'My focus areas are:
+
+    1. Refactor the auth module
+
+    2. Improve the error handling
+
+    3. Add request logging'
+  - 'My focus areas are:
+
+    1. Refactor the auth module.
+
+    2. Improve the error handling.
+
+    3. Add request logging.'
 - category: list
   input: please order five monitors three keyboards and ten mice
   accepted:
-  - "Please order:
-- 5 monitors
-- 3 keyboards
-- 10 mice"
+  - 'Please order:
+
+    - 5 monitors
+
+    - 3 keyboards
+
+    - 10 mice'
 - category: list
   input: please review the design and the implementation
   accepted:
   - Please review the design and the implementation.
   - Please review the design and implementation.
 - category: list
-  input: step one clone the repo step two install dependencies step three run tests step four deploy
+  input: step one clone the repo step two install dependencies step three run tests
+    step four deploy
   accepted:
-  - "1. Clone the repo
-2. Install dependencies
-3. Run tests
-4. Deploy"
-  - "1. Clone the repo.
-2. Install dependencies.
-3. Run tests.
-4. Deploy."
-  - "Step 1: Clone the repo
-Step 2: Install dependencies
-Step 3: Run tests
-Step 4: Deploy"
+  - '1. Clone the repo
+
+    2. Install dependencies
+
+    3. Run tests
+
+    4. Deploy'
+  - '1. Clone the repo.
+
+    2. Install dependencies.
+
+    3. Run tests.
+
+    4. Deploy.'
+  - 'Step 1: Clone the repo
+
+    Step 2: Install dependencies
+
+    Step 3: Run tests
+
+    Step 4: Deploy'
 - category: list
-  input: the action items from the meeting are update the roadmap schedule a design review and hire two more engineers
+  input: the action items from the meeting are update the roadmap schedule a design
+    review and hire two more engineers
   accepted:
-  - "The action items from the meeting are:
-- Update the roadmap
-- Schedule a design review
-- Hire 2 more engineers"
-  - "The action items from the meeting are:
-- Update the roadmap
-- Schedule a design review
-- Hire two more engineers"
-  - "The action items from the meeting are:
-1. Update the roadmap
-2. Schedule a design review
-3. Hire 2 more engineers"
-  - "The action items from the meeting are:
-1. Update the roadmap
-2. Schedule a design review
-3. Hire two more engineers"
-  - "The action items from the meeting are:
-1. Update the roadmap schedule.
-2. Schedule a design review.
-3. Hire 2 more engineers."
+  - 'The action items from the meeting are:
+
+    - Update the roadmap
+
+    - Schedule a design review
+
+    - Hire 2 more engineers'
+  - 'The action items from the meeting are:
+
+    - Update the roadmap
+
+    - Schedule a design review
+
+    - Hire two more engineers'
+  - 'The action items from the meeting are:
+
+    1. Update the roadmap
+
+    2. Schedule a design review
+
+    3. Hire 2 more engineers'
+  - 'The action items from the meeting are:
+
+    1. Update the roadmap
+
+    2. Schedule a design review
+
+    3. Hire two more engineers'
+  - 'The action items from the meeting are:
+
+    1. Update the roadmap schedule.
+
+    2. Schedule a design review.
+
+    3. Hire 2 more engineers.'
 - category: list
   input: the choices are accept or reject
   accepted:
   - The choices are accept or reject.
-  - "The choices are: accept or reject."
+  - 'The choices are: accept or reject.'
 - category: list
   input: the options are upgrade or replace
   accepted:
   - The options are upgrade or replace.
-  - "The options are: upgrade or replace."
+  - 'The options are: upgrade or replace.'
 - category: list
-  input: the priorities are first fix the login bug second add caching third write documentation
+  input: the priorities are first fix the login bug second add caching third write
+    documentation
   accepted:
-  - "The priorities are:
-1. Fix the login bug
-2. Add caching
-3. Write documentation"
-  - "The priorities are:
-1. Fix the login bug.
-2. Add caching.
-3. Write documentation."
+  - 'The priorities are:
+
+    1. Fix the login bug
+
+    2. Add caching
+
+    3. Write documentation'
+  - 'The priorities are:
+
+    1. Fix the login bug.
+
+    2. Add caching.
+
+    3. Write documentation.'
 - category: list
-  input: the tasks for this sprint are first set up the CI pipeline second write the integration tests and third update the deployment scripts
+  input: the tasks for this sprint are first set up the CI pipeline second write the
+    integration tests and third update the deployment scripts
   accepted:
-  - "The tasks for this sprint are:
-1. Set up the CI pipeline
-2. Write the integration tests
-3. Update the deployment scripts"
-  - "The tasks for this sprint are:
-1. Set up the CI pipeline.
-2. Write the integration tests.
-3. Update the deployment scripts."
+  - 'The tasks for this sprint are:
+
+    1. Set up the CI pipeline
+
+    2. Write the integration tests
+
+    3. Update the deployment scripts'
+  - 'The tasks for this sprint are:
+
+    1. Set up the CI pipeline.
+
+    2. Write the integration tests.
+
+    3. Update the deployment scripts.'
 - category: list
   input: we need to test the frontend and the backend
   accepted:
@@ -496,27 +569,42 @@ Step 4: Deploy"
   accepted:
   - You can use SSH or the web console.
 - category: meeting
-  input: okay so in today's standup um john said the backend API is ready sarah mentioned she's blocked on the design review and mike said he'll finish the tests by tomorrow
+  input: okay so in today's standup um john said the backend API is ready sarah mentioned
+    she's blocked on the design review and mike said he'll finish the tests by tomorrow
   accepted:
-  - "In today's standup:
-- John said the backend API is ready.
-- Sarah mentioned she's blocked on the design review.
-- Mike said he'll finish the tests by tomorrow."
-  - "In today's standup:
-- John said the backend API is ready
-- Sarah mentioned she's blocked on the design review
-- Mike said he'll finish the tests by tomorrow"
+  - 'In today''s standup:
+
+    - John said the backend API is ready.
+
+    - Sarah mentioned she''s blocked on the design review.
+
+    - Mike said he''ll finish the tests by tomorrow.'
+  - 'In today''s standup:
+
+    - John said the backend API is ready
+
+    - Sarah mentioned she''s blocked on the design review
+
+    - Mike said he''ll finish the tests by tomorrow'
 - category: meeting
-  input: the key takeaways from the meeting are one we need to hire two more engineers two the deadline is moved to April fifteenth and three we should schedule a follow up for next week
+  input: the key takeaways from the meeting are one we need to hire two more engineers
+    two the deadline is moved to April fifteenth and three we should schedule a follow
+    up for next week
   accepted:
-  - "The key takeaways from the meeting are:
-1. We need to hire 2 more engineers.
-2. The deadline is moved to April 15th.
-3. We should schedule a follow-up for next week."
-  - "The key takeaways from the meeting are:
-1. We need to hire 2 more engineers
-2. The deadline is moved to April 15th
-3. We should schedule a follow-up for next week"
+  - 'The key takeaways from the meeting are:
+
+    1. We need to hire 2 more engineers.
+
+    2. The deadline is moved to April 15th.
+
+    3. We should schedule a follow-up for next week.'
+  - 'The key takeaways from the meeting are:
+
+    1. We need to hire 2 more engineers
+
+    2. The deadline is moved to April 15th
+
+    3. We should schedule a follow-up for next week'
 - category: multilingual
   input: abhi meeting mein discuss karte hain then we'll send the proposal
   accepted:
@@ -536,18 +624,24 @@ Step 4: Deploy"
 - category: no-leadin-list
   input: eggs milk bread butter and cheese
   accepted:
-  - "- Eggs
-- Milk
-- Bread
-- Butter
-- Cheese"
+  - '- Eggs
+
+    - Milk
+
+    - Bread
+
+    - Butter
+
+    - Cheese'
   - Eggs, milk, bread, butter, and cheese.
 - category: no-leadin-list
   input: first the database second the cache third the load balancer
   accepted:
-  - "1. The database
-2. The cache
-3. The load balancer"
+  - '1. The database
+
+    2. The cache
+
+    3. The load balancer'
 - category: number
   input: I have eight files to review
   accepted:
@@ -589,8 +683,8 @@ Step 4: Deploy"
 - category: number
   input: the meeting is at two thirty PM on March fifteenth
   accepted:
-  - "The meeting is at 2:30 PM on March 15th."
-  - "The meeting is at 2:30 p.m. on March 15th."
+  - The meeting is at 2:30 PM on March 15th.
+  - The meeting is at 2:30 p.m. on March 15th.
 - category: number
   input: the meeting is on the third floor
   accepted:
@@ -598,7 +692,7 @@ Step 4: Deploy"
 - category: number
   input: the ratio is one to four
   accepted:
-  - "The ratio is 1:4."
+  - The ratio is 1:4.
 - category: number
   input: the salary range is ninety thousand to one hundred twenty thousand dollars
   accepted:
@@ -803,8 +897,9 @@ Step 4: Deploy"
 - category: punctuation
   input: add a note new line then add the details
   accepted:
-  - "Add a note.
-Then add the details."
+  - 'Add a note.
+
+    Then add the details.'
 - category: punctuation
   input: can we push the launch question mark I need more time
   accepted:
@@ -824,11 +919,13 @@ Then add the details."
   accepted:
   - Dear team, I wanted to follow up on this.
 - category: punctuation
-  input: we shipped the release on Monday new paragraph the rollout went smoothly with no incidents
+  input: we shipped the release on Monday new paragraph the rollout went smoothly
+    with no incidents
   accepted:
-  - "We shipped the release on Monday.
+  - 'We shipped the release on Monday.
 
-The rollout went smoothly with no incidents."
+
+    The rollout went smoothly with no incidents.'
 - category: punctuation
   input: he said open quote I'll be there close quote
   accepted:
@@ -869,7 +966,7 @@ The rollout went smoothly with no incidents."
 - category: punctuation
   input: the options are colon option A semicolon option B semicolon and option C
   accepted:
-  - "The options are: option A; option B; and option C."
+  - 'The options are: option A; option B; and option C.'
 - category: punctuation
   input: the project em dash which started in January em dash is almost done
   accepted:
@@ -908,7 +1005,7 @@ The rollout went smoothly with no incidents."
   input: she said she said the timeline is is too aggressive
   accepted:
   - She said the timeline is too aggressive.
-  - "She said, "The timeline is too aggressive.""
+  - She said, "The timeline is too aggressive."
 - category: repetition
   input: the problem is the problem is that we don't have enough test coverage
   accepted:
@@ -927,26 +1024,42 @@ The rollout went smoothly with no incidents."
   accepted:
   - We should update the documentation.
 - category: run-on
-  input: I talked to the client and they want the feature by next week and also they asked about pricing and I told them we'd send a proposal
+  input: I talked to the client and they want the feature by next week and also they
+    asked about pricing and I told them we'd send a proposal
   accepted:
-  - I talked to the client. They want the feature by next week. They also asked about pricing, and I told them we'd send a proposal.
-  - I talked to the client and they want the feature by next week. Also, they asked about pricing. I told them we'd send a proposal.
-  - I talked to the client, and they want the feature by next week. They also asked about pricing, and I told them we'd send a proposal.
+  - I talked to the client. They want the feature by next week. They also asked about
+    pricing, and I told them we'd send a proposal.
+  - I talked to the client and they want the feature by next week. Also, they asked
+    about pricing. I told them we'd send a proposal.
+  - I talked to the client, and they want the feature by next week. They also asked
+    about pricing, and I told them we'd send a proposal.
 - category: run-on
-  input: so the thing is we tried to deploy on Friday but the tests failed and then we had to roll back and then on Monday we fixed the issue and redeployed and it worked
+  input: so the thing is we tried to deploy on Friday but the tests failed and then
+    we had to roll back and then on Monday we fixed the issue and redeployed and it
+    worked
   accepted:
-  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed and we had to roll back. On Monday we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed, so we had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed. We had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed. We had to roll back and then on Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday
+    we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday,
+    we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed and we had to roll back. On
+    Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed, so we had to roll back. On
+    Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back. On Monday,
+    we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back and then
+    on Monday we fixed the issue and redeployed, and it worked.
 - category: run-on
-  input: we need to update the database and then run the migrations and then restart the service and then verify that everything is working and then notify the team
+  input: we need to update the database and then run the migrations and then restart
+    the service and then verify that everything is working and then notify the team
   accepted:
-  - We need to update the database, run the migrations, and restart the service. Then verify that everything is working and notify the team.
-  - We need to update the database, run the migrations, restart the service, verify that everything is working, and notify the team.
-  - We need to update the database, then run the migrations, then restart the service, then verify that everything is working, and then notify the team.
+  - We need to update the database, run the migrations, and restart the service. Then
+    verify that everything is working and notify the team.
+  - We need to update the database, run the migrations, restart the service, verify
+    that everything is working, and notify the team.
+  - We need to update the database, then run the migrations, then restart the service,
+    then verify that everything is working, and then notify the team.
 - category: small-number
   input: we need three developers on this
   accepted:
@@ -1035,115 +1148,210 @@ The rollout went smoothly with no incidents."
   accepted:
   - We're switching from Redis to Memcached for session storage.
 - category: parakeet-backtrack
-  input: The deployment is scheduled for Thursday. No wait Friday at 3 p.m. Please make sure all the tests pass before then.
+  input: The deployment is scheduled for Thursday. No wait Friday at 3 p.m. Please
+    make sure all the tests pass before then.
   accepted:
-  - The deployment is scheduled for Friday at 3 PM. Please make sure all the tests pass before then.
-  - The deployment is scheduled for Friday at 3 p.m. Please make sure all the tests pass before then.
+  - The deployment is scheduled for Friday at 3 PM. Please make sure all the tests
+    pass before then.
+  - The deployment is scheduled for Friday at 3 p.m. Please make sure all the tests
+    pass before then.
 - category: parakeet-preserve
-  input: The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five minute timeout.
+  input: The CI pipeline runs in three stages. First, it compiles the code, then it
+    runs the test suite, and finally it deploys to staging. Each stage has a five
+    minute timeout.
   accepted:
-  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
-  - The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
-  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
+  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the
+    test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
+  - The CI pipeline runs in three stages. First, it compiles the code, then it runs
+    the test suite, and finally it deploys to staging. Each stage has a five-minute
+    timeout.
+  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the
+    test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
 - category: parakeet-false-start
-  input: We should probably actually know let me think rethink this. The best approach would be to add a retry mechanism with exponential back off. That way we It won't overwhelm the server during peak hours.
+  input: We should probably actually know let me think rethink this. The best approach
+    would be to add a retry mechanism with exponential back off. That way we It won't
+    overwhelm the server during peak hours.
   accepted:
-  - The best approach would be to add a retry mechanism with exponential backoff. That way it won't overwhelm the server during peak hours.
+  - The best approach would be to add a retry mechanism with exponential backoff.
+    That way it won't overwhelm the server during peak hours.
 - category: parakeet-backtrack
-  input: The timeout should be set to 30 uh no 60 seconds and we should add a health check-in point that runs every five minutes.
+  input: The timeout should be set to 30 uh no 60 seconds and we should add a health
+    check-in point that runs every five minutes.
   accepted:
-  - The timeout should be set to 60 seconds. We should add a health check-in point that runs every 5 minutes.
-  - The timeout should be set to 60 seconds, and we should add a health check-in point that runs every 5 minutes.
-  - The timeout should be set to 60 seconds and we should add a health check-in point that runs every 5 minutes.
+  - The timeout should be set to 60 seconds. We should add a health check-in point
+    that runs every 5 minutes.
+  - The timeout should be set to 60 seconds, and we should add a health check-in point
+    that runs every 5 minutes.
+  - The timeout should be set to 60 seconds and we should add a health check-in point
+    that runs every 5 minutes.
 - category: parakeet-correction
-  input: The sour response time is about 500 milliseconds. Um I mean five seconds. That's way too slow for a real-time application. We need to get it under two hundred milliseconds.
+  input: The sour response time is about 500 milliseconds. Um I mean five seconds.
+    That's way too slow for a real-time application. We need to get it under two hundred
+    milliseconds.
   accepted:
-  - The sour response time is about 5 seconds. That's way too slow for a real-time application. We need to get it under 200 milliseconds.
+  - The sour response time is about 5 seconds. That's way too slow for a real-time
+    application. We need to get it under 200 milliseconds.
 - category: parakeet-preserve
-  input: The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
+  input: The monitoring dashboard shows three critical alerts. The primary database
+    is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%.
+    Two of the application servers are returning 500 errors on the checkout endpoint.
+    I've already page the on-call engineer and they're looking into it.
   accepted:
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer, and they're looking into it.
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running
+    at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the
+    application servers are returning 500 errors on the checkout endpoint. I've already
+    paged the on-call engineer and they're looking into it.
+  - The monitoring dashboard shows three critical alerts. The primary database is
+    running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two
+    of the application servers are returning 500 errors on the checkout endpoint.
+    I've already paged the on-call engineer and they're looking into it.
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running
+    at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application
+    servers are returning 500 errors on the checkout endpoint. I've already paged
+    the on-call engineer, and they're looking into it.
 - category: parakeet-correction
-  input: We had about twelve hundred active users last month. Uh sorry, I mean twelve thousand. Revenue was up fifteen percent compared to Q three. The churn rate stayed. Flat at around three point five percent.
+  input: We had about twelve hundred active users last month. Uh sorry, I mean twelve
+    thousand. Revenue was up fifteen percent compared to Q three. The churn rate stayed.
+    Flat at around three point five percent.
   accepted:
-  - We had about 12,000 active users last month. Revenue was up 15% compared to Q3. The churn rate stayed flat at around 3.5%.
+  - We had about 12,000 active users last month. Revenue was up 15% compared to Q3.
+    The churn rate stayed flat at around 3.5%.
 - category: parakeet-backtrack
-  input: Honestly, this is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the wrong. Right call.
+  input: Honestly, this is the best architecture decision we've made all year. The
+    microservices approach was killing us with latency. Going back to a monolith for
+    the core services was absolutely the wrong. Right call.
   accepted:
-  - This is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the right call.
-  - Honestly, this is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the right call.
+  - This is the best architecture decision we've made all year. The microservices
+    approach was killing us with latency. Going back to a monolith for the core services
+    was absolutely the right call.
+  - Honestly, this is the best architecture decision we've made all year. The microservices
+    approach was killing us with latency. Going back to a monolith for the core services
+    was absolutely the right call.
 - category: parakeet-punctuation
-  input: Please send the update to the team dash and make sure to CC the project manager. The deadline is Friday, comma. So don't wait until the last minute.
+  input: Please send the update to the team dash and make sure to CC the project manager.
+    The deadline is Friday, comma. So don't wait until the last minute.
   accepted:
-  - Please send the update to the team — and make sure to CC the project manager. The deadline is Friday, so don't wait until the last minute.
+  - Please send the update to the team — and make sure to CC the project manager.
+    The deadline is Friday, so don't wait until the last minute.
 - category: parakeet-preserve
-  input: Okay, so here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  input: Okay, so here's the plan for tomorrow. First we'll deploy the database changes
+    during the maintenance window. Then once that's stable, we'll push the new API
+    version. And finally we'll update the client SDK and send out the migration guide.
   accepted:
-  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then, once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during
+    the maintenance window. Then once that's stable, we'll push the new API version.
+    Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First we'll deploy the database changes during the
+    maintenance window. Then once that's stable, we'll push the new API version. And
+    finally we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during
+    the maintenance window. Once that's stable, we'll push the new API version. Finally,
+    we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during
+    the maintenance window. Then, once that's stable, we'll push the new API version.
+    Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First we'll deploy the database changes during the
+    maintenance window. Once that's stable, we'll push the new API version. And finally
+    we'll update the client SDK and send out the migration guide.
 - category: parakeet-preserve
-  input: The monitoring dashboard shows three critical alerts. The primary database is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
+  input: The monitoring dashboard shows three critical alerts. The primary database
+    is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%.
+    Two of the application servers are returning 500 errors on the checkout endpoint.
+    I've already page the on-call engineer and they're looking into it.
   accepted:
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already paged the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the application servers are returning 500 errors on the checkout endpoint. I've already page the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application servers are returning 500 errors on the checkout endpoint. I already paged the on-call engineer, and they're looking into it.
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running
+    at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the
+    application servers are returning 500 errors on the checkout endpoint. I've already
+    paged the on-call engineer and they're looking into it.
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running
+    at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the
+    application servers are returning 500 errors on the checkout endpoint. I've already
+    page the on-call engineer and they're looking into it.
+  - The monitoring dashboard shows 3 critical alerts. The primary database is running
+    at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application
+    servers are returning 500 errors on the checkout endpoint. I already paged the
+    on-call engineer, and they're looking into it.
 - category: parakeet-backtrack
-  input: We should deploy to staging. Actually no, deploy to production. The hotfix needs to go out immediately.
+  input: We should deploy to staging. Actually no, deploy to production. The hotfix
+    needs to go out immediately.
   accepted:
   - We should deploy to production. The hotfix needs to go out immediately.
   - Deploy to production. The hotfix needs to go out immediately.
 - category: parakeet-preserve
-  input: The database cluster has five nodes across three availability zones. Two are configured as primaries and three as read replicas. The replication lag is consistently under 50 milliseconds. We can handle an automated failover in under ten seconds.
+  input: The database cluster has five nodes across three availability zones. Two
+    are configured as primaries and three as read replicas. The replication lag is
+    consistently under 50 milliseconds. We can handle an automated failover in under
+    ten seconds.
   accepted:
-  - The database cluster has 5 nodes across 3 availability zones. Two are configured as primaries and 3 as read replicas. The replication lag is consistently under 50 milliseconds. We can handle an automated failover in under 10 seconds.
+  - The database cluster has 5 nodes across 3 availability zones. Two are configured
+    as primaries and 3 as read replicas. The replication lag is consistently under
+    50 milliseconds. We can handle an automated failover in under 10 seconds.
 - category: parakeet-ampm
   input: The meeting is at 3 p.m. sharp in the main conference room.
   accepted:
   - The meeting is at 3 PM sharp in the main conference room.
 - category: parakeet-ampm
-  input: The maintenance window starts at 2 a.m. tomorrow and ends at 6 a.m. We should have the migration done by then.
+  input: The maintenance window starts at 2 a.m. tomorrow and ends at 6 a.m. We should
+    have the migration done by then.
   accepted:
-  - The maintenance window starts at 2 AM tomorrow and ends at 6 AM. We should have the migration done by then.
+  - The maintenance window starts at 2 AM tomorrow and ends at 6 AM. We should have
+    the migration done by then.
 - category: parakeet-ampm
-  input: The deploy went out at 4 p.m. yesterday. We started seeing errors around 5 p.m. The rollback was complete by 6 p.m.
+  input: The deploy went out at 4 p.m. yesterday. We started seeing errors around
+    5 p.m. The rollback was complete by 6 p.m.
   accepted:
-  - The deploy went out at 4 PM yesterday. We started seeing errors around 5 PM. The rollback was complete by 6 PM.
+  - The deploy went out at 4 PM yesterday. We started seeing errors around 5 PM. The
+    rollback was complete by 6 PM.
 - category: parakeet-backtrack
-  input: The bug is in the auth service. Wait, no, it's in the gateway. We need to check the request routing logic.
+  input: The bug is in the auth service. Wait, no, it's in the gateway. We need to
+    check the request routing logic.
   accepted:
   - The bug is in the gateway. We need to check the request routing logic.
 - category: parakeet-backtrack
-  input: Let's use MySQL. Scratch that, PostgreSQL is a better fit. It has better support for JSON columns.
+  input: Let's use MySQL. Scratch that, PostgreSQL is a better fit. It has better
+    support for JSON columns.
   accepted:
   - Let's use PostgreSQL. It has better support for JSON columns.
   - PostgreSQL is a better fit. It has better support for JSON columns.
 - category: parakeet-backtrack
-  input: The cache TTL should be five minutes. Actually, make it ten minutes. We don't want to hit the database too often.
+  input: The cache TTL should be five minutes. Actually, make it ten minutes. We don't
+    want to hit the database too often.
   accepted:
   - The cache TTL should be 10 minutes. We don't want to hit the database too often.
 - category: parakeet-preserve
-  input: The incident response plan has four stages. Detection happens through automated monitoring alerts. Triage determines the severity and assigns the on-call engineer. Mitigation focuses on reducing customer impact as quickly as possible.
+  input: The incident response plan has four stages. Detection happens through automated
+    monitoring alerts. Triage determines the severity and assigns the on-call engineer.
+    Mitigation focuses on reducing customer impact as quickly as possible.
   accepted:
-  - The incident response plan has 4 stages. Detection happens through automated monitoring alerts. Triage determines the severity and assigns the on-call engineer. Mitigation focuses on reducing customer impact as quickly as possible.
+  - The incident response plan has 4 stages. Detection happens through automated monitoring
+    alerts. Triage determines the severity and assigns the on-call engineer. Mitigation
+    focuses on reducing customer impact as quickly as possible.
 - category: parakeet-preserve
-  input: The new API gateway handles authentication, rate limiting, and request routing. It supports both REST and GraphQL endpoints. Average latency added by the gateway is under five milliseconds. We've been running it in shadow mode for two weeks with no issues.
+  input: The new API gateway handles authentication, rate limiting, and request routing.
+    It supports both REST and GraphQL endpoints. Average latency added by the gateway
+    is under five milliseconds. We've been running it in shadow mode for two weeks
+    with no issues.
   accepted:
-  - The new API gateway handles authentication, rate limiting, and request routing. It supports both REST and GraphQL endpoints. Average latency added by the gateway is under 5 milliseconds. We've been running it in shadow mode for 2 weeks with no issues.
+  - The new API gateway handles authentication, rate limiting, and request routing.
+    It supports both REST and GraphQL endpoints. Average latency added by the gateway
+    is under 5 milliseconds. We've been running it in shadow mode for 2 weeks with
+    no issues.
 - category: parakeet-preserve
-  input: We migrated from AWS to GCP last quarter. The main drivers were cost savings and better Kubernetes support. Total migration took about six weeks. The only issue was reconfiguring the CDN which added an extra three days.
+  input: We migrated from AWS to GCP last quarter. The main drivers were cost savings
+    and better Kubernetes support. Total migration took about six weeks. The only
+    issue was reconfiguring the CDN which added an extra three days.
   accepted:
-  - We migrated from AWS to GCP last quarter. The main drivers were cost savings and better Kubernetes support. Total migration took about 6 weeks. The only issue was reconfiguring the CDN, which added an extra 3 days.
+  - We migrated from AWS to GCP last quarter. The main drivers were cost savings and
+    better Kubernetes support. Total migration took about 6 weeks. The only issue
+    was reconfiguring the CDN, which added an extra 3 days.
 - category: parakeet-ampm
-  input: The on-call rotation starts at 9 a.m. Monday and ends at 9 a.m. the following Monday.
+  input: The on-call rotation starts at 9 a.m. Monday and ends at 9 a.m. the following
+    Monday.
   accepted:
   - The on-call rotation starts at 9 AM Monday and ends at 9 AM the following Monday.
 - category: parakeet-ampm
-  input: We noticed the CPU spike at 11 p.m. last night. By 1 a.m. the service had fully recovered.
+  input: We noticed the CPU spike at 11 p.m. last night. By 1 a.m. the service had
+    fully recovered.
   accepted:
   - We noticed the CPU spike at 11 PM last night. By 1 AM the service had fully recovered.
   - We noticed the CPU spike at 11 PM last night. By 1 AM, the service had fully recovered.
@@ -1152,34 +1360,50 @@ The rollout went smoothly with no incidents."
   accepted:
   - The batch job runs at 4 AM daily and processes about 50,000 records.
 - category: parakeet-correction
-  input: The timeout is set to thirty seconds. I mean thirty minutes. That's way too long for a health check.
+  input: The timeout is set to thirty seconds. I mean thirty minutes. That's way too
+    long for a health check.
   accepted:
   - The timeout is set to 30 minutes. That's way too long for a health check.
 - category: parakeet-correction
-  input: We deployed to the staging region. Sorry I mean the production region. The latency requirements are different for live traffic.
+  input: We deployed to the staging region. Sorry I mean the production region. The
+    latency requirements are different for live traffic.
   accepted:
-  - We deployed to the production region. The latency requirements are different for live traffic.
+  - We deployed to the production region. The latency requirements are different for
+    live traffic.
 - category: parakeet-discourse
-  input: Like, the main issue is that the database queries are not optimized. We need to add proper indexing.
+  input: Like, the main issue is that the database queries are not optimized. We need
+    to add proper indexing.
   accepted:
-  - The main issue is that the database queries are not optimized. We need to add proper indexing.
+  - The main issue is that the database queries are not optimized. We need to add
+    proper indexing.
 - category: parakeet-discourse
-  input: So basically, the authentication flow is broken because the token refresh endpoint returns a 500 error.
+  input: So basically, the authentication flow is broken because the token refresh
+    endpoint returns a 500 error.
   accepted:
-  - The authentication flow is broken because the token refresh endpoint returns a 500 error.
+  - The authentication flow is broken because the token refresh endpoint returns a
+    500 error.
 - category: parakeet-discourse
-  input: You know, the real problem is that we don't have enough monitoring in place. We need better observability.
+  input: You know, the real problem is that we don't have enough monitoring in place.
+    We need better observability.
   accepted:
-  - The real problem is that we don't have enough monitoring in place. We need better observability.
+  - The real problem is that we don't have enough monitoring in place. We need better
+    observability.
 - category: parakeet-correction-long
-  input: The cluster has eight nodes. I mean sixteen nodes. We doubled the capacity after the holiday traffic spike. The auto scaling policy triggers at 70% memory utilization.
+  input: The cluster has eight nodes. I mean sixteen nodes. We doubled the capacity
+    after the holiday traffic spike. The auto scaling policy triggers at 70% memory
+    utilization.
   accepted:
-  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike. The auto scaling policy triggers at 70% memory utilization.
-  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike. The auto-scaling policy triggers at 70% memory utilization.
+  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike.
+    The auto scaling policy triggers at 70% memory utilization.
+  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike.
+    The auto-scaling policy triggers at 70% memory utilization.
 - category: parakeet-correction-long
-  input: The database has about two hundred tables. Sorry I mean two thousand tables. Most of them are legacy and haven't been accessed in months. We need to audit and clean up the unused ones.
+  input: The database has about two hundred tables. Sorry I mean two thousand tables.
+    Most of them are legacy and haven't been accessed in months. We need to audit
+    and clean up the unused ones.
   accepted:
-  - The database has about 2,000 tables. Most of them are legacy and haven't been accessed in months. We need to audit and clean up the unused ones.
+  - The database has about 2,000 tables. Most of them are legacy and haven't been
+    accessed in months. We need to audit and clean up the unused ones.
 - category: word-boundary
   input: Deploy two staging and run the tests
   accepted:
@@ -1201,25 +1425,27 @@ The rollout went smoothly with no incidents."
   accepted:
   - She ran the 3rd period of practice.
 - category: paragraph-command
-  input: The deadline was moved to Friday new paragraph please update your tickets accordingly
+  input: The deadline was moved to Friday new paragraph please update your tickets
+    accordingly
   accepted:
-  - "The deadline was moved to Friday.
+  - 'The deadline was moved to Friday.
 
-Please update your tickets accordingly."
+
+    Please update your tickets accordingly.'
 - category: paragraph-command
   input: We discussed the new paragraph structure in the document
   accepted:
   - We discussed the new paragraph structure in the document.
 - category: continuation
   input: Latency and throughput are the main concerns
+  precedingText: The main concerns are
   accepted:
   - latency and throughput are the main concerns.
-  precedingText: The main concerns are
 - category: continuation
   input: Consider using a message queue instead
+  precedingText: I think we should
   accepted:
   - consider using a message queue instead.
-  precedingText: I think we should
 - category: filler-vs-content
   input: Yeah I saw the PR and it looks good
   accepted:

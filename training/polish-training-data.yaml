@@ -1,69 +1,25 @@
-- category: apple-bug
-  input: Can you, check the, status of the, deployment
-  accepted:
-  - Can you check the status of the deployment?
-- category: apple-bug
-  input: Can you, review, the pull, request,,
-  accepted:
-  - Can you review the pull request?
-- category: apple-bug
-  input: Could you, check, the logs, for errors,
-  accepted:
-  - Could you check the logs for errors?
-- category: apple-bug
-  input: Did you, finish, the migration, script,,
-  accepted:
-  - Did you finish the migration script?
-- category: apple-bug
-  input: I will, be there, at 3 PM
-  accepted:
-  - I will be there at 3 PM.
-- category: apple-bug
-  input: Please, send the, report by, Friday
-  accepted:
-  - Please send the report by Friday.
-- category: apple-bug
-  input: She will arrive at 5, PM,, on Wednesday,
-  accepted:
-  - She will arrive at 5 PM on Wednesday.
-- category: apple-bug
-  input: The call is at, 2,, PM, on Friday,
-  accepted:
-  - The call is at 2 PM on Friday.
-- category: apple-bug
-  input: The meeting is at, 10 AM, on Monday
-  accepted:
-  - The meeting is at 10 AM on Monday.
-- category: apple-bug
-  input: the team, is ready, to deploy
-  accepted:
-  - The team is ready to deploy.
-- category: apple-bug
-  input: we need, to update, the documentation, before release
-  accepted:
-  - We need to update the documentation before release.
 - category: backtrack
-  input: I'll need five no wait seven days
+  input: I'll need five no wait seven days.
   accepted:
   - I'll need 7 days.
 - category: backtrack
-  input: the meeting is at two no three PM
+  input: The meeting is at two no three PM.
   accepted:
   - The meeting is at 3 PM.
 - category: backtrack
-  input: the price is eighty actually ninety dollars
+  input: The price is eighty actually ninety dollars.
   accepted:
   - The price is $90.
 - category: backtrack
-  input: we need six no eight servers for the cluster
+  input: We need six no eight servers for the cluster.
   accepted:
   - We need 8 servers for the cluster.
 - category: backtrack
-  input: the sprint is two no three weeks long
+  input: The sprint is two no three weeks long.
   accepted:
   - The sprint is 3 weeks long.
 - category: backtrack
-  input: there are four no five open tickets
+  input: There are four no five open tickets.
   accepted:
   - There are 5 open tickets.
 - category: capitalization
@@ -83,172 +39,175 @@
 
     '
 - category: capitalization
-  input: I talked to sarah and mike about the timeline
+  input: I talked to sarah and mike about the timeline.
   accepted:
   - I talked to Sarah and Mike about the timeline.
 - category: capitalization
-  input: I met with john and lisa from the new york office last week
+  input: I met with john and lisa from the new york office last week.
   accepted:
   - I met with John and Lisa from the New York office last week.
 - category: capitalization
-  input: david from the chicago team paired with emma on the refactor
+  input: David from the chicago team paired with emma on the refactor.
   accepted:
   - David from the Chicago team paired with Emma on the refactor.
 - category: capitalization
-  input: ask james from the berlin office about the kubernetes setup
+  input: Ask james from the berlin office about the kubernetes setup.
   accepted:
   - Ask James from the Berlin office about the Kubernetes setup.
 - category: capitalization
-  input: I talked to the PM and she wants it by Thursday and the designer agreed and engineering said it's tight but doable
+  input: I talked to the PM and she wants it by Thursday and the designer agreed and
+    engineering said it's tight but doable.
   accepted:
-  - I talked to the PM and she wants it by Thursday. The designer agreed. Engineering said it's tight but doable.
-  - I talked to the PM, and she wants it by Thursday. The designer agreed, and engineering said it's tight but doable.
+  - I talked to the PM and she wants it by Thursday. The designer agreed. Engineering
+    said it's tight but doable.
+  - I talked to the PM, and she wants it by Thursday. The designer agreed, and engineering
+    said it's tight but doable.
 - category: capitalization
-  input: ahmed from the dubai office updated the jira tickets
+  input: Ahmed from the dubai office updated the jira tickets.
   accepted:
   - Ahmed from the Dubai office updated the Jira tickets.
 - category: capitalization
-  input: can you ask sarah from the london office
+  input: Can you ask sarah from the london office.
   accepted:
   - Can you ask Sarah from the London office?
 - category: capitalization
-  input: check the x forwarded for header
+  input: Check the x forwarded for header.
   accepted:
   - Check the X-Forwarded-For header.
 - category: capitalization
-  input: configure the apache kafka cluster
+  input: Configure the apache kafka cluster.
   accepted:
   - Configure the Apache Kafka cluster.
 - category: capitalization
-  input: i spoke with maria from netflix about the project
+  input: I spoke with maria from netflix about the project.
   accepted:
   - I spoke with Maria from Netflix about the project.
 - category: capitalization
-  input: i went to new york last week
+  input: I went to new york last week.
   accepted:
   - I went to New York last week.
 - category: capitalization
-  input: maria set up the grafana dashboard
+  input: Maria set up the grafana dashboard.
   accepted:
   - Maria set up the Grafana dashboard.
 - category: capitalization
-  input: memcached is faster for simple key value lookups
+  input: Memcached is faster for simple key value lookups.
   accepted:
   - Memcached is faster for simple key-value lookups.
 - category: capitalization
-  input: microsoft teams doesn't work with google chrome
+  input: Microsoft teams doesn't work with google chrome.
   accepted:
   - Microsoft Teams doesn't work with Google Chrome.
 - category: capitalization
-  input: priya from the new york office sent the report
+  input: Priya from the new york office sent the report.
   accepted:
   - Priya from the New York office sent the report.
 - category: capitalization
-  input: set the authorization header to bearer token
+  input: Set the authorization header to bearer token.
   accepted:
   - Set the Authorization header to Bearer token.
 - category: capitalization
-  input: set the cache control header to no cache
+  input: Set the cache control header to no cache.
   accepted:
   - Set the Cache-Control header to no-cache.
 - category: capitalization
-  input: talk to alex from amazon about the integration
+  input: Talk to alex from amazon about the integration.
   accepted:
   - Talk to Alex from Amazon about the integration.
 - category: capitalization
-  input: tell mike from the sales team to send the report
+  input: Tell mike from the sales team to send the report.
   accepted:
   - Tell Mike from the sales team to send the report.
 - category: capitalization
-  input: the CI CD pipeline uses GKE and GCS
+  input: The CI CD pipeline uses GKE and GCS.
   accepted:
   - The CI/CD pipeline uses GKE and GCS.
 - category: capitalization
-  input: the accept header should include application json
+  input: The accept header should include application json.
   accepted:
   - The Accept header should include application/json.
 - category: capitalization
-  input: the content type header should be application JSON
+  input: The content type header should be application JSON.
   accepted:
   - The Content-Type header should be application/json.
 - category: capitalization
-  input: the docker container runs on linux
+  input: The docker container runs on linux.
   accepted:
   - The Docker container runs on Linux.
 - category: capitalization
-  input: the fetch API returns a promise
+  input: The fetch API returns a promise.
   accepted:
   - The Fetch API returns a promise.
 - category: capitalization
-  input: the flask API serves the mobile app
+  input: The flask API serves the mobile app.
   accepted:
   - The Flask API serves the mobile app.
 - category: capitalization
-  input: the iphone runs ios eighteen
+  input: The iphone runs ios eighteen.
   accepted:
   - The iPhone runs iOS 18.
 - category: capitalization
-  input: the python script uses numpy and pandas
+  input: The python script uses numpy and pandas.
   accepted:
   - The Python script uses NumPy and Pandas.
 - category: capitalization
-  input: the swift package uses combine and swiftui
+  input: The swift package uses combine and swiftui.
   accepted:
   - The Swift package uses Combine and SwiftUI.
 - category: capitalization
-  input: the terraform config deploys to aws
+  input: The terraform config deploys to aws.
   accepted:
   - The Terraform config deploys to AWS.
 - category: capitalization
-  input: the typescript compiler found three errors
+  input: The typescript compiler found three errors.
   accepted:
   - The TypeScript compiler found 3 errors.
 - category: capitalization
-  input: the vue app loads faster than the angular one
+  input: The vue app loads faster than the angular one.
   accepted:
   - The Vue app loads faster than the Angular one.
 - category: capitalization
-  input: tom from the tokyo office is on the pagerduty rotation
+  input: Tom from the tokyo office is on the pagerduty rotation.
   accepted:
   - Tom from the Tokyo office is on the PagerDuty rotation.
 - category: capitalization
-  input: use the fetch API to make the request
+  input: Use the fetch API to make the request.
   accepted:
   - Use the Fetch API to make the request.
 - category: capitalization
-  input: use the fetch API with an authorization header
+  input: Use the fetch API with an authorization header.
   accepted:
   - Use the Fetch API with an Authorization header.
 - category: capitalization
-  input: we host on google cloud platform with bigquery
+  input: We host on google cloud platform with bigquery.
   accepted:
   - We host on Google Cloud Platform with BigQuery.
 - category: capitalization
-  input: we host on vercel with a supabase backend
+  input: We host on vercel with a supabase backend.
   accepted:
   - We host on Vercel with a Supabase backend.
 - category: capitalization
-  input: we migrated from jenkins to github actions
+  input: We migrated from jenkins to github actions.
   accepted:
   - We migrated from Jenkins to GitHub Actions.
 - category: capitalization
-  input: we use EKS for staging and GKE for production
+  input: We use EKS for staging and GKE for production.
   accepted:
   - We use EKS for staging and GKE for production.
 - category: capitalization
-  input: we use elasticsearch for full text search
+  input: We use elasticsearch for full text search.
   accepted:
   - We use Elasticsearch for full-text search.
 - category: capitalization
-  input: we use slack for communication and notion for docs
+  input: We use slack for communication and notion for docs.
   accepted:
   - We use Slack for communication and Notion for docs.
 - category: capitalization
-  input: we're switching from redis to memcached
+  input: We're switching from redis to memcached.
   accepted:
   - We're switching from Redis to Memcached.
 - category: capitalization
-  input: we're using kubernetes on aws
+  input: We're using kubernetes on aws.
   accepted:
   - We're using Kubernetes on AWS.
 - category: clean
@@ -282,11 +241,11 @@
 
     '
 - category: clean
-  input: I want to go to the meeting
+  input: I want to go to the meeting.
   accepted:
   - I want to go to the meeting.
 - category: clean
-  input: I was thinking… maybe we should wait
+  input: I was thinking… maybe we should wait.
   accepted:
   - I was thinking… maybe we should wait.
   - I was thinking. Maybe we should wait.
@@ -313,7 +272,7 @@
   accepted:
   - Let's circle back on this tomorrow.
 - category: clean
-  input: Research & development is our focus
+  input: Research & development is our focus.
   accepted:
   - Research & development is our focus.
 - category: clean
@@ -337,706 +296,707 @@
   accepted:
   - We're on track for the Q2 release.
 - category: clean
-  input: ahmed from the dubai office joined the call
+  input: Ahmed from the dubai office joined the call.
   accepted:
   - Ahmed from the Dubai office joined the call.
 - category: clean
-  input: ahmed updated the documentation yesterday
+  input: Ahmed updated the documentation yesterday.
   accepted:
   - Ahmed updated the documentation yesterday.
 - category: clean
-  input: and then… it just stopped working
+  input: And then… it just stopped working.
   accepted:
   - And then… it just stopped working.
   - And then it just stopped working.
 - category: clean
-  input: can you ask alex about the deployment
+  input: Can you ask alex about the deployment.
   accepted:
   - Can you ask Alex about the deployment?
   - Can you ask alex about the deployment?
 - category: clean
-  input: check its configuration file
+  input: Check its configuration file.
   accepted:
   - Check its configuration file.
 - category: clean
-  input: check the config/settings page
+  input: Check the config/settings page.
   accepted:
   - Check the config/settings page.
 - category: clean
-  input: check the ec2 instance status
+  input: Check the ec2 instance status.
   accepted:
   - Check the EC2 instance status.
 - category: clean
-  input: check the function (user ID) for errors
+  input: Check the function (user ID) for errors.
   accepted:
   - Check the function (user ID) for errors.
 - category: clean
-  input: check the splunk logs for errors
+  input: Check the splunk logs for errors.
   accepted:
   - Check the Splunk logs for errors.
 - category: clean
-  input: check with jennifer before merging
+  input: Check with jennifer before merging.
   accepted:
   - Check with Jennifer before merging.
 - category: clean
-  input: chen from the tokyo office is on call this week
+  input: Chen from the tokyo office is on call this week.
   accepted:
   - Chen from the Tokyo office is on call this week.
 - category: clean
-  input: chen will present at the all-hands
+  input: Chen will present at the all-hands.
   accepted:
   - Chen will present at the all-hands.
 - category: clean
-  input: contact support (ext 4567) for help
+  input: Contact support (ext 4567) for help.
   accepted:
   - Contact support (ext 4567) for help.
 - category: clean
-  input: deploy the nginx reverse proxy first
+  input: Deploy the nginx reverse proxy first.
   accepted:
   - Deploy the Nginx reverse proxy first.
 - category: clean
-  input: dmitri from the berlin team deployed the fix
+  input: Dmitri from the berlin team deployed the fix.
   accepted:
   - Dmitri from the Berlin team deployed the fix.
 - category: clean
-  input: dmitri said the release is on track
+  input: Dmitri said the release is on track.
   accepted:
   - Dmitri said the release is on track.
 - category: clean
-  input: it's a personal decision
+  input: It's a personal decision.
   accepted:
   - It's a personal decision.
 - category: clean
-  input: its configuration is correct
+  input: Its configuration is correct.
   accepted:
   - Its configuration is correct.
 - category: clean
-  input: jennifer from the london team reviewed the PR
+  input: Jennifer from the london team reviewed the PR.
   accepted:
   - Jennifer from the London team reviewed the PR.
 - category: clean
-  input: john will handle the code review
+  input: John will handle the code review.
   accepted:
   - John will handle the code review.
 - category: clean
-  input: keep personal information private
+  input: Keep personal information private.
   accepted:
   - Keep personal information private.
 - category: clean
-  input: maria set up the monitoring dashboard
+  input: Maria set up the monitoring dashboard.
   accepted:
   - Maria set up the monitoring dashboard.
 - category: clean
-  input: migrate from EKS to GKE
+  input: Migrate from EKS to GKE.
   accepted:
   - Migrate from EKS to GKE.
 - category: clean
-  input: mike from google reached out about the partnership
+  input: Mike from google reached out about the partnership.
   accepted:
   - Mike from Google reached out about the partnership.
 - category: clean
-  input: one more thing before we wrap up
+  input: One more thing before we wrap up.
   accepted:
   - One more thing before we wrap up.
 - category: clean
-  input: one of the servers is down
+  input: One of the servers is down.
   accepted:
   - One of the servers is down.
 - category: clean
-  input: priya from the bangalore team fixed the bug
+  input: Priya from the bangalore team fixed the bug.
   accepted:
   - Priya from the Bangalore team fixed the bug.
 - category: clean
-  input: sarah from the seattle office has the details
+  input: Sarah from the seattle office has the details.
   accepted:
   - Sarah from the Seattle office has the details.
 - category: clean
-  input: that's a good one
+  input: That's a good one.
   accepted:
   - That's a good one.
 - category: clean
-  input: that's a personal preference
+  input: That's a personal preference.
   accepted:
   - That's a personal preference.
 - category: clean
-  input: the API (version 2) supports pagination
+  input: The API (version 2) supports pagination.
   accepted:
   - The API (version 2) supports pagination.
 - category: clean
-  input: the ansible playbook needs updating
+  input: The ansible playbook needs updating.
   accepted:
   - The Ansible playbook needs updating.
 - category: clean
-  input: the app lost its state after the crash
+  input: The app lost its state after the crash.
   accepted:
   - The app lost its state after the crash.
 - category: clean
-  input: the cluster runs on GKE in us-central
+  input: The cluster runs on GKE in us-central.
   accepted:
   - The cluster runs on GKE in us-central.
 - category: clean
-  input: the database and its indexes are corrupt
+  input: The database and its indexes are corrupt.
   accepted:
   - The database and its indexes are corrupt.
 - category: clean
-  input: the datadog alerts are too noisy
+  input: The datadog alerts are too noisy.
   accepted:
   - The Datadog alerts are too noisy.
 - category: clean
-  input: the django backend handles authentication
+  input: The django backend handles authentication.
   accepted:
   - The Django backend handles authentication.
 - category: clean
-  input: the formula is 2 + 3 = 5
+  input: The formula is 2 + 3 = 5.
   accepted:
   - The formula is 2 + 3 = 5.
 - category: clean
-  input: the grafana dashboard shows the latency spike
+  input: The grafana dashboard shows the latency spike.
   accepted:
   - The Grafana dashboard shows the latency spike.
 - category: clean
-  input: the jenkins pipeline is broken
+  input: The jenkins pipeline is broken.
   accepted:
   - The Jenkins pipeline is broken.
 - category: clean
-  input: the kotlin code is cleaner than java
+  input: The kotlin code is cleaner than java.
   accepted:
   - The Kotlin code is cleaner than Java.
 - category: clean
-  input: the lambda function timed out
+  input: The lambda function timed out.
   accepted:
   - The Lambda function timed out.
   - The lambda function timed out.
 - category: clean
-  input: the mongodb collection is getting large
+  input: The mongodb collection is getting large.
   accepted:
   - The MongoDB collection is getting large.
 - category: clean
-  input: the postgresql database needs an upgrade
+  input: The postgresql database needs an upgrade.
   accepted:
   - The PostgreSQL database needs an upgrade.
 - category: clean
-  input: the price is $50 with a 10% discount
+  input: The price is $50 with a 10% discount.
   accepted:
   - The price is $50 with a 10% discount.
 - category: clean
-  input: the python script runs every hour
+  input: The python script runs every hour.
   accepted:
   - The Python script runs every hour.
 - category: clean
-  input: the rabbitmq queue is backing up
+  input: The rabbitmq queue is backing up.
   accepted:
   - The RabbitMQ queue is backing up.
 - category: clean
-  input: the rds instance needs a larger class
+  input: The rds instance needs a larger class.
   accepted:
   - The RDS instance needs a larger class.
 - category: clean
-  input: the react component needs refactoring
+  input: The react component needs refactoring.
   accepted:
   - The React component needs refactoring.
 - category: clean
-  input: the redis cluster needs more memory
+  input: The redis cluster needs more memory.
   accepted:
   - The Redis cluster needs more memory.
 - category: clean
-  input: the results were… interesting
+  input: The results were… interesting.
   accepted:
   - The results were… interesting.
 - category: clean
-  input: the s3 bucket permissions are wrong
+  input: The s3 bucket permissions are wrong.
   accepted:
   - The S3 bucket permissions are wrong.
 - category: clean
-  input: the server (production) is down
+  input: The server (production) is down.
   accepted:
   - The server (production) is down.
 - category: clean
-  input: the service and its dependencies need updating
+  input: The service and its dependencies need updating.
   accepted:
   - The service and its dependencies need updating.
 - category: clean
-  input: the typescript compiler caught the error
+  input: The typescript compiler caught the error.
   accepted:
   - The TypeScript compiler caught the error.
 - category: clean
-  input: the variable is max_retry_count
+  input: The variable is max_retry_count.
   accepted:
   - The variable is max_retry_count.
 - category: clean
-  input: the webpack build is slow
+  input: The webpack build is slow.
   accepted:
   - The Webpack build is slow.
 - category: clean
-  input: this one is better
+  input: This one is better.
   accepted:
   - This one is better.
 - category: clean
-  input: tom and lisa are working on the frontend
+  input: Tom and lisa are working on the frontend.
   accepted:
   - Tom and Lisa are working on the frontend.
 - category: clean
-  input: update the terraform configuration
+  input: Update the terraform configuration.
   accepted:
   - Update the Terraform configuration.
 - category: clean
-  input: use numpy for the matrix operations
+  input: Use numpy for the matrix operations.
   accepted:
   - Use NumPy for the matrix operations.
 - category: clean
-  input: use swift for the ios app
+  input: Use swift for the ios app.
   accepted:
   - Use Swift for the iOS app.
 - category: clean
-  input: 'use the #backend channel for updates'
+  input: 'Use the #backend channel for updates.'
   accepted:
   - 'Use the #backend channel for updates.'
 - category: clean
-  input: use the * wildcard for matching
+  input: Use the * wildcard for matching.
   accepted:
   - Use the * wildcard for matching.
 - category: clean
-  input: wait… I need to think about this
+  input: Wait… I need to think about this.
   accepted:
   - Wait… I need to think about this.
   - Wait. I need to think about this.
 - category: clean
-  input: we migrated from mysql to postgresql
+  input: We migrated from mysql to postgresql.
   accepted:
   - We migrated from MySQL to PostgreSQL.
 - category: clean
-  input: we need to update the config (see below) before deploying
+  input: We need to update the config (see below) before deploying.
   accepted:
   - We need to update the config (see below) before deploying.
 - category: clean
-  input: we rewrote it in rust for performance
+  input: We rewrote it in rust for performance.
   accepted:
   - We rewrote it in Rust for performance.
 - category: clean
-  input: we use cloudflare for CDN
+  input: We use cloudflare for CDN.
   accepted:
   - We use Cloudflare for CDN.
 - category: clean
-  input: we use prometheus for monitoring
+  input: We use prometheus for monitoring.
   accepted:
   - We use Prometheus for monitoring.
 - category: clean
-  input: we use vite instead of webpack now
+  input: We use vite instead of webpack now.
   accepted:
   - We use Vite instead of Webpack now.
 - category: contraction
-  input: she won't accept it but he'll probably agree
+  input: She won't accept it but he'll probably agree.
   accepted:
   - She won't accept it but he'll probably agree.
   - She won't accept it, but he'll probably agree.
 - category: contraction
-  input: they won't approve the budget but we'll find another way
+  input: They won't approve the budget but we'll find another way.
   accepted:
   - They won't approve the budget but we'll find another way.
   - They won't approve the budget, but we'll find another way.
 - category: contraction
-  input: I wouldn't recommend it but you'd know better than me
+  input: I wouldn't recommend it but you'd know better than me.
   accepted:
   - I wouldn't recommend it but you'd know better than me.
   - I wouldn't recommend it, but you'd know better than me.
 - category: contraction
-  input: it shouldn't take long and we'll have the results by Friday
+  input: It shouldn't take long and we'll have the results by Friday.
   accepted:
   - It shouldn't take long and we'll have the results by Friday.
   - It shouldn't take long, and we'll have the results by Friday.
 - category: contraction
-  input: he didn't finish the report but she'll cover for him
+  input: He didn't finish the report but she'll cover for him.
   accepted:
   - He didn't finish the report but she'll cover for him.
   - He didn't finish the report, but she'll cover for him.
 - category: contraction
-  input: we can't delay it any further or they'll miss the window
+  input: We can't delay it any further or they'll miss the window.
   accepted:
   - We can't delay it any further or they'll miss the window.
   - We can't delay it any further, or they'll miss the window.
 - category: contraction
-  input: you shouldn't merge that yet but I'll let you decide
+  input: You shouldn't merge that yet but I'll let you decide.
   accepted:
   - You shouldn't merge that yet but I'll let you decide.
   - You shouldn't merge that yet, but I'll let you decide.
 - category: contraction
-  input: it won't compile right now but it'll work after the patch
+  input: It won't compile right now but it'll work after the patch.
   accepted:
   - It won't compile right now but it'll work after the patch.
   - It won't compile right now, but it'll work after the patch.
 - category: contraction
-  input: he'd rather wait but she'd prefer to ship now
+  input: He'd rather wait but she'd prefer to ship now.
   accepted:
   - He'd rather wait but she'd prefer to ship now.
   - He'd rather wait, but she'd prefer to ship now.
 - category: contraction
-  input: I can't promise it'll be done today but I'll try
+  input: I can't promise it'll be done today but I'll try.
   accepted:
   - I can't promise it'll be done today but I'll try.
   - I can't promise it'll be done today, but I'll try.
 - category: contraction
-  input: I'll send it tomorrow and we'll review it Monday
+  input: I'll send it tomorrow and we'll review it Monday.
   accepted:
   - I'll send it tomorrow and we'll review it Monday.
   - I'll send it tomorrow, and we'll review it Monday.
 - category: contraction
-  input: he said I'll be there by noon
+  input: He said I'll be there by noon.
   accepted:
   - He said, "I'll be there by noon."
   - He said, I'll be there by noon.
 - category: contraction
-  input: he said “I'll handle it”
+  input: He said “I'll handle it”.
   accepted:
   - He said, “I'll handle it.”
 - category: contraction
-  input: he'd assumed it'd be easier to deploy
+  input: He'd assumed it'd be easier to deploy.
   accepted:
   - He'd assumed it'd be easier to deploy.
 - category: contraction
-  input: they'd already deployed when we'd barely started testing
+  input: They'd already deployed when we'd barely started testing.
   accepted:
   - They'd already deployed when we'd barely started testing.
 - category: contraction
-  input: we couldn't have done it without the team's support
+  input: We couldn't have done it without the team's support.
   accepted:
   - We couldn't have done it without the team's support.
 - category: contraction
-  input: we're deploying on GKE with istio
+  input: We're deploying on GKE with istio.
   accepted:
   - We're deploying on GKE with Istio.
 - category: contraction
-  input: you'd expect it'd be faster after the upgrade
+  input: You'd expect it'd be faster after the upgrade.
   accepted:
   - You'd expect it'd be faster after the upgrade.
 - category: contraction
-  input: you'd think they'd have fixed that by now
+  input: You'd think they'd have fixed that by now.
   accepted:
   - You'd think they'd have fixed that by now.
 - category: correction
-  input: I actually enjoyed the presentation
+  input: I actually enjoyed the presentation.
   accepted:
   - I actually enjoyed the presentation.
 - category: correction
-  input: I was going to suggest but never mind let's just go with your idea
+  input: I was going to suggest but never mind let's just go with your idea.
   accepted:
   - Let's just go with your idea.
 - category: correction
-  input: I'll be there in ten make that twenty minutes
+  input: I'll be there in ten make that twenty minutes.
   accepted:
   - I'll be there in 20 minutes.
 - category: correction
-  input: I'll handle it actually can you take care of it
+  input: I'll handle it actually can you take care of it.
   accepted:
   - Can you take care of it?
 - category: correction
-  input: book the large room no wait the small one is fine
+  input: Book the large room no wait the small one is fine.
   accepted:
   - Book the small room.
 - category: correction
-  input: deploy to us-east no wait us-west
+  input: Deploy to us-east no wait us-west.
   accepted:
   - Deploy to us-west.
 - category: correction
-  input: email it to marketing sorry engineering
+  input: Email it to marketing sorry engineering.
   accepted:
   - Email it to engineering.
 - category: correction
-  input: it actually works better than expected
+  input: It actually works better than expected.
   accepted:
   - It actually works better than expected.
 - category: correction
-  input: it took two days or rather three days to fix
+  input: It took two days or rather three days to fix.
   accepted:
   - It took 3 days to fix.
 - category: correction
-  input: it's on port 3000 no 3001
+  input: It's on port 3000 no 3001.
   accepted:
   - It's on port 3001.
 - category: correction
-  input: just to be clear we need five servers not six
+  input: Just to be clear we need five servers not six.
   accepted:
   - We need 5 servers, not 6.
 - category: correction
-  input: let me clarify the budget is forty thousand not fifty
+  input: Let me clarify the budget is forty thousand not fifty.
   accepted:
   - The budget is $40,000, not $50,000.
   - The budget is 40,000, not 50,000.
 - category: correction
-  input: let me rephrase the cost is ten thousand not twelve
+  input: Let me rephrase the cost is ten thousand not twelve.
   accepted:
   - The cost is $10,000, not $12,000.
 - category: correction
-  input: let me rephrase the project will take two months not three
+  input: Let me rephrase the project will take two months not three.
   accepted:
   - The project will take 2 months, not 3.
 - category: correction
-  input: let's meet on Tuesday no wait Wednesday
+  input: Let's meet on Tuesday no wait Wednesday.
   accepted:
   - Let's meet on Wednesday.
 - category: correction
-  input: let's use MySQL actually PostgreSQL is better
+  input: Let's use MySQL actually PostgreSQL is better.
   accepted:
   - Let's use PostgreSQL.
 - category: correction
-  input: never mind what I just said the original plan is fine
+  input: Never mind what I just said the original plan is fine.
   accepted:
   - The original plan is fine.
 - category: correction
-  input: order five monitors make that six
+  input: Order five monitors make that six.
   accepted:
   - Order 6 monitors.
 - category: correction
-  input: send the report to John no wait send it to Sarah
+  input: Send the report to John no wait send it to Sarah.
   accepted:
   - Send the report to Sarah.
 - category: correction
-  input: talk to the design team I mean the product team
+  input: Talk to the design team I mean the product team.
   accepted:
   - Talk to the product team.
 - category: correction
-  input: the budget is ten thousand sorry twenty thousand dollars
+  input: The budget is ten thousand sorry twenty thousand dollars.
   accepted:
   - The budget is $20,000.
 - category: correction
-  input: the deadline is Friday I mean Monday
+  input: The deadline is Friday I mean Monday.
   accepted:
   - The deadline is Monday.
 - category: correction
-  input: the deadline is next week actually it's this Friday
+  input: The deadline is next week actually it's this Friday.
   accepted:
   - The deadline is this Friday.
 - category: correction
-  input: the estimate is six months not eight
+  input: The estimate is six months not eight.
   accepted:
   - The estimate is 6 months, not 8.
 - category: correction
-  input: the fix actually broke something else
+  input: The fix actually broke something else.
   accepted:
   - The fix actually broke something else.
 - category: correction
-  input: the latency is fifty no sixty milliseconds
+  input: The latency is fifty no sixty milliseconds.
   accepted:
   - The latency is 60 milliseconds.
 - category: correction
-  input: the meeting is at 2 no wait 3 PM
+  input: The meeting is at 2 no wait 3 PM.
   accepted:
   - The meeting is at 3 PM.
 - category: correction
-  input: the port is 8080 sorry 8443
+  input: The port is 8080 sorry 8443.
   accepted:
   - The port is 8443.
 - category: correction
-  input: the release is Tuesday no Wednesday
+  input: The release is Tuesday no Wednesday.
   accepted:
   - The release is Wednesday.
 - category: correction
-  input: to be clear the fix takes two hours not four
+  input: To be clear the fix takes two hours not four.
   accepted:
   - To be clear, the fix takes 2 hours, not 4.
   - The fix takes 2 hours, not 4.
 - category: correction
-  input: to clarify the sprint is three weeks not four
+  input: To clarify the sprint is three weeks not four.
   accepted:
   - To clarify, the sprint is 3 weeks, not 4.
   - To clarify, the sprint is 3 weeks not 4.
   - The sprint is 3 weeks, not 4.
 - category: correction
-  input: use the REST API I mean the GraphQL API
+  input: Use the REST API I mean the GraphQL API.
   accepted:
   - Use the GraphQL API.
 - category: correction
-  input: use the staging server no wait the production server
+  input: Use the staging server no wait the production server.
   accepted:
   - Use the production server.
 - category: correction
-  input: we actually shipped on time
+  input: We actually shipped on time.
   accepted:
   - We actually shipped on time.
 - category: correction
-  input: we need a backend developer I mean a frontend developer
+  input: We need a backend developer I mean a frontend developer.
   accepted:
   - We need a frontend developer.
 - category: correction
-  input: we need a meeting or rather a quick sync
+  input: We need a meeting or rather a quick sync.
   accepted:
   - We need a quick sync.
 - category: correction
-  input: we need five no wait seven engineers
+  input: We need five no wait seven engineers.
   accepted:
   - We need 7 engineers.
 - category: correction
-  input: we need three more developers actually four
+  input: We need three more developers actually four.
   accepted:
   - We need 4 more developers.
 - category: correction
-  input: we need three no four engineers on this
+  input: We need three no four engineers on this.
   accepted:
   - We need 4 engineers on this.
 - category: correction
-  input: we need two more sprints make that three
+  input: We need two more sprints make that three.
   accepted:
   - We need 3 more sprints.
 - category: correction
-  input: we should use Python actually let's use Rust
+  input: We should use Python actually let's use Rust.
   accepted:
   - Let's use Rust.
 - category: discourse
-  input: between you and me the project is at risk
+  input: Between you and me the project is at risk.
   accepted:
   - Between you and me, the project is at risk.
 - category: discourse
-  input: for what it's worth I think the design is solid
+  input: For what it's worth I think the design is solid.
   accepted:
   - For what it's worth, I think the design is solid.
   - I think the design is solid.
 - category: discourse
-  input: frankly the current solution isn't scalable
+  input: Frankly the current solution isn't scalable.
   accepted:
   - Frankly, the current solution isn't scalable.
   - The current solution isn't scalable.
 - category: discourse
-  input: here's the thing the tests are still flaky
+  input: Here's the thing the tests are still flaky.
   accepted:
   - Here's the thing, the tests are still flaky.
   - The tests are still flaky.
   - 'Here''s the thing: the tests are still flaky.'
 - category: discourse
-  input: honestly I think we should postpone the launch
+  input: Honestly I think we should postpone the launch.
   accepted:
   - Honestly, I think we should postpone the launch.
   - I think we should postpone the launch.
 - category: discourse
-  input: importantly we need to update the documentation
+  input: Importantly we need to update the documentation.
   accepted:
   - Importantly, we need to update the documentation.
 - category: discourse
-  input: in all honesty the code needs a rewrite
+  input: In all honesty the code needs a rewrite.
   accepted:
   - In all honesty, the code needs a rewrite.
   - The code needs a rewrite.
 - category: discourse
-  input: interestingly the bug only happens on Tuesdays
+  input: Interestingly the bug only happens on Tuesdays.
   accepted:
   - Interestingly, the bug only happens on Tuesdays.
 - category: discourse
-  input: listen we need to talk about the timeline
+  input: Listen we need to talk about the timeline.
   accepted:
   - Listen, we need to talk about the timeline.
   - We need to talk about the timeline.
 - category: discourse
-  input: look the real question is whether we can ship by Friday
+  input: Look the real question is whether we can ship by Friday.
   accepted:
   - Look, the real question is whether we can ship by Friday.
   - The real question is whether we can ship by Friday.
 - category: discourse
-  input: look the reality is we can't ship this yet
+  input: Look the reality is we can't ship this yet.
   accepted:
   - Look, the reality is we can't ship this yet.
   - The reality is we can't ship this yet.
 - category: discourse
-  input: obviously we need to test before deploying
+  input: Obviously we need to test before deploying.
   accepted:
   - Obviously, we need to test before deploying.
 - category: discourse
-  input: surprisingly the performance improved after the change
+  input: Surprisingly the performance improved after the change.
   accepted:
   - Surprisingly, the performance improved after the change.
 - category: discourse
-  input: the bottom line is we need more engineers
+  input: The bottom line is we need more engineers.
   accepted:
   - The bottom line is we need more engineers.
 - category: discourse
-  input: the fact of the matter is we need more time
+  input: The fact of the matter is we need more time.
   accepted:
   - The fact of the matter is, we need more time.
   - We need more time.
   - The fact of the matter is we need more time.
 - category: discourse
-  input: the point is we're behind schedule
+  input: The point is we're behind schedule.
   accepted:
   - The point is we're behind schedule.
 - category: discourse
-  input: the thing is we don't have enough data
+  input: The thing is we don't have enough data.
   accepted:
   - The thing is, we don't have enough data.
   - We don't have enough data.
   - The thing is we don't have enough data.
 - category: discourse
-  input: to be honest I don't think we'll make the deadline
+  input: To be honest I don't think we'll make the deadline.
   accepted:
   - To be honest, I don't think we'll make the deadline.
   - I don't think we'll make the deadline.
 - category: discourse
-  input: truth be told I'm not confident in the estimate
+  input: Truth be told I'm not confident in the estimate.
   accepted:
   - Truth be told, I'm not confident in the estimate.
   - I'm not confident in the estimate.
 - category: discourse
-  input: unfortunately the build is broken
+  input: Unfortunately the build is broken.
   accepted:
   - Unfortunately, the build is broken.
   - Unfortunately the build is broken.
 - category: discourse
-  input: you see the issue is that the cache is stale
+  input: You see the issue is that the cache is stale.
   accepted:
   - You see, the issue is that the cache is stale.
   - The issue is that the cache is stale.
   - You see the issue is that the cache is stale.
 - category: discourse
-  input: right so basically the migration script needs a rewrite
+  input: Right so basically the migration script needs a rewrite.
   accepted:
   - The migration script needs a rewrite.
 - category: discourse
-  input: right so basically we should prioritize the hotfix
+  input: Right so basically we should prioritize the hotfix.
   accepted:
   - We should prioritize the hotfix.
 - category: discourse
-  input: I mean at the end of the day the architecture has to scale
+  input: I mean at the end of the day the architecture has to scale.
   accepted:
   - At the end of the day, the architecture has to scale.
 - category: discourse
-  input: I mean honestly the latency numbers are not great
+  input: I mean honestly the latency numbers are not great.
   accepted:
   - Honestly, the latency numbers are not great.
   - The latency numbers are not great.
 - category: discourse
-  input: you see the real issue is the database connection pool
+  input: You see the real issue is the database connection pool.
   accepted:
   - You see, the real issue is the database connection pool.
   - The real issue is the database connection pool.
   - You see the real issue is the database connection pool.
 - category: discourse
-  input: you see what happened is the cron job failed silently
+  input: You see what happened is the cron job failed silently.
   accepted:
   - You see, what happened is the cron job failed silently.
   - The cron job failed silently.
   - You see what happened is the cron job failed silently.
 - category: discourse
-  input: so yeah basically the whole thing needs to be refactored
+  input: So yeah basically the whole thing needs to be refactored.
   accepted:
   - The whole thing needs to be refactored.
 - category: discourse
-  input: like the problem is we never validated the input
+  input: Like the problem is we never validated the input.
   accepted:
   - The problem is we never validated the input.
 - category: email
-  input: I hope this email finds you well I wanted to discuss the timeline
+  input: I hope this email finds you well I wanted to discuss the timeline.
   accepted:
   - I hope this email finds you well. I wanted to discuss the timeline.
 - category: email
-  input: can you forward that email the one about the budget or whatever
+  input: Can you forward that email the one about the budget or whatever.
   accepted:
   - Can you forward the email about the budget?
 - category: email
-  input: can you send me the thing we talked about yesterday like the report or whatever
+  input: Can you send me the thing we talked about yesterday like the report or whatever.
   accepted:
   - Can you send me the report we talked about yesterday?
 - category: email
-  input: following up on our conversation from last week
+  input: Following up on our conversation from last week.
   accepted:
   - Following up on our conversation from last week.
 - category: email
-  input: from the retro Pat said onboarding is slow Dana flagged the docs are outdated and Ravi volunteered to update them
+  input: From the retro Pat said onboarding is slow Dana flagged the docs are outdated
+    and Ravi volunteered to update them.
   accepted:
   - 'From the retro:
 
@@ -1057,21 +1017,22 @@
 
     '
 - category: email
-  input: hey can you send me that document or whatever it was from the meeting
+  input: Hey can you send me that document or whatever it was from the meeting.
   accepted:
   - Hey, can you send me that document from the meeting?
 - category: email
-  input: hey can you send me the report we talked about yesterday
+  input: Hey can you send me the report we talked about yesterday.
   accepted:
   - Hey, can you send me the report we talked about yesterday?
 - category: email
-  input: hope you had a good weekend wanted to circle back on the hiring plan
+  input: Hope you had a good weekend wanted to circle back on the hiring plan.
   accepted:
   - Hope you had a good weekend. Wanted to circle back on the hiring plan.
   - Hope you had a good weekend. I wanted to circle back on the hiring plan.
   - Hope you had a good weekend, wanted to circle back on the hiring plan.
 - category: email
-  input: in the sync Alex said the migration is done Beth mentioned the tests are flaky and Carlos will fix the CI pipeline
+  input: In the sync Alex said the migration is done Beth mentioned the tests are
+    flaky and Carlos will fix the CI pipeline.
   accepted:
   - 'In the sync:
 
@@ -1092,70 +1053,72 @@
 
     '
 - category: email
-  input: just checking in on this are we still targeting the March release
+  input: Just checking in on this are we still targeting the March release.
   accepted:
   - Just checking in on this. Are we still targeting the March release?
 - category: email
-  input: just circling back on the deployment are we still on track for Friday
+  input: Just circling back on the deployment are we still on track for Friday.
   accepted:
   - Just circling back on the deployment. Are we still on track for Friday?
 - category: email
-  input: just following up on the timeline are we still targeting next Monday
+  input: Just following up on the timeline are we still targeting next Monday.
   accepted:
   - Just following up on the timeline. Are we still targeting next Monday?
 - category: email
-  input: just looping back on the hiring plan any updates
+  input: Just looping back on the hiring plan any updates.
   accepted:
   - Just looping back on the hiring plan. Any updates?
 - category: email
-  input: just send me the stuff from last week you know the proposal or whatever
+  input: Just send me the stuff from last week you know the proposal or whatever.
   accepted:
   - Send me the proposal from last week.
   - Just send me the proposal from last week.
 - category: email
-  input: just wanted to check in on the status of the project
+  input: Just wanted to check in on the status of the project.
   accepted:
   - Just wanted to check in on the status of the project.
 - category: email
-  input: just wanted to flag this are we still planning to ship by the end of the month
+  input: Just wanted to flag this are we still planning to ship by the end of the
+    month.
   accepted:
   - Just wanted to flag this. Are we still planning to ship by the end of the month?
   - 'Just wanted to flag this: Are we still planning to ship by the end of the month?'
 - category: email
-  input: looks good to me let's ship it
+  input: Looks good to me let's ship it.
   accepted:
   - Looks good to me, let's ship it.
   - Looks good to me. Let's ship it.
 - category: email
-  input: nice one I'll review it after lunch
+  input: Nice one I'll review it after lunch.
   accepted:
   - Nice one, I'll review it after lunch.
   - Nice one. I'll review it after lunch.
 - category: email
-  input: on it will update the ticket
+  input: On it will update the ticket.
   accepted:
   - On it, will update the ticket.
   - On it, I will update the ticket.
   - On it will update the ticket.
 - category: email
-  input: quick follow up on the budget discussion from yesterday
+  input: Quick follow up on the budget discussion from yesterday.
   accepted:
   - Quick follow-up on the budget discussion from yesterday.
 - category: email
-  input: quick note on the deployment schedule we may need to push it by a day
+  input: Quick note on the deployment schedule we may need to push it by a day.
   accepted:
   - 'Quick note on the deployment schedule: we may need to push it by a day.'
 - category: email
-  input: sounds good thanks for the heads up
+  input: Sounds good thanks for the heads up.
   accepted:
   - Sounds good, thanks for the heads up.
   - Sounds good. Thanks for the heads up.
 - category: email
-  input: thanks for getting back to me I wanted to follow up on the proposal
+  input: Thanks for getting back to me I wanted to follow up on the proposal.
   accepted:
   - Thanks for getting back to me. I wanted to follow up on the proposal.
 - category: email
-  input: the decisions are one move to weekly releases two freeze the API for two weeks and three assign a dedicated QA engineer
+  input: The decisions are one move to weekly releases two freeze the API for two
+    weeks and three assign a dedicated QA engineer.
   accepted:
   - 'The decisions are:
 
@@ -1176,7 +1139,8 @@
 
     '
 - category: email
-  input: the outcomes are one approved the budget two pushed the deadline to June and three assigned the new team lead
+  input: The outcomes are one approved the budget two pushed the deadline to June
+    and three assigned the new team lead.
   accepted:
   - 'The outcomes are:
 
@@ -1197,853 +1161,568 @@
 
     '
 - category: emphasis
-  input: aye aye I'll handle it
+  input: Aye aye I'll handle it.
   accepted:
   - Aye aye, I'll handle it.
 - category: emphasis
-  input: bye bye see you tomorrow
+  input: Bye bye see you tomorrow.
   accepted:
   - Bye bye, see you tomorrow.
   - Bye bye. See you tomorrow.
 - category: emphasis
-  input: can can you check on that
+  input: Can can you check on that.
   accepted:
   - Can you check on that?
 - category: emphasis
-  input: chop chop we're running late
+  input: Chop chop we're running late.
   accepted:
   - Chop chop, we're running late.
 - category: emphasis
-  input: go go go we need to ship now
+  input: Go go go we need to ship now.
   accepted:
   - Go, go, go, we need to ship now.
   - Go, go, go. We need to ship now.
 - category: emphasis
-  input: ha ha that's funny
+  input: Ha ha that's funny.
   accepted:
   - Ha ha, that's funny.
 - category: emphasis
-  input: hear hear that's a great idea
+  input: Hear hear that's a great idea.
   accepted:
   - Hear, hear, that's a great idea.
   - Hear, hear. That's a great idea.
   - Hear hear, that's a great idea.
 - category: emphasis
-  input: is is there a workaround
+  input: Is is there a workaround.
   accepted:
   - Is there a workaround?
 - category: emphasis
-  input: it's a big big problem
+  input: It's a big big problem.
   accepted:
   - It's a big, big problem.
 - category: emphasis
-  input: knock knock who's there
+  input: Knock knock who's there.
   accepted:
   - Knock knock, who's there?
   - Knock, knock. Who's there?
   - Knock knock. Who's there?
 - category: emphasis
-  input: never ever deploy on a Friday
+  input: Never ever deploy on a Friday.
   accepted:
   - Never ever deploy on a Friday.
 - category: emphasis
-  input: no no no don't push that to production
+  input: No no no don't push that to production.
   accepted:
   - No, no, no, don't push that to production.
 - category: emphasis
-  input: no no no that's completely wrong
+  input: No no no that's completely wrong.
   accepted:
   - No, no, no, that's completely wrong.
 - category: emphasis
-  input: now now let's not overreact
+  input: Now now let's not overreact.
   accepted:
   - Now, now, let's not overreact.
 - category: emphasis
-  input: please please don't deploy yet
+  input: Please please don't deploy yet.
   accepted:
   - Please, please don't deploy yet.
 - category: emphasis
-  input: please please don't merge that branch
+  input: Please please don't merge that branch.
   accepted:
   - Please, please don't merge that branch.
 - category: emphasis
-  input: please please send me the latest build
+  input: Please please send me the latest build.
   accepted:
   - Please please send me the latest build.
   - Please, please send me the latest build.
 - category: emphasis
-  input: stop stop stop we need to rethink this
+  input: Stop stop stop we need to rethink this.
   accepted:
   - Stop, stop, stop, we need to rethink this.
   - Stop, stop, stop. We need to rethink this.
 - category: emphasis
-  input: that is totally totally wrong
+  input: That is totally totally wrong.
   accepted:
   - That is totally totally wrong.
   - That is totally, totally wrong.
 - category: emphasis
-  input: that's very very interesting
+  input: That's very very interesting.
   accepted:
   - That's very very interesting.
   - That's very, very interesting.
 - category: emphasis
-  input: the results were so so
+  input: The results were so so.
   accepted:
   - The results were so-so.
   - The results were so so.
 - category: emphasis
-  input: there there it'll be okay
+  input: There there it'll be okay.
   accepted:
   - There, there, it'll be okay.
   - There, there. It'll be okay.
 - category: emphasis
-  input: they need need to approve the PR first
+  input: They need need to approve the PR first.
   accepted:
   - They need to approve the PR first.
 - category: emphasis
-  input: this is completely completely unacceptable
+  input: This is completely completely unacceptable.
   accepted:
   - This is completely unacceptable.
 - category: emphasis
-  input: this is really really important
+  input: This is really really important.
   accepted:
   - This is really really important.
   - This is really, really important.
 - category: emphasis
-  input: wait wait I have an idea
+  input: Wait wait I have an idea.
   accepted:
   - Wait, wait, I have an idea.
 - category: emphasis
-  input: wait wait wait that's not what I meant
+  input: Wait wait wait that's not what I meant.
   accepted:
   - Wait, wait, wait, that's not what I meant.
 - category: emphasis
-  input: we have to have to get this done today
+  input: We have to have to get this done today.
   accepted:
   - We have to get this done today.
 - category: emphasis
-  input: we really really need to ship this today
+  input: We really really need to ship this today.
   accepted:
   - We really really need to ship this today.
   - We really, really need to ship this today.
 - category: emphasis
-  input: we should should deploy before the weekend
+  input: We should should deploy before the weekend.
   accepted:
   - We should deploy before the weekend.
 - category: emphasis
-  input: yes yes yes I love that idea
+  input: Yes yes yes I love that idea.
   accepted:
   - Yes, yes, yes, I love that idea.
 - category: emphasis
-  input: you have have to update the ticket
+  input: You have have to update the ticket.
   accepted:
   - You have to update the ticket.
 - category: false-start
-  input: I had an idea about oh it doesn't matter the current approach is fine
+  input: I had an idea about oh it doesn't matter the current approach is fine.
   accepted:
   - The current approach is fine.
 - category: false-start
-  input: I think we should try to actually you know what let me come back to this
+  input: I think we should try to actually you know what let me come back to this.
   accepted:
   - Let me come back to this.
 - category: false-start
-  input: I was going to say but never mind the point is we need testing
+  input: I was going to say but never mind the point is we need testing.
   accepted:
   - The point is we need testing.
 - category: false-start
-  input: I was going to suggest or actually no let's just keep the current design
+  input: I was going to suggest or actually no let's just keep the current design.
   accepted:
   - Let's just keep the current design.
 - category: false-start
-  input: I was thinking maybe we could no never mind let's keep it simple
+  input: I was thinking maybe we could no never mind let's keep it simple.
   accepted:
   - Let's keep it simple.
 - category: false-start
-  input: how about we start with the nah that won't scale
+  input: How about we start with the nah that won't scale.
   accepted:
   - That won't scale.
 - category: false-start
-  input: maybe we should no forget it the deadline is too tight
+  input: Maybe we should no forget it the deadline is too tight.
   accepted:
   - The deadline is too tight.
 - category: false-start
-  input: should we consider no let's not complicate things
+  input: Should we consider no let's not complicate things.
   accepted:
   - Let's not complicate things.
 - category: false-start
-  input: should we try no forget it let's stick with what works
+  input: Should we try no forget it let's stick with what works.
   accepted:
   - Let's stick with what works.
 - category: false-start
-  input: should we try to hmm actually you know what let's revisit this tomorrow
+  input: Should we try to hmm actually you know what let's revisit this tomorrow.
   accepted:
   - Let's revisit this tomorrow.
 - category: false-start
-  input: the thing about no wait let me think about this differently
+  input: The thing about no wait let me think about this differently.
   accepted:
   - Let me think about this differently.
 - category: false-start
-  input: we could try to oh forget it let's just restart the server
+  input: We could try to oh forget it let's just restart the server.
   accepted:
   - Let's just restart the server.
 - category: false-start
-  input: what about using no that's too complex just keep the current setup
+  input: What about using no that's too complex just keep the current setup.
   accepted:
   - Just keep the current setup.
 - category: false-start
-  input: what if we no that won't work let's use the existing approach
+  input: What if we no that won't work let's use the existing approach.
   accepted:
   - Let's use the existing approach.
 - category: false-start
-  input: what if we no that's a bad idea let's just ship what we have
+  input: What if we no that's a bad idea let's just ship what we have.
   accepted:
   - Let's just ship what we have.
 - category: false-start
-  input: what if we used a different wait no the current stack is fine
+  input: What if we used a different wait no the current stack is fine.
   accepted:
   - The current stack is fine.
 - category: filler
-  input: I actually think we should wait
+  input: I actually think we should wait.
   accepted:
   - I actually think we should wait.
 - category: filler
-  input: I like the new design
+  input: I like the new design.
   accepted:
   - I like the new design.
 - category: filler
-  input: I literally just fixed that bug yesterday
+  input: I literally just fixed that bug yesterday.
   accepted:
   - I just fixed that bug yesterday.
 - category: filler
-  input: I mean like you know it's not great
+  input: I mean like you know it's not great.
   accepted:
   - It's not great.
 - category: filler
-  input: I mean sure
+  input: I mean sure.
   accepted:
   - Sure.
 - category: filler
-  input: I mean the latency is like two hundred milliseconds
+  input: I mean the latency is like two hundred milliseconds.
   accepted:
   - The latency is 200 milliseconds.
 - category: filler
-  input: I mean the test coverage is pretty low
+  input: I mean the test coverage is pretty low.
   accepted:
   - The test coverage is pretty low.
 - category: filler
-  input: I mean we could try a different approach
+  input: I mean we could try a different approach.
   accepted:
   - We could try a different approach.
 - category: filler
-  input: I mean what I said about the deadline
+  input: I mean what I said about the deadline.
   accepted:
   - I mean what I said about the deadline.
 - category: filler
-  input: I need the spreadsheet or the slides or whatever you have
+  input: I need the spreadsheet or the slides or whatever you have.
   accepted:
   - I need the spreadsheet or the slides you have.
 - category: filler
-  input: I think so too
+  input: I think so too.
   accepted:
   - I think so too.
 - category: filler
-  input: I totally agree with that approach
+  input: I totally agree with that approach.
   accepted:
   - I totally agree with that approach.
 - category: filler
-  input: I was like thinking we should update the docs
+  input: I was like thinking we should update the docs.
   accepted:
   - I was thinking we should update the docs.
 - category: filler
-  input: I'd like to schedule a meeting
+  input: I'd like to schedule a meeting.
   accepted:
   - I'd like to schedule a meeting.
 - category: filler
-  input: I'm not sure about the timeline you know
+  input: I'm not sure about the timeline you know.
   accepted:
   - I'm not sure about the timeline.
 - category: filler
-  input: basically the Docker container is you know crashing on startup
+  input: Basically the Docker container is you know crashing on startup.
   accepted:
   - The Docker container is crashing on startup.
 - category: filler
-  input: basically we need to rewrite the parser
+  input: Basically we need to rewrite the parser.
   accepted:
   - We need to rewrite the parser.
 - category: filler
-  input: do so at your own risk
+  input: Do so at your own risk.
   accepted:
   - Do so at your own risk.
 - category: filler
-  input: do you know what I mean
+  input: Do you know what I mean.
   accepted:
   - Do you know what I mean?
 - category: filler
-  input: features like caching and logging
+  input: Features like caching and logging.
   accepted:
   - Features like caching and logging.
 - category: filler
-  input: it literally took five hours to deploy
+  input: It literally took five hours to deploy.
   accepted:
   - It took 5 hours to deploy.
 - category: filler
-  input: it looks like rain today
+  input: It looks like rain today.
   accepted:
   - It looks like rain today.
 - category: filler
-  input: it works well in production
+  input: It works well in production.
   accepted:
   - It works well in production.
 - category: filler
-  input: it's I mean it's not ideal but it works
+  input: It's I mean it's not ideal but it works.
   accepted:
   - It's not ideal but it works.
   - It's not ideal, but it works.
 - category: filler
-  input: it's actually not that complicated
+  input: It's actually not that complicated.
   accepted:
   - It's actually not that complicated.
 - category: filler
-  input: it's basically impossible to debug
+  input: It's basically impossible to debug.
   accepted:
   - It's impossible to debug.
 - category: filler
-  input: it's basically the same as the old version
+  input: It's basically the same as the old version.
   accepted:
   - It's the same as the old version.
   - It's basically the same as the old version.
 - category: filler
-  input: it's like literally impossible to debug this
+  input: It's like literally impossible to debug this.
   accepted:
   - It's impossible to debug this.
 - category: filler
-  input: it's like not even working properly
+  input: It's like not even working properly.
   accepted:
   - It's not even working properly.
 - category: filler
-  input: it's like the most important feature we have
+  input: It's like the most important feature we have.
   accepted:
   - It's the most important feature we have.
 - category: filler
-  input: it's you know not the best approach
+  input: It's you know not the best approach.
   accepted:
   - It's not the best approach.
 - category: filler
-  input: like whatever
+  input: Like whatever.
   accepted:
   - Whatever.
 - category: filler
-  input: ok let's move on to the next item
+  input: Ok let's move on to the next item.
   accepted:
   - Let's move on to the next item.
 - category: filler
-  input: okay I'll take care of it
+  input: Okay I'll take care of it.
   accepted:
   - I'll take care of it.
 - category: filler
-  input: okay so basically I think we should like just deploy it
+  input: Okay so basically I think we should like just deploy it.
   accepted:
   - I think we should just deploy it.
 - category: filler
-  input: okay so the server is down
+  input: Okay so the server is down.
   accepted:
   - The server is down.
 - category: filler
-  input: okay well basically you know the tests are failing
+  input: Okay well basically you know the tests are failing.
   accepted:
   - The tests are failing.
 - category: filler
-  input: right now we need to focus
+  input: Right now we need to focus.
   accepted:
   - Right now we need to focus.
 - category: filler
-  input: she was like we need to fix this immediately
+  input: She was like we need to fix this immediately.
   accepted:
   - She said we need to fix this immediately.
   - She said, we need to fix this immediately.
 - category: filler
-  input: so I talked to the PM and she agreed
+  input: So I talked to the PM and she agreed.
   accepted:
   - I talked to the PM and she agreed.
   - I talked to the PM, and she agreed.
 - category: filler
-  input: so I was thinking about the architecture
+  input: So I was thinking about the architecture.
   accepted:
   - I was thinking about the architecture.
 - category: filler
-  input: so basically the pipeline is broken
+  input: So basically the pipeline is broken.
   accepted:
   - The pipeline is broken.
 - category: filler
-  input: so far everything looks good
+  input: So far everything looks good.
   accepted:
   - So far everything looks good.
 - category: filler
-  input: so like basically we need to redo the whole thing
+  input: So like basically we need to redo the whole thing.
   accepted:
   - We need to redo the whole thing.
 - category: filler
-  input: so like the API endpoint is basically returning a 500
+  input: So like the API endpoint is basically returning a 500.
   accepted:
   - The API endpoint is returning a 500.
 - category: filler
-  input: so much for the early release
+  input: So much for the early release.
   accepted:
   - So much for the early release.
 - category: filler
-  input: so the question is whether we can ship this week
+  input: So the question is whether we can ship this week.
   accepted:
   - The question is whether we can ship this week.
 - category: filler
-  input: so the tests are passing now
+  input: So the tests are passing now.
   accepted:
   - The tests are passing now.
 - category: filler
-  input: so we need to deploy by Friday
+  input: So we need to deploy by Friday.
   accepted:
   - We need to deploy by Friday.
 - category: filler
-  input: so we need to fix the build pipeline
+  input: So we need to fix the build pipeline.
   accepted:
   - We need to fix the build pipeline.
 - category: filler
-  input: so yeah
+  input: So yeah.
   accepted:
   - So yeah.
   - So yeah
 - category: filler
-  input: so yeah I mean the performance is like really bad
+  input: So yeah I mean the performance is like really bad.
   accepted:
   - The performance is really bad.
 - category: filler
-  input: so yeah the migration is done
+  input: So yeah the migration is done.
   accepted:
   - The migration is done.
 - category: filler
-  input: something like fifty requests per second
+  input: Something like fifty requests per second.
   accepted:
   - Something like 50 requests per second.
 - category: filler
-  input: that's the right approach
+  input: That's the right approach.
   accepted:
   - That's the right approach.
 - category: filler
-  input: that's totally the right call
+  input: That's totally the right call.
   accepted:
   - That's totally the right call.
 - category: filler
-  input: the API is like literally broken
+  input: The API is like literally broken.
   accepted:
   - The API is broken.
 - category: filler
-  input: the API is you know kind of slow
+  input: The API is you know kind of slow.
   accepted:
   - The API is kind of slow.
 - category: filler
-  input: the build is failing right
+  input: The build is failing right.
   accepted:
   - The build is failing right?
 - category: filler
-  input: the code actually works fine in production
+  input: The code actually works fine in production.
   accepted:
   - The code actually works fine in production.
 - category: filler
-  input: the deployment went well you know
+  input: The deployment went well you know.
   accepted:
   - The deployment went well.
 - category: filler
-  input: the function literally returns null in every case
+  input: The function literally returns null in every case.
   accepted:
   - The function returns null in every case.
 - category: filler
-  input: the latency is pretty bad you know
+  input: The latency is pretty bad you know.
   accepted:
   - The latency is pretty bad.
 - category: filler
-  input: the server is like constantly crashing
+  input: The server is like constantly crashing.
   accepted:
   - The server is constantly crashing.
 - category: filler
-  input: the server literally crashed three times today
+  input: The server literally crashed three times today.
   accepted:
   - The server crashed 3 times today.
 - category: filler
-  input: the system basically crashed overnight
+  input: The system basically crashed overnight.
   accepted:
   - The system crashed overnight.
 - category: filler
-  input: the tests are flaking out you know
+  input: The tests are flaking out you know.
   accepted:
   - The tests are flaking out.
 - category: filler
-  input: the two approaches are basically identical
+  input: The two approaches are basically identical.
   accepted:
   - The two approaches are identical.
 - category: filler
-  input: the well is running dry
+  input: The well is running dry.
   accepted:
   - The well is running dry.
 - category: filler
-  input: turn right at the next intersection
+  input: Turn right at the next intersection.
   accepted:
   - Turn right at the next intersection.
 - category: filler
-  input: we need to fix the pipeline you know
+  input: We need to fix the pipeline you know.
   accepted:
   - We need to fix the pipeline.
 - category: filler
-  input: we need to you know figure this out
+  input: We need to you know figure this out.
   accepted:
   - We need to figure this out.
 - category: filler
-  input: we should deploy today right
+  input: We should deploy today right.
   accepted:
   - We should deploy today.
 - category: filler
-  input: we should you know probably test this first
+  input: We should you know probably test this first.
   accepted:
   - We should probably test this first.
 - category: filler
-  input: well I think we should wait until Monday
+  input: Well I think we should wait until Monday.
   accepted:
   - I think we should wait until Monday.
 - category: filler
-  input: well basically the thing is we don't have the budget
+  input: Well basically the thing is we don't have the budget.
   accepted:
   - We don't have the budget.
 - category: filler
-  input: well done on the release
+  input: Well done on the release.
   accepted:
   - Well done on the release.
 - category: filler
-  input: well it depends on the requirements
+  input: Well it depends on the requirements.
   accepted:
   - It depends on the requirements.
 - category: filler
-  input: well known experts agree on this
+  input: Well known experts agree on this.
   accepted:
   - Well-known experts agree on this.
 - category: filler
-  input: well okay fine
+  input: Well okay fine.
   accepted:
   - Okay, fine.
 - category: filler
-  input: well the tests are still failing
+  input: Well the tests are still failing.
   accepted:
   - The tests are still failing.
 - category: filler
-  input: yeah no I think we should fix it first
+  input: Yeah no I think we should fix it first.
   accepted:
   - No, I think we should fix it first.
   - I think we should fix it first.
 - category: filler
-  input: yeah no for sure the tests need updating
+  input: Yeah no for sure the tests need updating.
   accepted:
   - No, for sure, the tests need updating.
   - The tests need updating.
 - category: filler
-  input: yeah no totally we should refactor that module
+  input: Yeah no totally we should refactor that module.
   accepted:
   - No, totally, we should refactor that module.
   - We should refactor that module.
 - category: filler
-  input: yeah the deployment went smoothly
+  input: Yeah the deployment went smoothly.
   accepted:
   - The deployment went smoothly.
 - category: filler
-  input: yeah totally that makes sense
+  input: Yeah totally that makes sense.
   accepted:
   - Totally, that makes sense.
   - That makes sense.
 - category: filler
-  input: you know I think we should just ship it
+  input: You know I think we should just ship it.
   accepted:
   - I think we should just ship it.
-- category: homophone
-  input: I can't access you're repository
-  accepted:
-  - I can't access your repository.
-- category: homophone
-  input: I need to by some new cables
-  accepted:
-  - I need to buy some new cables.
-- category: homophone
-  input: I'll forward it to you're inbox
-  accepted:
-  - I'll forward it to your inbox.
-- category: homophone
-  input: I'm not sure weather we should deploy today
-  accepted:
-  - I'm not sure whether we should deploy today.
-- category: homophone
-  input: bad weather delayed the release party
-  accepted:
-  - Bad weather delayed the release party.
-- category: homophone
-  input: bare with us during the migration
-  accepted:
-  - Bear with us during the migration.
-- category: homophone
-  input: check it's status page
-  accepted:
-  - Check its status page.
-- category: homophone
-  input: check their documentation for details
-  accepted:
-  - Check their documentation for details.
-- category: homophone
-  input: check weather the server is running
-  accepted:
-  - Check whether the server is running.
-- category: homophone
-  input: check you're calendar for availability
-  accepted:
-  - Check your calendar for availability.
-- category: homophone
-  input: check you're inbox for the details
-  accepted:
-  - Check your inbox for the details.
-- category: homophone
-  input: it's running smoothly now
-  accepted:
-  - It's running smoothly now.
-- category: homophone
-  input: its a known issue
-  accepted:
-  - It's a known issue.
-- category: homophone
-  input: its clear that we need more testing
-  accepted:
-  - It's clear that we need more testing.
-- category: homophone
-  input: its going to take a while
-  accepted:
-  - It's going to take a while.
-- category: homophone
-  input: its going to take longer than expected
-  accepted:
-  - It's going to take longer than expected.
-- category: homophone
-  input: its important that we ship on time
-  accepted:
-  - It's important that we ship on time.
-- category: homophone
-  input: its important to test before deploying
-  accepted:
-  - It's important to test before deploying.
-- category: homophone
-  input: its not working as expected
-  accepted:
-  - It's not working as expected.
-- category: homophone
-  input: its the third time this week
-  accepted:
-  - It's the third time this week.
-  - It's the 3rd time this week.
-- category: homophone
-  input: let me know weather you can attend
-  accepted:
-  - Let me know whether you can attend.
-- category: homophone
-  input: please bare with me while I look this up
-  accepted:
-  - Please bear with me while I look this up.
-- category: homophone
-  input: please update you're settings before the migration
-  accepted:
-  - Please update your settings before the migration.
-- category: homophone
-  input: the affect on latency was significant
-  accepted:
-  - The effect on latency was significant.
-- category: homophone
-  input: the app crashed because of it's configuration
-  accepted:
-  - The app crashed because of its configuration.
-- category: homophone
-  input: the change will affect performance
-  accepted:
-  - The change will affect performance.
-- category: homophone
-  input: the data must comply with there policies
-  accepted:
-  - The data must comply with their policies.
-- category: homophone
-  input: the new API is faster then the legacy one
-  accepted:
-  - The new API is faster than the legacy one.
-- category: homophone
-  input: the personal department handles hiring
-  accepted:
-  - The personnel department handles hiring.
-- category: homophone
-  input: the system lost it's state
-  accepted:
-  - The system lost its state.
-- category: homophone
-  input: the weather forecast says rain
-  accepted:
-  - The weather forecast says rain.
-- category: homophone
-  input: the weather is nice today
-  accepted:
-  - The weather is nice today.
-- category: homophone
-  input: their always complaining about the build times
-  accepted:
-  - They're always complaining about the build times.
-- category: homophone
-  input: their building was sold last year
-  accepted:
-  - Their building was sold last year.
-- category: homophone
-  input: their codebase is well organized
-  accepted:
-  - Their codebase is well organized.
-- category: homophone
-  input: their coming to the office tomorrow
-  accepted:
-  - They're coming to the office tomorrow.
-- category: homophone
-  input: their not happy with the results
-  accepted:
-  - They're not happy with the results.
-- category: homophone
-  input: their planning to release next week
-  accepted:
-  - They're planning to release next week.
-- category: homophone
-  input: their planning to ship it next week
-  accepted:
-  - They're planning to ship it next week.
-- category: homophone
-  input: their planning was excellent
-  accepted:
-  - Their planning was excellent.
-- category: homophone
-  input: their running costs are too high
-  accepted:
-  - Their running costs are too high.
-- category: homophone
-  input: their running the tests right now
-  accepted:
-  - They're running the tests right now.
-- category: homophone
-  input: their saying the feature is ready
-  accepted:
-  - They're saying the feature is ready.
-- category: homophone
-  input: their starting lineup was announced
-  accepted:
-  - Their starting lineup was announced.
-- category: homophone
-  input: their still waiting for approval
-  accepted:
-  - They're still waiting for approval.
-- category: homophone
-  input: their team finished first
-  accepted:
-  - Their team finished first.
-- category: homophone
-  input: their working conditions need improvement
-  accepted:
-  - Their working conditions need improvement.
-- category: homophone
-  input: they're working on the fix
-  accepted:
-  - They're working on the fix.
-- category: homophone
-  input: this approach is better then the old one
-  accepted:
-  - This approach is better than the old one.
-- category: homophone
-  input: update you're profile with the new title
-  accepted:
-  - Update your profile with the new title.
-- category: homophone
-  input: we don't have enough personal for this project
-  accepted:
-  - We don't have enough personnel for this project.
-- category: homophone
-  input: we need more personal to cover the shift
-  accepted:
-  - We need more personnel to cover the shift.
-- category: homophone
-  input: we need to follow there guidelines
-  accepted:
-  - We need to follow their guidelines.
-- category: homophone
-  input: we need to weather this storm
-  accepted:
-  - We need to weather this storm.
-- category: homophone
-  input: what's the affect of this migration
-  accepted:
-  - What's the effect of this migration?
-- category: homophone
-  input: whether we deploy today depends on the tests
-  accepted:
-  - Whether we deploy today depends on the tests.
-- category: homophone
-  input: who's available this afternoon
-  accepted:
-  - Who's available this afternoon?
-- category: homophone
-  input: who's code broke the build
-  accepted:
-  - Whose code broke the build?
-- category: homophone
-  input: who's code is breaking the build
-  accepted:
-  - Whose code is breaking the build?
-- category: homophone
-  input: who's coming to the standup
-  accepted:
-  - Who's coming to the standup?
-- category: homophone
-  input: who's laptop is on the table
-  accepted:
-  - Whose laptop is on the table?
-- category: homophone
-  input: who's late to standup again
-  accepted:
-  - Who's late to standup again?
-- category: homophone
-  input: who's next in the queue
-  accepted:
-  - Who's next in the queue?
-- category: homophone
-  input: who's ready for the demo
-  accepted:
-  - Who's ready for the demo?
-- category: homophone
-  input: who's responsibility is the deployment
-  accepted:
-  - Whose responsibility is the deployment?
-- category: homophone
-  input: who's responsible for the outage
-  accepted:
-  - Who's responsible for the outage?
-- category: homophone
-  input: who's right about the architecture
-  accepted:
-  - Who's right about the architecture?
-- category: homophone
-  input: who's turn is it to be on call
-  accepted:
-  - Whose turn is it to be on call?
-- category: homophone
-  input: your going to love this feature
-  accepted:
-  - You're going to love this feature.
-- category: homophone
-  input: your the best person for this task
-  accepted:
-  - You're the best person for this task.
-- category: homophone
-  input: your welcome to join the meeting
-  accepted:
-  - You're welcome to join the meeting.
 - category: keep-tag
   input: 'I finished the code review
 
@@ -2058,20 +1737,24 @@
     '
   - 'I finished the code review. Let me know if you have questions about my comments. '
 - category: keep-tag
-  input: 'I wanted to give you a quick update on the project the frontend work is done and we''re waiting on the API integration
+  input: 'I wanted to give you a quick update on the project the frontend work is
+    done and we''re waiting on the API integration
 
 
     let me know if you''d like to schedule a demo for the stakeholders this week
 
     '
   accepted:
-  - 'I wanted to give you a quick update on the project. The frontend work is done and we''re waiting on the API integration.
+  - 'I wanted to give you a quick update on the project. The frontend work is done
+    and we''re waiting on the API integration.
 
 
     Let me know if you''d like to schedule a demo for the stakeholders this week.
 
     '
-  - 'I wanted to give you a quick update on the project. The frontend work is done and we''re waiting on the API integration.  Let me know if you''d like to schedule a demo for the stakeholders this week. '
+  - 'I wanted to give you a quick update on the project. The frontend work is done
+    and we''re waiting on the API integration.  Let me know if you''d like to schedule
+    a demo for the stakeholders this week. '
 - category: keep-tag
   input: click the hashtag help button
   accepted:
@@ -2085,7 +1768,8 @@
   accepted:
   - Sales & marketing are aligned.
 - category: keep-tag
-  input: 'thanks for joining the call today we covered the Q3 roadmap and the hiring plan
+  input: 'thanks for joining the call today we covered the Q3 roadmap and the hiring
+    plan
 
 
     for next steps please review the shared document and add your comments by Thursday
@@ -2098,7 +1782,8 @@
     For next steps, please review the shared document and add your comments by Thursday.
 
     '
-  - 'Thanks for joining the call today. We covered the Q3 roadmap and the hiring plan.  For next steps, please review the shared document and add your comments by Thursday. '
+  - 'Thanks for joining the call today. We covered the Q3 roadmap and the hiring plan.  For
+    next steps, please review the shared document and add your comments by Thursday. '
 - category: keep-tag
   input: 'the deployment is scheduled for Friday
 
@@ -2111,7 +1796,8 @@
     Please make sure all tests pass before then.
 
     '
-  - 'The deployment is scheduled for Friday. Please make sure all tests pass before then. '
+  - 'The deployment is scheduled for Friday. Please make sure all tests pass before
+    then. '
 - category: keep-tag
   input: 'the feature flag is enabled in staging
 
@@ -2124,7 +1810,8 @@
     We should verify it works before rolling out to production.
 
     '
-  - 'The feature flag is enabled in staging. We should verify it works before rolling out to production. '
+  - 'The feature flag is enabled in staging. We should verify it works before rolling
+    out to production. '
 - category: keep-tag
   input: 'the migration to the new database is complete and all services are healthy
 
@@ -2139,7 +1826,8 @@
     Going forward, please use the new connection string in your configuration files.
 
     '
-  - 'The migration to the new database is complete and all services are healthy.  Going forward, please use the new connection string in your configuration files. '
+  - 'The migration to the new database is complete and all services are healthy.  Going
+    forward, please use the new connection string in your configuration files. '
 - category: keep-tag
   input: 'the server is running on port 8080
 
@@ -2177,9 +1865,10 @@
     The current versions have known security vulnerabilities.
 
     '
-  - 'We need to update the dependencies. The current versions have known security vulnerabilities. '
+  - 'We need to update the dependencies. The current versions have known security
+    vulnerabilities. '
 - category: list
-  input: I need to buy eggs milk bread and butter
+  input: I need to buy eggs milk bread and butter.
   accepted:
   - 'I need to buy:
 
@@ -2193,7 +1882,8 @@
 
     '
 - category: list
-  input: before we ship we need to first run the full test suite second get sign off from QA and third update the release notes
+  input: Before we ship we need to first run the full test suite second get sign off
+    from QA and third update the release notes.
   accepted:
   - 'Before we ship we need to:
 
@@ -2223,7 +1913,7 @@
 
     '
 - category: list
-  input: first update the config second restart the service third verify
+  input: First update the config second restart the service third verify.
   accepted:
   - '1. Update the config
 
@@ -2233,7 +1923,7 @@
 
     '
 - category: list
-  input: for the offsite we need a projector flip charts markers and name tags
+  input: For the offsite we need a projector flip charts markers and name tags.
   accepted:
   - 'For the offsite we need:
 
@@ -2280,7 +1970,7 @@
 
     '
 - category: list
-  input: here are the main concerns latency security and backwards compatibility
+  input: Here are the main concerns latency security and backwards compatibility.
   accepted:
   - 'Here are the main concerns:
 
@@ -2292,7 +1982,8 @@
 
     '
 - category: list
-  input: here are the things I committed to this morning code review documentation and the bug triage
+  input: Here are the things I committed to this morning code review documentation
+    and the bug triage.
   accepted:
   - 'Here are the things I committed to this morning:
 
@@ -2313,7 +2004,7 @@
 
     '
 - category: list
-  input: here's what I grabbed from the supply closet pens tape scissors and labels
+  input: Here's what I grabbed from the supply closet pens tape scissors and labels.
   accepted:
   - 'Here''s what I grabbed from the supply closet:
 
@@ -2327,7 +2018,8 @@
 
     '
 - category: list
-  input: here's what we discussed in the review performance issues security gaps and missing documentation
+  input: Here's what we discussed in the review performance issues security gaps and
+    missing documentation.
   accepted:
   - 'Here''s what we discussed in the review:
 
@@ -2339,7 +2031,8 @@
 
     '
 - category: list
-  input: here's what we need for the office printer paper sticky notes folders and binder clips
+  input: Here's what we need for the office printer paper sticky notes folders and
+    binder clips.
   accepted:
   - 'Here''s what we need for the office:
 
@@ -2364,7 +2057,8 @@
 
     '
 - category: list
-  input: in the standup john said the API is done sarah said she's blocked and mike will finish testing tomorrow
+  input: In the standup john said the API is done sarah said she's blocked and mike
+    will finish testing tomorrow.
   accepted:
   - 'In the standup:
 
@@ -2385,7 +2079,8 @@
 
     '
 - category: list
-  input: my priorities today are one finish the code review and two update the design spec
+  input: My priorities today are one finish the code review and two update the design
+    spec.
   accepted:
   - 'My priorities today are:
 
@@ -2395,7 +2090,7 @@
 
     '
 - category: list
-  input: pack three boxes seven envelopes and twenty labels
+  input: Pack three boxes seven envelopes and twenty labels.
   accepted:
   - 'Pack:
 
@@ -2407,7 +2102,7 @@
 
     '
 - category: list
-  input: ship twelve laptops six docking stations and twenty cables
+  input: Ship twelve laptops six docking stations and twenty cables.
   accepted:
   - 'Ship:
 
@@ -2419,7 +2114,8 @@
 
     '
 - category: list
-  input: so the things I noticed during the walkthrough were broken tiles water damage and missing signage
+  input: So the things I noticed during the walkthrough were broken tiles water damage
+    and missing signage.
   accepted:
   - 'The things I noticed during the walkthrough were:
 
@@ -2431,7 +2127,7 @@
 
     '
 - category: list
-  input: step one clone the repo step two run the tests step three deploy
+  input: Step one clone the repo step two run the tests step three deploy.
   accepted:
   - '1. Clone the repo
 
@@ -2441,11 +2137,12 @@
 
     '
 - category: list
-  input: talk to the designer and the product manager
+  input: Talk to the designer and the product manager.
   accepted:
   - Talk to the designer and the product manager.
 - category: list
-  input: the action items are alex will fix the bug priya will update the docs and chen will deploy
+  input: The action items are alex will fix the bug priya will update the docs and
+    chen will deploy.
   accepted:
   - 'The action items are:
 
@@ -2466,7 +2163,8 @@
 
     '
 - category: list
-  input: the action items are first migrate the database second update the API endpoints and third notify the downstream teams
+  input: The action items are first migrate the database second update the API endpoints
+    and third notify the downstream teams.
   accepted:
   - 'The action items are:
 
@@ -2478,7 +2176,8 @@
 
     '
 - category: list
-  input: the blocked items are the database migration the API refactor and the auth rewrite
+  input: The blocked items are the database migration the API refactor and the auth
+    rewrite.
   accepted:
   - 'The blocked items are:
 
@@ -2499,11 +2198,12 @@
 
     '
 - category: list
-  input: the choices are proceed or postpone
+  input: The choices are proceed or postpone.
   accepted:
   - The choices are proceed or postpone.
 - category: list
-  input: the feedback from the client included faster navigation clearer labels and better mobile support
+  input: The feedback from the client included faster navigation clearer labels and
+    better mobile support.
   accepted:
   - 'The feedback from the client included:
 
@@ -2515,7 +2215,8 @@
 
     '
 - category: list
-  input: the key takeaways are one we need more testing two the deploy pipeline is slow and three documentation is outdated
+  input: The key takeaways are one we need more testing two the deploy pipeline is
+    slow and three documentation is outdated.
   accepted:
   - 'The key takeaways are:
 
@@ -2527,7 +2228,7 @@
 
     '
 - category: list
-  input: the languages we support are Python Java Go and TypeScript
+  input: The languages we support are Python Java Go and TypeScript.
   accepted:
   - 'The languages we support are:
 
@@ -2541,7 +2242,7 @@
 
     '
 - category: list
-  input: the meeting attendees are John Sarah Mike and Lisa
+  input: The meeting attendees are John Sarah Mike and Lisa.
   accepted:
   - 'The meeting attendees are:
 
@@ -2555,11 +2256,12 @@
 
     '
 - category: list
-  input: the paths forward are continue or pivot
+  input: The paths forward are continue or pivot.
   accepted:
   - The paths forward are continue or pivot.
 - category: list
-  input: the plan is one set up the staging environment two deploy the candidate build three run the smoke tests and four promote to production
+  input: The plan is one set up the staging environment two deploy the candidate build
+    three run the smoke tests and four promote to production.
   accepted:
   - 'The plan is:
 
@@ -2573,7 +2275,7 @@
 
     '
 - category: list
-  input: the priorities are first fix the bug second add tests third deploy
+  input: The priorities are first fix the bug second add tests third deploy.
   accepted:
   - 'The priorities are:
 
@@ -2585,7 +2287,8 @@
 
     '
 - category: list
-  input: the requirements are one support dark mode two add export functionality and three improve load times
+  input: The requirements are one support dark mode two add export functionality and
+    three improve load times.
   accepted:
   - 'The requirements are:
 
@@ -2597,7 +2300,8 @@
 
     '
 - category: list
-  input: the schedule for today is first design review second code walkthrough and third planning poker
+  input: The schedule for today is first design review second code walkthrough and
+    third planning poker.
   accepted:
   - 'The schedule for today is:
 
@@ -2609,7 +2313,7 @@
 
     '
 - category: list
-  input: the stack includes React Node PostgreSQL and Redis
+  input: The stack includes React Node PostgreSQL and Redis.
   accepted:
   - 'The stack includes:
 
@@ -2623,7 +2327,7 @@
 
     '
 - category: list
-  input: the tools we'll need for this project are Figma Jira and Confluence
+  input: The tools we'll need for this project are Figma Jira and Confluence.
   accepted:
   - 'The tools we''ll need for this project are:
 
@@ -2635,7 +2339,8 @@
 
     '
 - category: list
-  input: things to check before release one verify all migrations ran two confirm monitoring dashboards are green and three validate the rollback procedure
+  input: Things to check before release one verify all migrations ran two confirm
+    monitoring dashboards are green and three validate the rollback procedure.
   accepted:
   - 'Things to check before release:
 
@@ -2647,21 +2352,21 @@
 
     '
 - category: list
-  input: update the readme and the changelog
+  input: Update the readme and the changelog.
   accepted:
   - Update the README and the changelog.
   - Update the readme and the changelog.
   - Update the README and the CHANGELOG.
 - category: list
-  input: we can either refactor or rewrite
+  input: We can either refactor or rewrite.
   accepted:
   - We can either refactor or rewrite.
 - category: list
-  input: we can merge or rebase
+  input: We can merge or rebase.
   accepted:
   - We can merge or rebase.
 - category: list
-  input: we need four desks two whiteboards and eight chairs
+  input: We need four desks two whiteboards and eight chairs.
   accepted:
   - 'We need:
 
@@ -2673,7 +2378,7 @@
 
     '
 - category: list
-  input: we need monitors keyboards mice and headsets
+  input: We need monitors keyboards mice and headsets.
   accepted:
   - 'We need:
 
@@ -2687,7 +2392,7 @@
 
     '
 - category: list
-  input: we need six laptops four monitors and twelve cables
+  input: We need six laptops four monitors and twelve cables.
   accepted:
   - 'We need:
 
@@ -2699,7 +2404,8 @@
 
     '
 - category: list
-  input: what I want to cover in the presentation is the timeline the budget and the risk factors
+  input: What I want to cover in the presentation is the timeline the budget and the
+    risk factors.
   accepted:
   - 'What I want to cover in the presentation is:
 
@@ -2711,11 +2417,12 @@
 
     '
 - category: list
-  input: your options are renew or cancel
+  input: Your options are renew or cancel.
   accepted:
   - Your options are renew or cancel.
 - category: meeting
-  input: from the retrospective sam raised that deploys are too slow anita suggested we add more caching and jun said he'd look into it
+  input: From the retrospective sam raised that deploys are too slow anita suggested
+    we add more caching and jun said he'd look into it.
   accepted:
   - 'From the retrospective:
 
@@ -2736,7 +2443,9 @@
 
     '
 - category: meeting
-  input: in the daily sync marcos said the API migration is complete leah mentioned she's waiting on the security review and derek said he'll wrap up the tests by end of day
+  input: In the daily sync marcos said the API migration is complete leah mentioned
+    she's waiting on the security review and derek said he'll wrap up the tests by
+    end of day.
   accepted:
   - 'In the daily sync:
 
@@ -2757,7 +2466,8 @@
 
     '
 - category: meeting
-  input: in the standup today chris said the feature is deployed nina mentioned she needs more test data and raj said he'll handle the rollback plan
+  input: In the standup today chris said the feature is deployed nina mentioned she
+    needs more test data and raj said he'll handle the rollback plan.
   accepted:
   - 'In the standup today:
 
@@ -2778,7 +2488,8 @@
 
     '
 - category: meeting
-  input: in the weekly sync emma said the release is on track tom flagged a dependency issue and priya will follow up with the vendor
+  input: In the weekly sync emma said the release is on track tom flagged a dependency
+    issue and priya will follow up with the vendor.
   accepted:
   - 'In the weekly sync:
 
@@ -2799,7 +2510,8 @@
 
     '
 - category: meeting
-  input: in today's planning call jess said the frontend is done omar flagged a blocker on the payment flow and tina will handle the rollout
+  input: In today's planning call jess said the frontend is done omar flagged a blocker
+    on the payment flow and tina will handle the rollout.
   accepted:
   - 'In today''s planning call:
 
@@ -2820,7 +2532,8 @@
 
     '
 - category: meeting
-  input: so in this morning's standup kate confirmed the migration is done leo raised a concern about test coverage and ravi will pair with him tomorrow
+  input: So in this morning's standup kate confirmed the migration is done leo raised
+    a concern about test coverage and ravi will pair with him tomorrow.
   accepted:
   - 'In this morning''s standup:
 
@@ -2841,7 +2554,8 @@
 
     '
 - category: meeting
-  input: the action items are one finalize the budget two assign the new project lead and three send the weekly update
+  input: The action items are one finalize the budget two assign the new project lead
+    and three send the weekly update.
   accepted:
   - 'The action items are:
 
@@ -2862,7 +2576,8 @@
 
     '
 - category: meeting
-  input: the conclusions are one we'll extend the deadline by a week two the team will add two more QA engineers and three the staging environment will be rebuilt
+  input: The conclusions are one we'll extend the deadline by a week two the team
+    will add two more QA engineers and three the staging environment will be rebuilt.
   accepted:
   - 'The conclusions are:
 
@@ -2890,7 +2605,8 @@
 
     3. The staging environment will be rebuilt'
 - category: meeting
-  input: the highlights from today are one the launch date is confirmed for June two the design team signed off and three we need to finalize the pricing
+  input: The highlights from today are one the launch date is confirmed for June two
+    the design team signed off and three we need to finalize the pricing.
   accepted:
   - 'The highlights from today are:
 
@@ -2918,7 +2634,8 @@
 
     3. We need to finalize the pricing'
 - category: meeting
-  input: the key decisions are one we go with vendor A two the timeline is eight weeks and three we need a dedicated PM
+  input: The key decisions are one we go with vendor A two the timeline is eight weeks
+    and three we need a dedicated PM.
   accepted:
   - 'The key decisions are:
 
@@ -2939,7 +2656,8 @@
 
     '
 - category: meeting
-  input: the three main points are one the budget is approved two the timeline is six weeks and three we need a project manager
+  input: The three main points are one the budget is approved two the timeline is
+    six weeks and three we need a project manager.
   accepted:
   - 'The three main points are:
 
@@ -2967,69 +2685,69 @@
 
     3. We need a project manager'
 - category: multilingual
-  input: grab lunch at the cafe downstairs
+  input: Grab lunch at the cafe downstairs.
   accepted:
   - Grab lunch at the café downstairs.
 - category: multilingual
-  input: his fiance works at the same company
+  input: His fiance works at the same company.
   accepted:
   - His fiancée works at the same company.
   - His fiancé works at the same company.
 - category: multilingual
-  input: it's become a cliche in the industry
+  input: It's become a cliche in the industry.
   accepted:
   - It's become a cliché in the industry.
 - category: multilingual
-  input: let's meet at the cafe on the corner
+  input: Let's meet at the cafe on the corner.
   accepted:
   - Let's meet at the café on the corner.
 - category: multilingual
-  input: please attach your resume to the application
+  input: Please attach your resume to the application.
   accepted:
   - Please attach your résumé to the application.
 - category: multilingual
-  input: she has a certain je ne sais quoi about her leadership style
+  input: She has a certain je ne sais quoi about her leadership style.
   accepted:
   - She has a certain je ne sais quoi about her leadership style.
 - category: multilingual
-  input: she's his protege on the engineering team
+  input: She's his protege on the engineering team.
   accepted:
   - She's his protégé on the engineering team.
 - category: multilingual
-  input: that's a rather naive assumption about the timeline
+  input: That's a rather naive assumption about the timeline.
   accepted:
   - That's a rather naïve assumption about the timeline.
 - category: multilingual
-  input: that's the raison d'etre of our product
+  input: That's the raison d'etre of our product.
   accepted:
   - That's the raison d'être of our product.
 - category: multilingual
-  input: the new cafe Milano on third street is excellent
+  input: The new cafe Milano on third street is excellent.
   accepted:
   - The new Café Milano on Third Street is excellent.
   - The new café Milano on 3rd Street is excellent.
 - category: multilingual
-  input: the restaurant has a nice ambiance and great entrees
+  input: The restaurant has a nice ambiance and great entrees.
   accepted:
   - The restaurant has a nice ambiance and great entrées.
 - category: multilingual
-  input: we need a tete a tete with the client before the launch
+  input: We need a tete a tete with the client before the launch.
   accepted:
   - We need a tête-à-tête with the client before the launch.
 - category: no-leadin-list
-  input: Python JavaScript Go and Rust
+  input: Python JavaScript Go and Rust.
   accepted:
   - Python, JavaScript, Go, and Rust.
 - category: no-leadin-list
-  input: React Angular Vue and Svelte
+  input: React Angular Vue and Svelte.
   accepted:
   - React, Angular, Vue, and Svelte.
 - category: no-leadin-list
-  input: design development testing and deployment
+  input: Design development testing and deployment.
   accepted:
   - Design, development, testing, and deployment.
 - category: no-leadin-list
-  input: first check the logs second restart the pod third verify the endpoint
+  input: First check the logs second restart the pod third verify the endpoint.
   accepted:
   - '1. Check the logs
 
@@ -3039,7 +2757,7 @@
 
     '
 - category: no-leadin-list
-  input: first draft the proposal second get feedback third finalize
+  input: First draft the proposal second get feedback third finalize.
   accepted:
   - '1. Draft the proposal
 
@@ -3056,23 +2774,23 @@
 
     '
 - category: no-leadin-list
-  input: red green blue and yellow
+  input: Red green blue and yellow.
   accepted:
   - Red, green, blue, and yellow.
 - category: number
-  input: I'll be there by nine fifteen AM
+  input: I'll be there by nine fifteen AM.
   accepted:
   - I'll be there by 9:15 AM.
 - category: number
-  input: I'll be there by one thirty
+  input: I'll be there by one thirty.
   accepted:
   - I'll be there by 1:30.
 - category: number
-  input: adoption is at about sixty percent
+  input: Adoption is at about sixty percent.
   accepted:
   - Adoption is at about 60%.
 - category: number
-  input: buy three whiteboards two projectors and fifteen markers
+  input: Buy three whiteboards two projectors and fifteen markers.
   accepted:
   - 'Buy:
 
@@ -3084,59 +2802,59 @@
 
     '
 - category: number
-  input: day one of the project went well
+  input: Day one of the project went well.
   accepted:
   - Day one of the project went well.
 - category: number
-  input: give me a hundred percent effort
+  input: Give me a hundred percent effort.
   accepted:
   - Give me 100% effort.
 - category: number
-  input: he was the tenth person to sign up
+  input: He was the tenth person to sign up.
   accepted:
   - He was the 10th person to sign up.
 - category: number
-  input: it costs ninety nine dollars
+  input: It costs ninety nine dollars.
   accepted:
   - It costs $99.
 - category: number
-  input: it takes two to tango
+  input: It takes two to tango.
   accepted:
   - It takes two to tango.
 - category: number
-  input: it was a zero day vulnerability
+  input: It was a zero day vulnerability.
   accepted:
   - It was a zero-day vulnerability.
 - category: number
-  input: it was nineteen dollars and ninety five cents
+  input: It was nineteen dollars and ninety five cents.
   accepted:
   - It was $19.95.
 - category: number
-  input: it's the seventh item on the list
+  input: It's the seventh item on the list.
   accepted:
   - It's the 7th item on the list.
 - category: number
-  input: let's schedule a one on one meeting
+  input: Let's schedule a one on one meeting.
   accepted:
   - Let's schedule a one-on-one meeting.
 - category: number
-  input: lunch is at twelve thirty
+  input: Lunch is at twelve thirty.
   accepted:
   - Lunch is at 12:30.
 - category: number
-  input: lunch is at twelve thirty
+  input: Lunch is at twelve thirty.
   accepted:
   - Lunch is at 12:30.
 - category: number
-  input: my number is five five five one two three four five six seven
+  input: My number is five five five one two three four five six seven.
   accepted:
   - My number is 555-123-4567.
 - category: number
-  input: one of the developers found a bug
+  input: One of the developers found a bug.
   accepted:
   - One of the developers found a bug.
 - category: number
-  input: provision eight CPUs sixteen gigs of RAM and two hundred gigs of storage
+  input: Provision eight CPUs sixteen gigs of RAM and two hundred gigs of storage.
   accepted:
   - 'Provision:
 
@@ -3148,267 +2866,265 @@
 
     '
 - category: number
-  input: revenue hit one point eight billion last year
+  input: Revenue hit one point eight billion last year.
   accepted:
   - Revenue hit 1.8 billion last year.
 - category: number
-  input: she finished in third place overall
+  input: She finished in third place overall.
   accepted:
   - She finished in 3rd place overall.
 - category: number
-  input: she joined as the ninth engineer
+  input: She joined as the ninth engineer.
   accepted:
   - She joined as the 9th engineer.
 - category: number
-  input: she's the one and only expert on this
+  input: She's the one and only expert on this.
   accepted:
   - She's the one and only expert on this.
 - category: number
-  input: she's the third person to report this
+  input: She's the third person to report this.
   accepted:
   - She's the 3rd person to report this.
 - category: number
-  input: the SDK is at version four point zero point two
+  input: The SDK is at version four point zero point two.
   accepted:
   - The SDK is at version 4.0.2.
 - category: number
-  input: the account balance is minus seventy five dollars
+  input: The account balance is minus seventy five dollars.
   accepted:
   - -$75.
   - The account balance is -$75.
 - category: number
-  input: the call is at three thirty PM
+  input: The call is at three thirty PM.
   accepted:
   - The call is at 3:30 PM.
 - category: number
-  input: the call starts at three thirty PM
+  input: The call starts at three thirty PM.
   accepted:
   - The call starts at 3:30 PM.
 - category: number
-  input: the company has three point four million users
+  input: The company has three point four million users.
   accepted:
   - The company has 3.4 million users.
 - category: number
-  input: the company is worth two billion dollars
+  input: The company is worth two billion dollars.
   accepted:
   - The company is worth $2 billion.
 - category: number
-  input: the contract is worth two point five million dollars
+  input: The contract is worth two point five million dollars.
   accepted:
   - The contract is worth $2.5 million.
 - category: number
-  input: the data center runs at eighteen degrees Celsius
+  input: The data center runs at eighteen degrees Celsius.
   accepted:
   - The data center runs at 18°C.
 - category: number
-  input: the dataset has two point five million rows
+  input: The dataset has two point five million rows.
   accepted:
   - The dataset has 2.5 million rows.
 - category: number
-  input: the delta is minus three percent
+  input: The delta is minus three percent.
   accepted:
   - The delta is -3%.
 - category: number
-  input: the deploy window is at four forty five PM
+  input: The deploy window is at four forty five PM.
   accepted:
   - The deploy window is at 4:45 PM.
 - category: number
-  input: the deploy window is twelve to one AM
+  input: The deploy window is twelve to one AM.
   accepted:
   - The deploy window is 12 to 1 AM.
 - category: number
-  input: the fee is nine dollars and ninety nine cents
+  input: The fee is nine dollars and ninety nine cents.
   accepted:
   - The fee is $9.99.
 - category: number
-  input: the file has seven hundred and ninety lines
+  input: The file has seven hundred and ninety lines.
   accepted:
   - The file has 790 lines.
 - category: number
-  input: the library is at version one point eight point three
+  input: The library is at version one point eight point three.
   accepted:
   - The library is at version 1.8.3.
 - category: number
-  input: the license is twelve hundred dollars per year
+  input: The license is twelve hundred dollars per year.
   accepted:
   - The license is $1,200 per year.
   - The license is $1200 per year.
 - category: number
-  input: the meeting is at two thirty PM
+  input: The meeting is at two thirty PM.
   accepted:
   - The meeting is at 2:30 PM.
 - category: number
-  input: the office is on the sixth floor
+  input: The office is on the sixth floor.
   accepted:
   - The office is on the 6th floor.
 - category: number
-  input: the queue has forty seven items
+  input: The queue has forty seven items.
   accepted:
   - The queue has 47 items.
 - category: number
-  input: the response time is one point five seconds
+  input: The response time is one point five seconds.
   accepted:
   - The response time is 1.5 seconds.
 - category: number
-  input: the response time is three hundred and twenty milliseconds
+  input: The response time is three hundred and twenty milliseconds.
   accepted:
   - The response time is 320 milliseconds.
 - category: number
-  input: the seventh build finally passed
+  input: The seventh build finally passed.
   accepted:
   - The 7th build finally passed.
 - category: number
-  input: the standup is at nine thirty AM
+  input: The standup is at nine thirty AM.
   accepted:
   - The standup is at 9:30 AM.
 - category: number
-  input: the standup is at nine thirty AM
+  input: The standup is at nine thirty AM.
   accepted:
   - The standup is at 9:30 AM.
 - category: number
-  input: the subscription costs four dollars and ninety nine cents per month
+  input: The subscription costs four dollars and ninety nine cents per month.
   accepted:
   - The subscription costs $4.99 per month.
 - category: number
-  input: the support line is eight hundred five five five one two three four
+  input: The support line is eight hundred five five five one two three four.
   accepted:
   - The support line is 800-555-1234.
 - category: number
-  input: the system has zero bugs in production
+  input: The system has zero bugs in production.
   accepted:
   - The system has zero bugs in production.
 - category: number
-  input: the temperature dropped to minus fifteen
+  input: The temperature dropped to minus fifteen.
   accepted:
   - The temperature dropped to -15.
 - category: number
-  input: the total is forty two dollars and fifty cents
+  input: The total is forty two dollars and fifty cents.
   accepted:
   - The total is $42.50.
 - category: number
-  input: the train departs at four forty five PM
+  input: The train departs at four forty five PM.
   accepted:
   - The train departs at 4:45 PM.
 - category: number
-  input: there are about three hundred thousand records
+  input: There are about three hundred thousand records.
   accepted:
   - There are about 300,000 records.
 - category: number
-  input: there are four hundred and sixty employees
+  input: There are four hundred and sixty employees.
   accepted:
   - There are 460 employees.
 - category: number
-  input: there were fifteen people at the meeting
+  input: There were fifteen people at the meeting.
   accepted:
   - There were 15 people at the meeting.
 - category: number
-  input: they identified patient zero
+  input: They identified patient zero.
   accepted:
   - They identified patient zero.
 - category: number
-  input: this is the eighth incident this quarter
+  input: This is the eighth incident this quarter.
   accepted:
   - This is the 8th incident this quarter.
 - category: number
-  input: this is the fourth sprint in the cycle
+  input: This is the fourth sprint in the cycle.
   accepted:
   - This is the 4th sprint in the cycle.
 - category: number
-  input: this is the second iteration of the design
+  input: This is the second iteration of the design.
   accepted:
   - This is the 2nd iteration of the design.
 - category: number
-  input: this is the sixth time we've had this outage
+  input: This is the sixth time we've had this outage.
   accepted:
   - This is the 6th time we've had this outage.
 - category: number
-  input: upgrade to node twenty one point five point zero
+  input: Upgrade to node twenty one point five point zero.
   accepted:
   - Upgrade to Node 21.5.0.
 - category: number
-  input: we have a meeting at ten fifteen AM
+  input: We have a meeting at ten fifteen AM.
   accepted:
   - We have a meeting at 10:15 AM.
 - category: number
-  input: we have zero tolerance for downtime
+  input: We have zero tolerance for downtime.
   accepted:
   - We have zero tolerance for downtime.
 - category: number
-  input: we hit ninety nine point nine percent uptime
+  input: We hit ninety nine point nine percent uptime.
   accepted:
   - We hit 99.9% uptime.
 - category: number
-  input: we need one more sprint
+  input: We need one more sprint.
   accepted:
   - We need one more sprint.
 - category: number
-  input: we need three developers on this project
+  input: We need three developers on this project.
   accepted:
   - We need 3 developers on this project.
 - category: number
-  input: we processed two hundred requests
+  input: We processed two hundred requests.
   accepted:
   - We processed 200 requests.
 - category: number
-  input: we saved about ten thousand dollars
+  input: We saved about ten thousand dollars.
   accepted:
   - We saved about $10,000.
 - category: number
-  input: we served eight million requests last month
+  input: We served eight million requests last month.
   accepted:
   - We served 8 million requests last month.
 - category: number
-  input: we start at eight fifteen in the morning
+  input: We start at eight fifteen in the morning.
   accepted:
   - We start at 8:15 in the morning.
 - category: number
-  input: we upgraded to version two point three point one
+  input: We upgraded to version two point three point one.
   accepted:
   - We upgraded to version 2.3.1.
 - category: number
-  input: we're back to square one
+  input: We're back to square one.
   accepted:
   - We're back to square one.
 - category: number
-  input: we're on version two point zero
+  input: We're on version two point zero.
   accepted:
   - We're on version 2.0.
 - category: number
-  input: we're running at minus two hundred requests per second from yesterday
+  input: We're running at minus two hundred requests per second from yesterday.
   accepted:
   - We're running at -200 requests per second from yesterday.
 - category: number
-  input: we're starting from ground zero
+  input: We're starting from ground zero.
   accepted:
   - We're starting from ground zero.
 - category: number
-  input: zero downtime deployment is the goal
+  input: Zero downtime deployment is the goal.
   accepted:
   - Zero downtime deployment is the goal.
 - category: preserve
-  input: I dunno if that's the right approach
+  input: I dunno if that's the right approach.
   accepted:
   - I dunno if that's the right approach.
 - category: preserve
-  input: I wanna make sure it works first
+  input: I wanna make sure it works first.
   accepted:
   - I wanna make sure it works first.
 - category: preserve
-  input: I'd rather not refactor right now
+  input: I'd rather not refactor right now.
   accepted:
   - I'd rather not refactor right now.
 - category: preserve
-  input: during that period we saw significant growth
+  input: During that period we saw significant growth.
   accepted:
   - During that period we saw significant growth.
   - During that period, we saw significant growth.
 - category: preserve
-  input: 'here is the update
+  input: 'Here is the update
 
 
-    the migration completed successfully
-
-    '
+    the migration completed successfully.'
   accepted:
   - 'Here is the update.
 
@@ -3418,32 +3134,30 @@
     '
   - 'Here is the update.  The migration completed successfully. '
 - category: preserve
-  input: it ain't gonna fix itself
+  input: It ain't gonna fix itself.
   accepted:
   - It ain't gonna fix itself.
 - category: preserve
-  input: it's a bit hacky but it works
+  input: It's a bit hacky but it works.
   accepted:
   - It's a bit hacky but it works.
   - It's a bit hacky, but it works.
 - category: preserve
-  input: lemme check on that real quick
+  input: Lemme check on that real quick.
   accepted:
   - Lemme check on that real quick.
 - category: preserve
-  input: right here is where the crash happens
+  input: Right here is where the crash happens.
   accepted:
   - Right here is where the crash happens.
 - category: preserve
-  input: right now we need to focus on stability
+  input: Right now we need to focus on stability.
   accepted:
   - Right now we need to focus on stability.
 - category: preserve
-  input: 'see the summary
+  input: 'See the summary
 
-    details are below
-
-    '
+    details are below.'
   accepted:
   - 'See the summary.
 
@@ -3452,25 +3166,23 @@
     '
   - 'See the summary. Details are below. '
 - category: preserve
-  input: so be it we'll go with plan B
+  input: So be it we'll go with plan B.
   accepted:
   - So be it, we'll go with plan B.
   - So be it. We'll go with plan B.
 - category: preserve
-  input: so far the migration is going smoothly
+  input: So far the migration is going smoothly.
   accepted:
   - So far the migration is going smoothly.
 - category: preserve
-  input: so much for launching early
+  input: So much for launching early.
   accepted:
   - So much for launching early.
 - category: preserve
-  input: 'summary of the issue
+  input: 'Summary of the issue
 
 
-    we found a memory leak in the cache layer
-
-    '
+    we found a memory leak in the cache layer.'
   accepted:
   - 'Summary of the issue.
 
@@ -3480,19 +3192,17 @@
     '
   - 'Summary of the issue.  We found a memory leak in the cache layer. '
 - category: preserve
-  input: that's how we've always done it
+  input: That's how we've always done it.
   accepted:
   - That's how we've always done it.
 - category: preserve
-  input: the billing period is thirty days
+  input: The billing period is thirty days.
   accepted:
   - The billing period is 30 days.
 - category: preserve
-  input: 'the build passed
+  input: 'The build passed
 
-    deploying now
-
-    '
+    deploying now.'
   accepted:
   - 'The build passed.
 
@@ -3501,17 +3211,15 @@
     '
   - 'The build passed. Deploying now. '
 - category: preserve
-  input: the cooling off period is fourteen days
+  input: The cooling off period is fourteen days.
   accepted:
   - The cooling-off period is 14 days.
   - The cooling off period is 14 days.
 - category: preserve
-  input: 'the first point is about testing
+  input: 'The first point is about testing
 
 
-    the second point is about deployment
-
-    '
+    the second point is about deployment.'
   accepted:
   - 'The first point is about testing.
 
@@ -3521,35 +3229,35 @@
     '
   - 'The first point is about testing.  The second point is about deployment. '
 - category: preserve
-  input: the fix is pretty straightforward
+  input: The fix is pretty straightforward.
   accepted:
   - The fix is pretty straightforward.
 - category: preserve
-  input: the probation period ends next month
+  input: The probation period ends next month.
   accepted:
   - The probation period ends next month.
 - category: preserve
-  input: the service is sorta flaky
+  input: The service is sorta flaky.
   accepted:
   - The service is sorta flaky.
 - category: preserve
-  input: the trial period expires tomorrow
+  input: The trial period expires tomorrow.
   accepted:
   - The trial period expires tomorrow.
 - category: preserve
-  input: we gotta finish this before the deadline
+  input: We gotta finish this before the deadline.
   accepted:
   - We gotta finish this before the deadline.
 - category: preserve
-  input: well done on closing the deal
+  input: Well done on closing the deal.
   accepted:
   - Well done on closing the deal.
 - category: preserve
-  input: well known frameworks like React and Angular
+  input: Well known frameworks like React and Angular.
   accepted:
   - Well-known frameworks like React and Angular.
 - category: preserve
-  input: y'all need to update your dependencies
+  input: Y'all need to update your dependencies.
   accepted:
   - Y'all need to update your dependencies.
 - category: punctuation
@@ -3612,163 +3320,199 @@
   accepted:
   - Well… that's interesting.
 - category: repetition
-  input: I I think we should wait
+  input: I I think we should wait.
   accepted:
   - I think we should wait.
 - category: repetition
-  input: I think I think we should refactor
+  input: I think I think we should refactor.
   accepted:
   - I think we should refactor.
 - category: repetition
-  input: I was going to I was going to ask about the budget
+  input: I was going to I was going to ask about the budget.
   accepted:
   - I was going to ask about the budget.
 - category: repetition
-  input: a a new version is out
+  input: A a new version is out.
   accepted:
   - A new version is out.
 - category: repetition
-  input: can can you review this
+  input: Can can you review this.
   accepted:
   - Can you review this?
 - category: repetition
-  input: can you can you send me the report
+  input: Can you can you send me the report.
   accepted:
   - Can you send me the report?
 - category: repetition
-  input: he he said it would be ready by Friday
+  input: He he said it would be ready by Friday.
   accepted:
   - He said it would be ready by Friday.
 - category: repetition
-  input: is is the build passing
+  input: Is is the build passing.
   accepted:
   - Is the build passing?
 - category: repetition
-  input: it's it's not working
+  input: It's it's not working.
   accepted:
   - It's not working.
 - category: repetition
-  input: it's really it's really important
+  input: It's really it's really important.
   accepted:
   - It's really important.
 - category: repetition
-  input: let me let me check on that
+  input: Let me let me check on that.
   accepted:
   - Let me check on that.
 - category: repetition
-  input: she said she said the timeline is aggressive
+  input: She said she said the timeline is aggressive.
   accepted:
   - She said the timeline is aggressive.
 - category: repetition
-  input: the problem is the problem is the memory leak
+  input: The problem is the problem is the memory leak.
   accepted:
   - The problem is the memory leak.
 - category: repetition
-  input: the the server is down
+  input: The the server is down.
   accepted:
   - The server is down.
 - category: repetition
-  input: the the the deployment failed
+  input: The the the deployment failed.
   accepted:
   - The deployment failed.
 - category: repetition
-  input: we need to we need to make sure everything is is backed up
+  input: We need to we need to make sure everything is is backed up.
   accepted:
   - We need to make sure everything is backed up.
 - category: repetition
-  input: we need to we need to update the docs
+  input: We need to we need to update the docs.
   accepted:
   - We need to update the docs.
 - category: repetition
-  input: we we need to fix this
+  input: We we need to fix this.
   accepted:
   - We need to fix this.
 - category: run-on
-  input: I reviewed the code and found three bugs and fixed two of them and the third one needs input from the backend team and I'll follow up tomorrow
+  input: I reviewed the code and found three bugs and fixed two of them and the third
+    one needs input from the backend team and I'll follow up tomorrow.
   accepted:
-  - I reviewed the code and found 3 bugs. I fixed 2 of them. The third needs input from the backend team, and I'll follow up tomorrow.
-  - I reviewed the code and found 3 bugs. I fixed 2 of them, but the 3rd one needs input from the backend team. I'll follow up tomorrow.
-  - I reviewed the code and found 3 bugs. I fixed 2 of them. The third one needs input from the backend team, and I'll follow up tomorrow.
-  - I reviewed the code and found 3 bugs. I fixed 2 of them, and the third one needs input from the backend team. I'll follow up tomorrow.
+  - I reviewed the code and found 3 bugs. I fixed 2 of them. The third needs input
+    from the backend team, and I'll follow up tomorrow.
+  - I reviewed the code and found 3 bugs. I fixed 2 of them, but the 3rd one needs
+    input from the backend team. I'll follow up tomorrow.
+  - I reviewed the code and found 3 bugs. I fixed 2 of them. The third one needs input
+    from the backend team, and I'll follow up tomorrow.
+  - I reviewed the code and found 3 bugs. I fixed 2 of them, and the third one needs
+    input from the backend team. I'll follow up tomorrow.
 - category: run-on
-  input: first we need to upgrade the database and then update the schema and then run migrations and then test everything
+  input: First we need to upgrade the database and then update the schema and then
+    run migrations and then test everything.
   accepted:
-  - First we need to upgrade the database, update the schema, and run migrations. Then test everything.
-  - First we need to upgrade the database, update the schema, run migrations, and then test everything.
-  - First we need to upgrade the database, then update the schema, then run migrations, and then test everything.
+  - First we need to upgrade the database, update the schema, and run migrations.
+    Then test everything.
+  - First we need to upgrade the database, update the schema, run migrations, and
+    then test everything.
+  - First we need to upgrade the database, then update the schema, then run migrations,
+    and then test everything.
 - category: run-on
-  input: the server went down at 3 AM and the on-call engineer got paged and they fixed it within an hour and then we did a post mortem and found the root cause
+  input: The server went down at 3 AM and the on-call engineer got paged and they
+    fixed it within an hour and then we did a post mortem and found the root cause.
   accepted:
-  - The server went down at 3 AM and the on-call engineer got paged. They fixed it within an hour. We did a post-mortem and found the root cause.
-  - The server went down at 3 AM. The on-call engineer got paged, and they fixed it within an hour. We did a post-mortem and found the root cause.
-  - The server went down at 3 AM, and the on-call engineer got paged. They fixed it within an hour, and then we did a postmortem and found the root cause.
-  - The server went down at 3 AM, and the on-call engineer got paged. They fixed it within an hour, and then we did a post mortem and found the root cause.
+  - The server went down at 3 AM and the on-call engineer got paged. They fixed it
+    within an hour. We did a post-mortem and found the root cause.
+  - The server went down at 3 AM. The on-call engineer got paged, and they fixed it
+    within an hour. We did a post-mortem and found the root cause.
+  - The server went down at 3 AM, and the on-call engineer got paged. They fixed it
+    within an hour, and then we did a postmortem and found the root cause.
+  - The server went down at 3 AM, and the on-call engineer got paged. They fixed it
+    within an hour, and then we did a post mortem and found the root cause.
 - category: run-on
-  input: the user clicks the button and the form submits and then the server validates the input and returns a response and the UI updates
+  input: The user clicks the button and the form submits and then the server validates
+    the input and returns a response and the UI updates.
   accepted:
-  - The user clicks the button and the form submits. The server validates the input and returns a response. The UI updates.
-  - The user clicks the button, the form submits, the server validates the input, and the UI updates.
-  - The user clicks the button, and the form submits. Then the server validates the input and returns a response, and the UI updates.
+  - The user clicks the button and the form submits. The server validates the input
+    and returns a response. The UI updates.
+  - The user clicks the button, the form submits, the server validates the input,
+    and the UI updates.
+  - The user clicks the button, and the form submits. Then the server validates the
+    input and returns a response, and the UI updates.
 - category: run-on
-  input: the user signs up and then we send a confirmation email and then they verify their account and then they can start using the app
+  input: The user signs up and then we send a confirmation email and then they verify
+    their account and then they can start using the app.
   accepted:
-  - The user signs up, then we send a confirmation email. They verify their account, and then they can start using the app.
-  - The user signs up, then we send a confirmation email, then they verify their account, and then they can start using the app.
-  - The user signs up, then we send a confirmation email. Then they verify their account, and then they can start using the app.
+  - The user signs up, then we send a confirmation email. They verify their account,
+    and then they can start using the app.
+  - The user signs up, then we send a confirmation email, then they verify their account,
+    and then they can start using the app.
+  - The user signs up, then we send a confirmation email. Then they verify their account,
+    and then they can start using the app.
 - category: run-on
-  input: we deployed on Friday and the tests failed and we had to roll back and on Monday we fixed it
+  input: We deployed on Friday and the tests failed and we had to roll back and on
+    Monday we fixed it.
   accepted:
-  - We deployed on Friday, but the tests failed, so we had to roll back. On Monday, we fixed it.
-  - We deployed on Friday, and the tests failed, so we rolled back. On Monday, we fixed it.
-  - We deployed on Friday, and the tests failed, so we had to roll back. On Monday, we fixed it.
-  - We deployed on Friday, and the tests failed. We had to roll back. On Monday, we fixed it.
+  - We deployed on Friday, but the tests failed, so we had to roll back. On Monday,
+    we fixed it.
+  - We deployed on Friday, and the tests failed, so we rolled back. On Monday, we
+    fixed it.
+  - We deployed on Friday, and the tests failed, so we had to roll back. On Monday,
+    we fixed it.
+  - We deployed on Friday, and the tests failed. We had to roll back. On Monday, we
+    fixed it.
 - category: run-on
-  input: we deployed on Friday and the tests failed and we rolled back and then on Monday we fixed it and redeployed
+  input: We deployed on Friday and the tests failed and we rolled back and then on
+    Monday we fixed it and redeployed.
   accepted:
-  - We deployed on Friday and the tests failed, so we rolled back. On Monday we fixed it and redeployed.
-  - We deployed on Friday, but the tests failed. We rolled back. On Monday, we fixed it and redeployed.
-  - We deployed on Friday, and the tests failed. We rolled back, then on Monday we fixed it and redeployed.
+  - We deployed on Friday and the tests failed, so we rolled back. On Monday we fixed
+    it and redeployed.
+  - We deployed on Friday, but the tests failed. We rolled back. On Monday, we fixed
+    it and redeployed.
+  - We deployed on Friday, and the tests failed. We rolled back, then on Monday we
+    fixed it and redeployed.
 - category: run-on
-  input: we need to update the database and run the migrations and restart the service and verify everything works and notify the team
+  input: We need to update the database and run the migrations and restart the service
+    and verify everything works and notify the team.
   accepted:
-  - We need to update the database, run the migrations, restart the service, verify everything works, and notify the team.
+  - We need to update the database, run the migrations, restart the service, verify
+    everything works, and notify the team.
 - category: small-number
-  input: call me at five five five one two three four five six seven
+  input: Call me at five five five one two three four five six seven.
   accepted:
   - Call me at 555-123-4567.
 - category: small-number
-  input: deploy to us east one on aws
+  input: Deploy to us east one on aws.
   accepted:
   - Deploy to us-east-1 on AWS.
 - category: small-number
-  input: dial four one five five five five zero one two three
+  input: Dial four one five five five five zero one two three.
   accepted:
   - Dial 415-555-0123.
 - category: small-number
-  input: failover to eu central one
+  input: Failover to eu central one.
   accepted:
   - Failover to eu-central-1.
 - category: small-number
-  input: her number is five five five nine eight seven six five four three
+  input: Her number is five five five nine eight seven six five four three.
   accepted:
   - Her number is 555-987-6543.
 - category: small-number
-  input: one engineer can handle this
+  input: One engineer can handle this.
   accepted:
   - 1 engineer can handle this.
 - category: small-number
-  input: she reviewed the PR and left three comments and asked for changes and I fixed them and she approved it
+  input: She reviewed the PR and left three comments and asked for changes and I fixed
+    them and she approved it.
   accepted:
-  - She reviewed the PR and left 3 comments, asking for changes. I fixed them and she approved it.
-  - She reviewed the PR, left three comments, and asked for changes. I fixed them, and she approved it.
-  - She reviewed the PR, left 3 comments, and asked for changes. I fixed them, and she approved it.
-  - She reviewed the PR and left 3 comments, asking for changes. I fixed them, and she approved it.
+  - She reviewed the PR and left 3 comments, asking for changes. I fixed them and
+    she approved it.
+  - She reviewed the PR, left three comments, and asked for changes. I fixed them,
+    and she approved it.
+  - She reviewed the PR, left 3 comments, and asked for changes. I fixed them, and
+    she approved it.
+  - She reviewed the PR and left 3 comments, asking for changes. I fixed them, and
+    she approved it.
 - category: small-number
-  input: 'step one is done
+  input: 'Step one is done
 
-    step two starts tomorrow
-
-    '
+    step two starts tomorrow.'
   accepted:
   - 'Step 1 is done.
 
@@ -3776,36 +3520,40 @@
 
     '
 - category: small-number
-  input: the API went down at 2 AM and the alerts fired and the on-call engineer responded within ten minutes and the root cause was a memory leak
+  input: The API went down at 2 AM and the alerts fired and the on-call engineer responded
+    within ten minutes and the root cause was a memory leak.
   accepted:
-  - The API went down at 2 AM and the alerts fired. The on-call engineer responded within 10 minutes. The root cause was a memory leak.
-  - The API went down at 2 AM, and the alerts fired. The on-call engineer responded within 10 minutes, and the root cause was a memory leak.
+  - The API went down at 2 AM and the alerts fired. The on-call engineer responded
+    within 10 minutes. The root cause was a memory leak.
+  - The API went down at 2 AM, and the alerts fired. The on-call engineer responded
+    within 10 minutes, and the root cause was a memory leak.
 - category: small-number
-  input: the CDN is in us east one and us west two
+  input: The CDN is in us east one and us west two.
   accepted:
   - The CDN is in us-east-1 and us-west-2.
 - category: small-number
-  input: the compression ratio is three to one
+  input: The compression ratio is three to one.
   accepted:
   - The compression ratio is 3:1.
 - category: small-number
-  input: the database is in ap southeast one
+  input: The database is in ap southeast one.
   accepted:
   - The database is in ap-southeast-1.
 - category: small-number
-  input: the deploy window opens at two AM
+  input: The deploy window opens at two AM.
   accepted:
   - The deploy window opens at 2 AM.
 - category: small-number
-  input: the fax number is five five five zero zero zero one two three four
+  input: The fax number is five five five zero zero zero one two three four.
   accepted:
   - The fax number is 555-000-1234.
 - category: small-number
-  input: the ratio is ten to one in our favor
+  input: The ratio is ten to one in our favor.
   accepted:
   - The ratio is 10:1 in our favor.
 - category: small-number
-  input: the status update is frontend is done backend needs two more days and QA starts next week
+  input: The status update is frontend is done backend needs two more days and QA
+    starts next week.
   accepted:
   - 'The status update is:
 
@@ -3817,36 +3565,39 @@
 
     '
 - category: small-number
-  input: the terraform config deploys to us east one
+  input: The terraform config deploys to us east one.
   accepted:
   - The Terraform config deploys to us-east-1.
 - category: small-number
-  input: there is only one option left
+  input: There is only one option left.
   accepted:
   - There is only 1 option left.
 - category: small-number
-  input: there's only one option
+  input: There's only one option.
   accepted:
   - There's only 1 option.
 - category: small-number
-  input: we had a meeting and decided to postpone the release and also we need to fix two critical bugs and then do a full regression test before shipping
+  input: We had a meeting and decided to postpone the release and also we need to
+    fix two critical bugs and then do a full regression test before shipping.
   accepted:
-  - We had a meeting and decided to postpone the release. We also need to fix 2 critical bugs and do a full regression test before shipping.
-  - We had a meeting and decided to postpone the release. We also need to fix 2 critical bugs, then do a full regression test before shipping.
+  - We had a meeting and decided to postpone the release. We also need to fix 2 critical
+    bugs and do a full regression test before shipping.
+  - We had a meeting and decided to postpone the release. We also need to fix 2 critical
+    bugs, then do a full regression test before shipping.
 - category: small-number
-  input: we have one week until the deadline
+  input: We have one week until the deadline.
   accepted:
   - We have 1 week until the deadline.
 - category: small-number
-  input: we maintain a ratio of five to one
+  input: We maintain a ratio of five to one.
   accepted:
   - We maintain a ratio of 5:1.
 - category: small-number
-  input: we need at least one backup
+  input: We need at least one backup.
   accepted:
   - We need at least 1 backup.
 - category: small-number
-  input: we need two servers four load balancers and six storage volumes
+  input: We need two servers four load balancers and six storage volumes.
   accepted:
   - 'We need:
 
@@ -3858,119 +3609,119 @@
 
     '
 - category: small-number
-  input: we only have one instance running
+  input: We only have one instance running.
   accepted:
   - We only have 1 instance running.
 - category: small-number
-  input: we run in us west two and eu west one
+  input: We run in us west two and eu west one.
   accepted:
   - We run in us-west-2 and eu-west-1.
 - category: small-number
-  input: we went from one to four servers
+  input: We went from one to four servers.
   accepted:
   - We went from 1 to 4 servers.
 - category: thinking
-  input: I think the best approach would be to refactor first
+  input: I think the best approach would be to refactor first.
   accepted:
   - I think the best approach would be to refactor first.
 - category: thinking
-  input: I think the root cause is a race condition
+  input: I think the root cause is a race condition.
   accepted:
   - I think the root cause is a race condition.
 - category: thinking
-  input: I think we need a bigger instance for the database
+  input: I think we need a bigger instance for the database.
   accepted:
   - I think we need a bigger instance for the database.
 - category: thinking
-  input: I think we should postpone the launch by a week
+  input: I think we should postpone the launch by a week.
   accepted:
   - I think we should postpone the launch by a week.
 - category: thinking
-  input: I'm trying to remember I think it was version three point two
+  input: I'm trying to remember I think it was version three point two.
   accepted:
   - I think it was version 3.2.
 - category: thinking
-  input: ah right the deadline was moved to Monday
+  input: Ah right the deadline was moved to Monday.
   accepted:
   - The deadline was moved to Monday.
 - category: thinking
-  input: hmm… let me check
+  input: Hmm… let me check.
   accepted:
   - Let me check.
 - category: thinking
-  input: hold on let me check yes the build passed
+  input: Hold on let me check yes the build passed.
   accepted:
   - The build passed.
 - category: thinking
-  input: hold on yes the root cause is the missing index
+  input: Hold on yes the root cause is the missing index.
   accepted:
   - The root cause is the missing index.
 - category: thinking
-  input: how do I put this the project needs more resources
+  input: How do I put this the project needs more resources.
   accepted:
   - The project needs more resources.
 - category: thinking
-  input: let me recall the meeting was on Tuesday
+  input: Let me recall the meeting was on Tuesday.
   accepted:
   - The meeting was on Tuesday.
 - category: thinking
-  input: let me see I believe the config is wrong
+  input: Let me see I believe the config is wrong.
   accepted:
   - I believe the config is wrong.
 - category: thinking
-  input: let me see I think the bottleneck is in the auth service
+  input: Let me see I think the bottleneck is in the auth service.
   accepted:
   - I think the bottleneck is in the auth service.
 - category: thinking
-  input: let me see I think we need to update the config
+  input: Let me see I think we need to update the config.
   accepted:
   - I think we need to update the config.
 - category: thinking
-  input: let me see right the issue is in the cache layer
+  input: Let me see right the issue is in the cache layer.
   accepted:
   - The issue is in the cache layer.
 - category: thinking
-  input: let me think about it okay we should use a queue
+  input: Let me think about it okay we should use a queue.
   accepted:
   - We should use a queue.
 - category: thinking
-  input: let me think right we should migrate to the new cluster
+  input: Let me think right we should migrate to the new cluster.
   accepted:
   - We should migrate to the new cluster.
 - category: thinking
-  input: let me think the answer is probably yes
+  input: Let me think the answer is probably yes.
   accepted:
   - The answer is probably yes.
 - category: thinking
-  input: let me think yes the config needs updating
+  input: Let me think yes the config needs updating.
   accepted:
   - The config needs updating.
 - category: thinking
-  input: now where was I oh yes the API rate limits
+  input: Now where was I oh yes the API rate limits.
   accepted:
   - The API rate limits.
 - category: thinking
-  input: oh right we already fixed that last sprint
+  input: Oh right we already fixed that last sprint.
   accepted:
   - We already fixed that last sprint.
 - category: thinking
-  input: okay let me think about this for a second I think we should use Redis
+  input: Okay let me think about this for a second I think we should use Redis.
   accepted:
   - I think we should use Redis.
 - category: thinking
-  input: right so I think the issue is in the database layer
+  input: Right so I think the issue is in the database layer.
   accepted:
   - I think the issue is in the database layer.
 - category: thinking
-  input: right so the issue is in the networking layer
+  input: Right so the issue is in the networking layer.
   accepted:
   - The issue is in the networking layer.
 - category: thinking
-  input: right the migration script needs updating
+  input: Right the migration script needs updating.
   accepted:
   - The migration script needs updating.
 - category: thinking
-  input: that makes sense I'll update the PR
+  input: That makes sense I'll update the PR.
   accepted:
   - That makes sense. I'll update the PR.
 - category: punctuation
@@ -4030,130 +3781,130 @@
   accepted:
   - The release is blocked. We need to fix the tests first.
 - category: preserve
-  input: the billing period is thirty days
+  input: The billing period is thirty days.
   accepted:
   - The billing period is 30 days.
 - category: preserve
-  input: the trial period ends next month
+  input: The trial period ends next month.
   accepted:
   - The trial period ends next month.
 - category: preserve
-  input: the probation period was extended by two weeks
+  input: The probation period was extended by two weeks.
   accepted:
   - The probation period was extended by 2 weeks.
 - category: preserve
-  input: the grace period for the payment is five days
+  input: The grace period for the payment is five days.
   accepted:
   - The grace period for the payment is 5 days.
 - category: preserve
-  input: during that period we saw significant growth
+  input: During that period we saw significant growth.
   accepted:
   - During that period, we saw significant growth.
   - During that period we saw significant growth.
 - category: thinking
-  input: that makes sense let's go with option B
+  input: That makes sense let's go with option B.
   accepted:
   - That makes sense. Let's go with option B.
   - That makes sense, let's go with option B.
 - category: thinking
-  input: wait what was I saying oh right the deployment
+  input: Wait what was I saying oh right the deployment.
   accepted:
   - The deployment.
 - category: thinking
-  input: that makes sense let's schedule it for next week
+  input: That makes sense let's schedule it for next week.
   accepted:
   - That makes sense. Let's schedule it for next week.
 - category: thinking
-  input: that makes sense we should probably add a retry
+  input: That makes sense we should probably add a retry.
   accepted:
   - That makes sense. We should probably add a retry.
   - That makes sense we should probably add a retry.
 - category: thinking
-  input: that makes sense let's use the staging environment
+  input: That makes sense let's use the staging environment.
   accepted:
   - That makes sense. Let's use the staging environment.
 - category: two-item-list
-  input: ping the frontend team and the QA team
+  input: Ping the frontend team and the QA team.
   accepted:
   - Ping the frontend team and the QA team.
 - category: two-item-list
-  input: we need to update the docs and the changelog
+  input: We need to update the docs and the changelog.
   accepted:
   - We need to update the docs and the changelog.
 - category: url
-  input: check the file at slash var slash log slash app dot log
+  input: Check the file at slash var slash log slash app dot log.
   accepted:
   - Check the file at /var/log/app.log.
 - category: url
-  input: check www.example.com for details
+  input: Check www.example.com for details.
   accepted:
   - Check www.example.com for details.
 - category: url
-  input: forward it to support at acme dot io
+  input: Forward it to support at acme dot io.
   accepted:
   - Forward it to support@acme.io.
 - category: url
-  input: my email is sarah dot jones at company dot com
+  input: My email is sarah dot jones at company dot com.
   accepted:
   - My email is sarah.jones@company.com.
 - category: url
-  input: navigate to slash dashboard slash reports
+  input: Navigate to slash dashboard slash reports.
   accepted:
   - Navigate to /dashboard/reports.
 - category: url
-  input: reach me at alex at startup dot co
+  input: Reach me at alex at startup dot co.
   accepted:
   - Reach me at alex@startup.co.
 - category: url
-  input: send it to jane@example.com please
+  input: Send it to jane@example.com please.
   accepted:
   - Send it to jane@example.com, please.
 - category: url
-  input: send it to john@example.com
+  input: Send it to john@example.com.
   accepted:
   - Send it to john@example.com.
 - category: url
-  input: the endpoint is /api/v2/users
+  input: The endpoint is /api/v2/users.
   accepted:
   - The endpoint is /api/v2/users.
 - category: url
-  input: the endpoint is slash api slash v2 slash users
+  input: The endpoint is slash api slash v2 slash users.
   accepted:
   - The endpoint is /api/v2/users.
 - category: url
-  input: the endpoint is slash users slash profile slash settings
+  input: The endpoint is slash users slash profile slash settings.
   accepted:
   - The endpoint is /users/profile/settings.
 - category: url
-  input: the health check is at slash health slash ready
+  input: The health check is at slash health slash ready.
   accepted:
   - The health check is at /health/ready.
 - category: url
-  input: the route is slash users slash profile
+  input: The route is slash users slash profile.
   accepted:
   - The route is /users/profile.
 - category: vocab
-  input: include a bearer token in the request header
+  input: Include a bearer token in the request header.
   accepted:
   - Include a Bearer token in the request header.
 - category: vocab
-  input: run the ansible playbook to provision the ec2 instances
+  input: Run the ansible playbook to provision the ec2 instances.
   accepted:
   - Run the Ansible playbook to provision the EC2 instances.
 - category: vocab
-  input: set the authorization to bearer and include the refresh token
+  input: Set the authorization to bearer and include the refresh token.
   accepted:
   - Set the Authorization to Bearer and include the refresh token.
 - category: vocab
-  input: the backend uses django with postgresql on heroku
+  input: The backend uses django with postgresql on heroku.
   accepted:
   - The backend uses Django with PostgreSQL on Heroku.
 - category: vocab
-  input: the header needs a bearer token for authentication
+  input: The header needs a bearer token for authentication.
   accepted:
   - The header needs a Bearer token for authentication.
 - category: vocab
-  input: the monitoring stack is prometheus grafana and alertmanager
+  input: The monitoring stack is prometheus grafana and alertmanager.
   accepted:
   - 'The monitoring stack is:
 
@@ -4166,771 +3917,447 @@
     '
   - The monitoring stack is Prometheus, Grafana, and Alertmanager.
 - category: vocab
-  input: the pipeline uses terraform and cloudformation
+  input: The pipeline uses terraform and cloudformation.
   accepted:
   - The pipeline uses Terraform and CloudFormation.
 - category: vocab
-  input: we switched from bitbucket to gitlab for version control
+  input: We switched from bitbucket to gitlab for version control.
   accepted:
   - We switched from Bitbucket to GitLab for version control.
-- category: casual
-  style: casual
-  input: cool I'll handle that after the standup
-  accepted:
-  - cool, I'll handle that after the standup
-  - cool I'll handle that after the standup
-- category: casual
-  style: casual
-  input: got it will push the fix tonight
-  accepted:
-  - got it, will push the fix tonight
-- category: casual
-  style: casual
-  input: lol that's so broken okay I'll look into it
-  accepted:
-  - lol that's so broken, okay I'll look into it
-- category: casual
-  style: casual
-  input: nah don't worry about it I'll just revert
-  accepted:
-  - nah don't worry about it, I'll just revert
-  - nah, don't worry about it, I'll just revert
-- category: casual
-  style: casual
-  input: sure thing just send me the link
-  accepted:
-  - sure thing, just send me the link
-- category: casual
-  style: casual
-  input: yep already on it should be done in an hour
-  accepted:
-  - yep already on it, should be done in an hour
-  - yep, already on it, should be done in an hour
-- category: casual
-  style: casual
-  input: oh right I forgot about that thanks for the reminder
-  accepted:
-  - oh right, I forgot about that, thanks for the reminder
-  - oh right I forgot about that, thanks for the reminder
-- category: casual
-  style: casual
-  input: hmm not sure let me ask the team
-  accepted:
-  - not sure, let me ask the team
-- category: casual
-  style: casual
-  input: um yeah that's fine go ahead and merge
-  accepted:
-  - yeah that's fine, go ahead and merge
-- category: casual
-  style: casual
-  input: ah okay makes sense I'll update the PR
-  accepted:
-  - okay makes sense, I'll update the PR
-- category: casual
-  style: casual
-  input: ha yeah we definitely need to refactor that module
-  accepted:
-  - ha yeah we definitely need to refactor that module
-- category: casual
-  style: casual
-  input: omg the tests are still failing can you take a look
-  accepted:
-  - omg the tests are still failing, can you take a look
-- category: casual
-  style: casual
-  input: right right I see what you mean let me try a different approach
-  accepted:
-  - right, I see what you mean, let me try a different approach
-  - right right I see what you mean, let me try a different approach
-- category: casual
-  style: casual
-  input: yo can you review my branch when you get a chance
-  accepted:
-  - yo can you review my branch when you get a chance
-- category: casual
-  style: casual
-  input: oh no the deploy broke hold on let me check
-  accepted:
-  - oh no the deploy broke, hold on let me check
-  - oh no, the deploy broke, hold on, let me check
-- category: casual
-  style: casual
-  input: aight I'll rebase and force push
-  accepted:
-  - aight I'll rebase and force push
-- category: casual
-  style: casual
-  input: wait actually never mind I figured it out
-  accepted:
-  - wait actually never mind, I figured it out
-- category: casual
-  style: casual
-  input: haha yeah that bug has been there forever
-  accepted:
-  - haha yeah that bug has been there forever
-- category: casual
-  style: casual
-  input: ooh good catch I didn't notice that edge case
-  accepted:
-  - ooh good catch, I didn't notice that edge case
-- category: casual
-  style: casual
-  input: okay so basically we need to swap the order of those two calls
-  accepted:
-  - okay so basically we need to swap the order of those two calls
-- category: casual
-  style: casual
-  input: Alright I'll grab the latest and try again
-  accepted:
-  - alright I'll grab the latest and try again
-- category: casual
-  style: casual
-  input: Bet that should work
-  accepted:
-  - bet that should work
-- category: casual
-  style: casual
-  input: Can you check if staging is up
-  accepted:
-  - can you check if staging is up
-- category: casual
-  style: casual
-  input: Dude the whole pipeline is down
-  accepted:
-  - dude the whole pipeline is down
-- category: casual
-  style: casual
-  input: Fair enough I'll just do it manually
-  accepted:
-  - fair enough, I'll just do it manually
-  - fair enough I'll just do it manually
-- category: casual
-  style: casual
-  input: For real though that was a great catch
-  accepted:
-  - for real though that was a great catch
-  - for real though, that was a great catch
-- category: casual
-  style: casual
-  input: Gonna push this branch in a sec
-  accepted:
-  - gonna push this branch in a sec
-- category: casual
-  style: casual
-  input: Ha that's exactly what I was thinking
-  accepted:
-  - ha that's exactly what I was thinking
-- category: casual
-  style: casual
-  input: Hold on let me pull the latest changes
-  accepted:
-  - hold on let me pull the latest changes
-  - hold on, let me pull the latest changes
-- category: casual
-  style: casual
-  input: I dunno maybe we should just skip that test
-  accepted:
-  - I dunno maybe we should just skip that test
-  - I dunno, maybe we should just skip that test
-- category: casual
-  style: casual
-  input: Just merged it check when you can
-  accepted:
-  - just merged it, check when you can
-- category: casual
-  style: casual
-  input: K I'll ping you when it's deployed
-  accepted:
-  - k I'll ping you when it's deployed
-- category: casual
-  style: casual
-  input: Lemme double check that real quick
-  accepted:
-  - lemme double check that real quick
-- category: casual
-  style: casual
-  input: Lol yeah the linter is not happy
-  accepted:
-  - lol yeah the linter is not happy
-- category: casual
-  style: casual
-  input: My bad I forgot to add the tests
-  accepted:
-  - my bad, I forgot to add the tests
-- category: casual
-  style: casual
-  input: Nope haven't looked at it yet
-  accepted:
-  - nope haven't looked at it yet
-  - nope, haven't looked at it yet
-- category: casual
-  style: casual
-  input: Oh man that took way longer than expected
-  accepted:
-  - oh man that took way longer than expected
-  - oh man, that took way longer than expected
-- category: casual
-  style: casual
-  input: Oof yeah that's gonna be a big diff
-  accepted:
-  - oof yeah that's gonna be a big diff
-- category: casual
-  style: casual
-  input: Prolly should add a test for that edge case
-  accepted:
-  - prolly should add a test for that edge case
-- category: casual
-  style: casual
-  input: Same here I can't reproduce it locally either
-  accepted:
-  - same here, I can't reproduce it locally either
-  - same here I can't reproduce it locally either
-- category: casual
-  style: casual
-  input: Sweet the CI is green now
-  accepted:
-  - sweet the CI is green now
-  - sweet, the CI is green now
-- category: casual
-  style: casual
-  input: Thanks I'll cherry pick that into the release branch
-  accepted:
-  - thanks I'll cherry pick that into the release branch
-  - thanks, I'll cherry pick that into the release branch
-- category: casual
-  style: casual
-  input: True we should probably bump the version too
-  accepted:
-  - true we should probably bump the version too
-  - true, we should probably bump the version too
-- category: casual
-  style: casual
-  input: Ugh another flaky test
-  accepted:
-  - ugh another flaky test
-- category: casual
-  style: casual
-  input: Word I'll take care of the migration
-  accepted:
-  - word I'll take care of the migration
-- category: casual
-  style: casual
-  input: Yeah no worries take your time on the review
-  accepted:
-  - yeah no worries, take your time on the review
-- category: casual
-  style: casual
-  input: Yo the hot fix is ready for review
-  accepted:
-  - yo the hot fix is ready for review
-- category: casual
-  style: casual
-  input: Actually wait I think the config is wrong
-  accepted:
-  - actually wait I think the config is wrong
-  - actually wait, I think the config is wrong
-- category: casual
-  style: casual
-  input: Tbh I'm not sure what the expected behavior is
-  accepted:
-  - tbh I'm not sure what the expected behavior is
-- category: casual
-  style: casual
-  input: Idk maybe ask the platform team about that
-  accepted:
-  - idk maybe ask the platform team about that
-- category: casual
-  style: casual
-  preceding_text: hey just wanted to let you know
-  input: the build is green now
-  accepted:
-  - the build is green now
-- category: casual
-  style: casual
-  preceding_text: I was thinking we could
-  input: maybe split this into two PRs
-  accepted:
-  - maybe split this into two PRs
-- category: casual
-  style: casual
-  preceding_text: yeah that makes sense, and
-  input: we should also update the docs
-  accepted:
-  - we should also update the docs
 - category: continuation
   preceding_text: The main concerns are
-  input: latency and the recent spike in error rates
+  input: Latency and the recent spike in error rates.
   accepted:
   - latency and the recent spike in error rates.
 - category: continuation
   preceding_text: I think we should
-  input: consider moving to a microservices architecture
+  input: Consider moving to a microservices architecture.
   accepted:
   - consider moving to a microservices architecture.
 - category: emphasis
-  input: no no no we can't deploy without tests
+  input: No no no we can't deploy without tests.
   accepted:
   - No, no, no, we can't deploy without tests.
 - category: emphasis
-  input: no no that's not right at all
+  input: No no that's not right at all.
   accepted:
   - No, no, that's not right at all.
 - category: emphasis
-  input: please please please review this before end of day
+  input: Please please please review this before end of day.
   accepted:
   - Please, please, please review this before end of day.
 - category: emphasis
-  input: please please fix the build before you leave
+  input: Please please fix the build before you leave.
   accepted:
   - Please, please fix the build before you leave.
 - category: emphasis
-  input: stop stop we need to reconsider
+  input: Stop stop we need to reconsider.
   accepted:
   - Stop, stop, we need to reconsider.
   - Stop, stop. We need to reconsider.
 - category: emphasis
-  input: go go go the window is closing
+  input: Go go go the window is closing.
   accepted:
   - Go, go, go, the window is closing.
   - Go, go, go. The window is closing.
 - category: emphasis
-  input: yes yes that's exactly what we need
+  input: Yes yes that's exactly what we need.
   accepted:
   - Yes, yes, that's exactly what we need.
 - category: emphasis
-  input: wait wait don't close that ticket yet
+  input: Wait wait don't close that ticket yet.
   accepted:
   - Wait, wait, don't close that ticket yet.
 - category: emphasis
-  input: no no I disagree with that estimate
+  input: No no I disagree with that estimate.
   accepted:
   - No, no, I disagree with that estimate.
 - category: emphasis
-  input: yes yes yes let's go with that approach
+  input: Yes yes yes let's go with that approach.
   accepted:
   - Yes, yes, yes, let's go with that approach.
-- category: casual
-  style: casual
-  input: Alright let me check the logs
-  accepted:
-  - alright let me check the logs
-- category: casual
-  style: casual
-  input: Cool thanks for letting me know
-  accepted:
-  - cool thanks for letting me know
-- category: casual
-  style: casual
-  input: Got it I'll take care of it
-  accepted:
-  - got it I'll take care of it
-  - got it, I'll take care of it
-- category: casual
-  style: casual
-  input: Nice that fixed the issue
-  accepted:
-  - nice that fixed the issue
-- category: casual
-  style: casual
-  input: Sure I'll send you the link
-  accepted:
-  - sure I'll send you the link
-- category: casual
-  style: casual
-  input: Thanks for the heads up
-  accepted:
-  - thanks for the heads up
-- category: casual
-  style: casual
-  input: True I didn't think about that
-  accepted:
-  - true I didn't think about that
-  - true, I didn't think about that
-- category: casual
-  style: casual
-  input: Yeah no problem I'll handle it
-  accepted:
-  - yeah no problem I'll handle it
-  - yeah no problem, I'll handle it
-- category: casual
-  style: casual
-  input: Right I'll update the branch
-  accepted:
-  - right I'll update the branch
-  - right, I'll update the branch
-- category: casual
-  style: casual
-  input: Sweet the pipeline is green
-  accepted:
-  - sweet the pipeline is green
-  - sweet, the pipeline is green
 - category: continuation
   preceding_text: The next steps are
-  input: migrate the database and update the config
+  input: Migrate the database and update the config.
   accepted:
   - migrate the database and update the config.
 - category: continuation
   preceding_text: We decided to
-  input: postpone the release until next week
+  input: Postpone the release until next week.
   accepted:
   - postpone the release until next week.
 - category: continuation
   preceding_text: The key issue is
-  input: latency in the auth service
+  input: Latency in the auth service.
   accepted:
   - latency in the auth service.
 - category: continuation
   preceding_text: In summary,
-  input: the migration went smoothly and no data was lost
+  input: The migration went smoothly and no data was lost.
   accepted:
   - the migration went smoothly and no data was lost.
 - category: continuation
   preceding_text: My recommendation is to
-  input: add more replicas and enable auto scaling
+  input: Add more replicas and enable auto scaling.
   accepted:
   - add more replicas and enable auto-scaling.
   - add more replicas and enable auto scaling.
 - category: continuation
   preceding_text: The root cause was
-  input: a race condition in the connection pool
+  input: A race condition in the connection pool.
   accepted:
   - a race condition in the connection pool.
 - category: continuation
   preceding_text: As discussed,
-  input: we will freeze the API for two weeks
+  input: We will freeze the API for two weeks.
   accepted:
   - we will freeze the API for 2 weeks.
   - we will freeze the API for two weeks.
 - category: continuation
   preceding_text: The blocker is
-  input: the vendor hasn't delivered the SDK yet
+  input: The vendor hasn't delivered the SDK yet.
   accepted:
   - the vendor hasn't delivered the SDK yet.
-- category: casual
-  style: casual
-  preceding_text: yeah I think
-  input: we should just revert and try again
-  accepted:
-  - we should just revert and try again
-- category: casual
-  style: casual
-  preceding_text: ok so basically
-  input: the fix is to bump the timeout
-  accepted:
-  - the fix is to bump the timeout
 - category: continuation
   preceding_text: The outcome was
-  input: the team shipped on time
+  input: The team shipped on time.
   accepted:
   - the team shipped on time.
 - category: continuation
   preceding_text: In short,
-  input: the refactor saved us two sprints
+  input: The refactor saved us two sprints.
   accepted:
   - the refactor saved us 2 sprints.
   - the refactor saved us two sprints.
 - category: continuation
   preceding_text: The answer is
-  input: the config was missing a required field
+  input: The config was missing a required field.
   accepted:
   - the config was missing a required field.
 - category: continuation
   preceding_text: The concern is
-  input: the latency spikes during peak hours
+  input: The latency spikes during peak hours.
   accepted:
   - the latency spikes during peak hours.
 - category: continuation
   preceding_text: To summarize,
-  input: the deployment went well and no issues were reported
+  input: The deployment went well and no issues were reported.
   accepted:
   - the deployment went well and no issues were reported.
   - the deployment went well, and no issues were reported.
 - category: continuation
   preceding_text: The update is that
-  input: the vendor finally delivered the SDK
+  input: The vendor finally delivered the SDK.
   accepted:
   - the vendor finally delivered the SDK.
 - category: continuation
   preceding_text: The reason is
-  input: the certificate expired overnight
+  input: The certificate expired overnight.
   accepted:
   - the certificate expired overnight.
 - category: continuation
   preceding_text: The good news is
-  input: the fix is already in staging
+  input: The fix is already in staging.
   accepted:
   - the fix is already in staging.
 - category: continuation
   preceding_text: The PR was merged.
-  input: now we need to update the staging environment
+  input: Now we need to update the staging environment.
   accepted:
   - Now we need to update the staging environment.
 - category: continuation
   preceding_text: The demo went well.
-  input: the client wants to move forward
+  input: The client wants to move forward.
   accepted:
   - The client wants to move forward.
 - category: continuation
   preceding_text: Looks good.
-  input: can you deploy it to production
+  input: Can you deploy it to production.
   accepted:
   - Can you deploy it to production?
 - category: continuation
   preceding_text: All tests passed.
-  input: we are ready to release
+  input: We are ready to release.
   accepted:
   - We are ready to release.
 - category: continuation
   preceding_text: Done.
-  input: moving on to the next ticket
+  input: Moving on to the next ticket.
   accepted:
   - Moving on to the next ticket.
 - category: continuation
   preceding_text: Confirmed.
-  input: the fix resolves the issue
+  input: The fix resolves the issue.
   accepted:
   - The fix resolves the issue.
 - category: continuation
   preceding_text: Thanks for the update.
-  input: I'll loop in the rest of the team
+  input: I'll loop in the rest of the team.
   accepted:
   - I'll loop in the rest of the team.
 - category: continuation
   preceding_text: Got it.
-  input: I'll start on that after lunch
+  input: I'll start on that after lunch.
   accepted:
   - I'll start on that after lunch.
 - category: continuation
   preceding_text: I was going to suggest
-  input: we use a feature flag for the rollout
+  input: We use a feature flag for the rollout.
   accepted:
   - we use a feature flag for the rollout.
 - category: continuation
   preceding_text: The plan is to
-  input: migrate everything to the new cluster by Friday
+  input: Migrate everything to the new cluster by Friday.
   accepted:
   - migrate everything to the new cluster by Friday.
 - category: continuation
   preceding_text: What we need is
-  input: a better monitoring setup
+  input: A better monitoring setup.
   accepted:
   - a better monitoring setup.
 - category: continuation
   preceding_text: The team agreed to
-  input: skip the retro this week
+  input: Skip the retro this week.
   accepted:
   - skip the retro this week.
 - category: continuation
   preceding_text: I wanted to mention that
-  input: the vendor contract expires next month
+  input: The vendor contract expires next month.
   accepted:
   - the vendor contract expires next month.
 - category: continuation
   preceding_text: One option would be to
-  input: run both services in parallel during the transition
+  input: Run both services in parallel during the transition.
   accepted:
   - run both services in parallel during the transition.
 - category: continuation
   preceding_text: The feedback so far is that
-  input: the new UI is much faster
+  input: The new UI is much faster.
   accepted:
   - the new UI is much faster.
 - category: continuation
   preceding_text: The tests all passed.
-  input: we can merge the PR now
+  input: We can merge the PR now.
   accepted:
   - We can merge the PR now.
 - category: continuation
   preceding_text: I pushed the fix.
-  input: can you verify it on staging
+  input: Can you verify it on staging.
   accepted:
   - Can you verify it on staging?
 - category: continuation
   preceding_text: The rollback is complete.
-  input: no data was lost
+  input: No data was lost.
   accepted:
   - No data was lost.
 - category: continuation
   preceding_text: We shipped on Friday.
-  input: the metrics look stable so far
+  input: The metrics look stable so far.
   accepted:
   - The metrics look stable so far.
 - category: continuation
   preceding_text: That's done.
-  input: next we should update the changelog
+  input: Next we should update the changelog.
   accepted:
   - Next we should update the changelog.
 - category: continuation
   preceding_text: Bug confirmed.
-  input: it only happens on the first request after a cold start
+  input: It only happens on the first request after a cold start.
   accepted:
   - It only happens on the first request after a cold start.
 - category: continuation
   preceding_text: we should talk to
-  input: Sarah about the timeline
+  input: Sarah about the timeline.
   accepted:
   - Sarah about the timeline.
 - category: continuation
   preceding_text: the stack includes
-  input: React and TypeScript on the frontend
+  input: React and TypeScript on the frontend.
   accepted:
   - React and TypeScript on the frontend.
 - category: continuation
   preceding_text: I'll ask
-  input: AWS support about the quota increase
+  input: AWS support about the quota increase.
   accepted:
   - AWS support about the quota increase.
 - category: continuation
   preceding_text: The migration is done.
-  input: now we need to verify the data
+  input: Now we need to verify the data.
   accepted:
   - Now we need to verify the data.
 - category: continuation
   preceding_text: Fixed the bug.
-  input: the deploy should go through now
+  input: The deploy should go through now.
   accepted:
   - The deploy should go through now.
 - category: continuation
   preceding_text: Sounds good.
-  input: I'll send the invite
+  input: I'll send the invite.
   accepted:
   - I'll send the invite.
-- category: homophone
-  input: who's idea was it to deploy on Friday
-  accepted:
-  - Whose idea was it to deploy on Friday?
-- category: homophone
-  input: who's code broke the build
-  accepted:
-  - Whose code broke the build?
-- category: homophone
-  input: who's turn is it to review the PR
-  accepted:
-  - Whose turn is it to review the PR?
-- category: homophone
-  input: your going to need a bigger instance
-  accepted:
-  - You're going to need a bigger instance.
-- category: homophone
-  input: your the best person for this task
-  accepted:
-  - You're the best person for this task.
-- category: homophone
-  input: let me know when your done with the review
-  accepted:
-  - Let me know when you're done with the review.
-- category: homophone
-  input: I think your right about the deadline
-  accepted:
-  - I think you're right about the deadline.
-- category: homophone
-  input: check if your config is correct
-  accepted:
-  - Check if your config is correct.
 - category: number
-  input: the subscription is fourteen dollars and ninety nine cents per month
+  input: The subscription is fourteen dollars and ninety nine cents per month.
   accepted:
   - The subscription is $14.99 per month.
 - category: number
-  input: it costs twenty nine dollars and fifty cents
+  input: It costs twenty nine dollars and fifty cents.
   accepted:
   - It costs $29.50.
 - category: number
-  input: the total comes to sixty seven dollars and eighty cents
+  input: The total comes to sixty seven dollars and eighty cents.
   accepted:
   - The total comes to $67.80.
 - category: number
-  input: each license is nine dollars and ninety nine cents
+  input: Each license is nine dollars and ninety nine cents.
   accepted:
   - Each license is $9.99.
 - category: number
-  input: the fee is forty five dollars and twenty five cents
+  input: The fee is forty five dollars and twenty five cents.
   accepted:
   - The fee is $45.25.
 - category: number
-  input: we saved twelve dollars and thirty cents per unit
+  input: We saved twelve dollars and thirty cents per unit.
   accepted:
   - We saved $12.30 per unit.
 - category: preserve-long
-  input: so the thing is um we tried three different approaches the first one worked but was too slow the second one had bugs and the third one is what we ended up shipping
+  input: So the thing is um we tried three different approaches the first one worked
+    but was too slow the second one had bugs and the third one is what we ended up
+    shipping.
   accepted:
-  - The thing is, we tried 3 different approaches. The first one worked but was too slow. The second one had bugs. The third one is what we ended up shipping.
+  - The thing is, we tried 3 different approaches. The first one worked but was too
+    slow. The second one had bugs. The third one is what we ended up shipping.
 - category: preserve-long
-  input: a lot of what we built last quarter is um actually still relevant the auth system works fine the API layer needs refactoring and the frontend is ready for the redesign
+  input: A lot of what we built last quarter is um actually still relevant the auth
+    system works fine the API layer needs refactoring and the frontend is ready for
+    the redesign.
   accepted:
-  - A lot of what we built last quarter is actually still relevant. The auth system works fine. The API layer needs refactoring. The frontend is ready for the redesign.
+  - A lot of what we built last quarter is actually still relevant. The auth system
+    works fine. The API layer needs refactoring. The frontend is ready for the redesign.
 - category: preserve-long
-  input: before we move on I want to mention that the tests are passing the deployment pipeline is green and we got sign off from the security team so we are good to merge
+  input: Before we move on I want to mention that the tests are passing the deployment
+    pipeline is green and we got sign off from the security team so we are good to
+    merge.
   accepted:
-  - Before we move on, I want to mention that the tests are passing, the deployment pipeline is green, and we got sign-off from the security team. So we are good to merge.
+  - Before we move on, I want to mention that the tests are passing, the deployment
+    pipeline is green, and we got sign-off from the security team. So we are good
+    to merge.
 - category: preserve-long
-  input: um the main concern is latency the P99 is above two hundred milliseconds the cache hit rate dropped to sixty percent and users are reporting timeouts on the dashboard
+  input: Um the main concern is latency the P99 is above two hundred milliseconds
+    the cache hit rate dropped to sixty percent and users are reporting timeouts on
+    the dashboard.
   accepted:
-  - The main concern is latency. The P99 is above 200 milliseconds. The cache hit rate dropped to 60%. Users are reporting timeouts on the dashboard.
+  - The main concern is latency. The P99 is above 200 milliseconds. The cache hit
+    rate dropped to 60%. Users are reporting timeouts on the dashboard.
 - category: preserve-long
-  input: okay so here is the context we migrated the database on Friday the migration went smoothly but we noticed some slow queries on Monday and by Tuesday the alerts started firing
+  input: Okay so here is the context we migrated the database on Friday the migration
+    went smoothly but we noticed some slow queries on Monday and by Tuesday the alerts
+    started firing.
   accepted:
-  - Here is the context. We migrated the database on Friday. The migration went smoothly, but we noticed some slow queries on Monday, and by Tuesday the alerts started firing.
+  - Here is the context. We migrated the database on Friday. The migration went smoothly,
+    but we noticed some slow queries on Monday, and by Tuesday the alerts started
+    firing.
 - category: preserve-long
-  input: I think the approach is solid the design doc covers the edge cases the implementation plan is realistic and the timeline accounts for testing so I would say we are ready to start
+  input: I think the approach is solid the design doc covers the edge cases the implementation
+    plan is realistic and the timeline accounts for testing so I would say we are
+    ready to start.
   accepted:
-  - I think the approach is solid. The design doc covers the edge cases. The implementation plan is realistic. The timeline accounts for testing. So I would say we are ready to start.
+  - I think the approach is solid. The design doc covers the edge cases. The implementation
+    plan is realistic. The timeline accounts for testing. So I would say we are ready
+    to start.
 - category: preserve-long
-  input: the results from the benchmark are um really promising the throughput increased by forty percent memory usage dropped by twenty percent and the cold start time went from eight seconds to under
-    two
+  input: The results from the benchmark are um really promising the throughput increased
+    by forty percent memory usage dropped by twenty percent and the cold start time
+    went from eight seconds to under two.
   accepted:
-  - The results from the benchmark are really promising. The throughput increased by 40%. Memory usage dropped by 20%. The cold start time went from 8 seconds to under 2.
+  - The results from the benchmark are really promising. The throughput increased
+    by 40%. Memory usage dropped by 20%. The cold start time went from 8 seconds to
+    under 2.
 - category: preserve-long
-  input: before we do that um we should consider whether the current architecture can handle the load the existing service handles about ten thousand requests per second and the new feature would roughly
-    double that
+  input: Before we do that um we should consider whether the current architecture
+    can handle the load the existing service handles about ten thousand requests per
+    second and the new feature would roughly double that.
   accepted:
-  - Before we do that, we should consider whether the current architecture can handle the load. The existing service handles about 10,000 requests per second, and the new feature would roughly double that.
+  - Before we do that, we should consider whether the current architecture can handle
+    the load. The existing service handles about 10,000 requests per second, and the
+    new feature would roughly double that.
 - category: preserve-long
-  input: a few things to note um the license expires next month the vendor has not responded to our renewal request and we do not have a fallback option so this needs to be escalated
+  input: A few things to note um the license expires next month the vendor has not
+    responded to our renewal request and we do not have a fallback option so this
+    needs to be escalated.
   accepted:
-  - A few things to note. The license expires next month. The vendor has not responded to our renewal request, and we do not have a fallback option. So this needs to be escalated.
+  - A few things to note. The license expires next month. The vendor has not responded
+    to our renewal request, and we do not have a fallback option. So this needs to
+    be escalated.
 - category: preserve-long
-  input: what happened was the deploy script ran fine but the health check timed out so the rollback triggered automatically and then we found out the health check endpoint had a bug in it
+  input: What happened was the deploy script ran fine but the health check timed out
+    so the rollback triggered automatically and then we found out the health check
+    endpoint had a bug in it.
   accepted:
-  - What happened was the deploy script ran fine, but the health check timed out, so the rollback triggered automatically. Then we found out the health check endpoint had a bug in it.
+  - What happened was the deploy script ran fine, but the health check timed out,
+    so the rollback triggered automatically. Then we found out the health check endpoint
+    had a bug in it.
 - category: preserve-long
-  input: the way I see it we have two options either we rewrite the module from scratch which would take about three weeks or we patch the existing code and live with some tech debt for now I think the
-    patch makes more sense given the deadline
+  input: The way I see it we have two options either we rewrite the module from scratch
+    which would take about three weeks or we patch the existing code and live with
+    some tech debt for now I think the patch makes more sense given the deadline.
   accepted:
-  - The way I see it, we have 2 options. Either we rewrite the module from scratch, which would take about 3 weeks, or we patch the existing code and live with some tech debt for now. I think the patch
-    makes more sense given the deadline.
+  - The way I see it, we have 2 options. Either we rewrite the module from scratch,
+    which would take about 3 weeks, or we patch the existing code and live with some
+    tech debt for now. I think the patch makes more sense given the deadline.
 - category: preserve-long
-  input: yeah so I had a call with the client this morning they are happy with the progress but they want us to add a dark mode option and they also asked about the mobile app timeline
+  input: Yeah so I had a call with the client this morning they are happy with the
+    progress but they want us to add a dark mode option and they also asked about
+    the mobile app timeline.
   accepted:
-  - I had a call with the client this morning. They are happy with the progress, but they want us to add a dark mode option. They also asked about the mobile app timeline.
+  - I had a call with the client this morning. They are happy with the progress, but
+    they want us to add a dark mode option. They also asked about the mobile app timeline.
 - category: preserve-long
-  input: um a couple of updates from my side I finished the PR for the auth flow I started looking into the caching issue and I also reviewed Sarahs pull request on the dashboard
+  input: Um a couple of updates from my side I finished the PR for the auth flow I
+    started looking into the caching issue and I also reviewed Sarahs pull request
+    on the dashboard.
   accepted:
-  - A couple of updates from my side. I finished the PR for the auth flow. I started looking into the caching issue. I also reviewed Sarah's pull request on the dashboard.
+  - A couple of updates from my side. I finished the PR for the auth flow. I started
+    looking into the caching issue. I also reviewed Sarah's pull request on the dashboard.
 - category: preserve-long
-  input: so I was looking at the metrics from last week and the conversion rate is up by twelve percent the bounce rate dropped and the average session duration increased by about thirty seconds which is
-    a good sign
+  input: So I was looking at the metrics from last week and the conversion rate is
+    up by twelve percent the bounce rate dropped and the average session duration
+    increased by about thirty seconds which is a good sign.
   accepted:
-  - I was looking at the metrics from last week. The conversion rate is up by 12%. The bounce rate dropped. The average session duration increased by about 30 seconds, which is a good sign.
+  - I was looking at the metrics from last week. The conversion rate is up by 12%.
+    The bounce rate dropped. The average session duration increased by about 30 seconds,
+    which is a good sign.
 - category: preserve-long
-  input: the short version is we tried to upgrade the cluster on Thursday it broke two downstream services we rolled back within an hour and nobody lost data but we need a better migration plan
+  input: The short version is we tried to upgrade the cluster on Thursday it broke
+    two downstream services we rolled back within an hour and nobody lost data but
+    we need a better migration plan.
   accepted:
-  - The short version is we tried to upgrade the cluster on Thursday. It broke 2 downstream services. We rolled back within 1 hour, and nobody lost data, but we need a better migration plan.
+  - The short version is we tried to upgrade the cluster on Thursday. It broke 2 downstream
+    services. We rolled back within 1 hour, and nobody lost data, but we need a better
+    migration plan.
 - category: preserve-long
-  input: I want to flag something the CI pipeline has been flaky for the past week about one in five runs fails with a timeout and it is slowing down the whole team we should prioritize fixing it
+  input: I want to flag something the CI pipeline has been flaky for the past week
+    about one in five runs fails with a timeout and it is slowing down the whole team
+    we should prioritize fixing it.
   accepted:
-  - I want to flag something. The CI pipeline has been flaky for the past week. About 1 in 5 runs fails with a timeout, and it is slowing down the whole team. We should prioritize fixing it.
+  - I want to flag something. The CI pipeline has been flaky for the past week. About
+    1 in 5 runs fails with a timeout, and it is slowing down the whole team. We should
+    prioritize fixing it.
 - category: preserve-long
-  input: here is my take on it the architecture is fine for now but once we hit fifty thousand concurrent users we will need to shard the database and add a caching layer that is probably a Q3 project
+  input: Here is my take on it the architecture is fine for now but once we hit fifty
+    thousand concurrent users we will need to shard the database and add a caching
+    layer that is probably a Q3 project.
   accepted:
-  - Here is my take on it. The architecture is fine for now, but once we hit 50,000 concurrent users, we will need to shard the database and add a caching layer. That is probably a Q3 project.
+  - Here is my take on it. The architecture is fine for now, but once we hit 50,000
+    concurrent users, we will need to shard the database and add a caching layer.
+    That is probably a Q3 project.
 - category: backtrack
-  input: The server is in us-east. No wait it's in us-west. Check the config file for the exact region.
+  input: The server is in us-east. No wait it's in us-west. Check the config file
+    for the exact region.
   accepted:
   - The server is in us-west. Check the config file for the exact region.
 - category: backtrack
-  input: We're deploying on Thursday. No wait Friday morning. Make sure the team is ready.
+  input: We're deploying on Thursday. No wait Friday morning. Make sure the team is
+    ready.
   accepted:
   - We're deploying on Friday morning. Make sure the team is ready.
 - category: backtrack
@@ -4938,7 +4365,8 @@
   accepted:
   - We have 4 replicas. We added one after the last outage.
 - category: backtrack
-  input: Send it to the marketing team. No actually send it to engineering. They need to review it first.
+  input: Send it to the marketing team. No actually send it to engineering. They need
+    to review it first.
   accepted:
   - Send it to engineering. They need to review it first.
 - category: backtrack
@@ -4946,18 +4374,117 @@
   accepted:
   - The retry limit is 5. We bumped it up after the network issues.
 - category: backtrack
-  input: The release is scheduled for Monday. No actually Tuesday. We pushed it back a day.
+  input: The release is scheduled for Monday. No actually Tuesday. We pushed it back
+    a day.
   accepted:
   - The release is scheduled for Tuesday. We pushed it back a day.
-- category: split-word
-  input: The server is completely. Overloaded and we need to scale up immediately.
+- category: dictated-punctuation
+  input: Send the report period.
   accepted:
-  - The server is completely overloaded and we need to scale up immediately.
-- category: split-word
-  input: The deployment finished. Successfully and all health checks are passing.
+  - Send the report.
+- category: dictated-punctuation
+  input: The meeting is at 3 PM period.
   accepted:
-  - The deployment finished successfully and all health checks are passing.
-- category: split-word
-  input: The cache is currently. Disabled because we found a consistency bug.
+  - The meeting is at 3 PM.
+- category: dictated-punctuation
+  input: Fix the bug exclamation point.
   accepted:
-  - The cache is currently disabled because we found a consistency bug.
+  - Fix the bug!
+- category: dictated-punctuation
+  input: Fix the bug exclamation mark.
+  accepted:
+  - Fix the bug!
+- category: dictated-punctuation
+  input: The items are colon apples, bananas, and oranges.
+  accepted:
+  - 'The items are: apples, bananas, and oranges.'
+- category: dictated-punctuation
+  input: Are you sure question mark.
+  accepted:
+  - Are you sure?
+- category: dictated-punctuation
+  input: Wait what question mark.
+  accepted:
+  - Wait, what?
+- category: dictated-punctuation
+  input: The billing period ends on Friday.
+  accepted:
+  - The billing period ends on Friday.
+- category: dictated-punctuation
+  input: Use a comma when separating clauses.
+  accepted:
+  - Use a comma when separating clauses.
+- category: dictated-punctuation
+  input: The colon cancer screening is scheduled for Monday.
+  accepted:
+  - The colon cancer screening is scheduled for Monday.
+- category: dictated-punctuation
+  input: The Oxford comma is important.
+  accepted:
+  - The Oxford comma is important.
+- category: dictated-punctuation
+  input: She ran the third period of practice.
+  accepted:
+  - She ran the 3rd period of practice.
+- category: dictated-punctuation
+  input: The question mark on the keyboard is broken.
+  accepted:
+  - The question mark on the keyboard is broken.
+- category: paragraph-command
+  input: First item. New paragraph. Second item here.
+  accepted:
+  - 'First item.
+
+
+    Second item here.'
+- category: paragraph-command
+  input: The deadline is Friday. New paragraph. Please update your tickets.
+  accepted:
+  - 'The deadline is Friday.
+
+
+    Please update your tickets.'
+- category: paragraph-command
+  input: Item one. New line. Item two. New line. Item three.
+  accepted:
+  - 'Item one.
+
+    Item two.
+
+    Item three.'
+- category: paragraph-command
+  input: Add a new line at the end of the file.
+  accepted:
+  - Add a new line at the end of the file.
+- category: paragraph-command
+  input: We discussed the new paragraph structure.
+  accepted:
+  - We discussed the new paragraph structure.
+- category: paragraph-command
+  input: Start a new paragraph after the introduction.
+  accepted:
+  - Start a new paragraph after the introduction.
+- category: filler-vs-content
+  input: Yeah I saw the PR and it looks good.
+  accepted:
+  - Yeah, I saw the PR and it looks good.
+- category: filler-vs-content
+  input: Uh yeah I think we should deploy today.
+  accepted:
+  - Yeah, I think we should deploy today.
+- category: filler-vs-content
+  input: Yeah no I don't think that will work.
+  accepted:
+  - Yeah, no, I don't think that will work.
+- category: filler-vs-content
+  input: Okay so yeah the build is passing now.
+  accepted:
+  - Yeah, the build is passing now.
+- category: filler-vs-content
+  input: Um yeah definitely we should do that.
+  accepted:
+  - Yeah, definitely we should do that.
+- category: filler-vs-content
+  input: Right so the issue is with the database.
+  accepted:
+  - The issue is with the database.
