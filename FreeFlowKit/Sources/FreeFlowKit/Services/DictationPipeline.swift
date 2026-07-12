@@ -920,6 +920,9 @@ public actor DictationPipeline: PipelineProviding {
             let text = try await streaming.finishStreaming()
             let result = PolishPipeline.stripTrailingFiller(text)
             Log.debug("[Pipeline] local polished: \"\(result)\"")
+            saveSampleIfCollecting(
+                streaming: streaming, audio: audioBuffer.data,
+                polished: result)
             return result
         } catch {
             Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
@@ -928,6 +931,57 @@ public actor DictationPipeline: PipelineProviding {
             await coordinator.failDictation()
             return nil
         }
+    }
+
+    /// Save audio + structured log when `/tmp/freeflow-collect` exists.
+    private func saveSampleIfCollecting(
+        streaming: StreamingDictationProviding,
+        audio: Data, polished: String
+    ) {
+        let flag = "/tmp/freeflow-collect"
+        guard FileManager.default.fileExists(atPath: flag) else { return }
+
+        let dir = "/tmp/freeflow-samples"
+        try? FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true)
+
+        // Prefer the provider's full polished transcript. With rolling
+        // injection, the returned `polished` holds only the final tail,
+        // so the provider exposes the committed text plus tail.
+        let rawSTT: String
+        var polishedFull = polished
+        if let local = streaming as? LocalStreamingProvider {
+            rawSTT = local.lastRawTranscript
+            if !local.lastPolishedTranscript.isEmpty {
+                polishedFull = local.lastPolishedTranscript
+            }
+        } else {
+            rawSTT = ""
+        }
+
+        // Atomic counter via file count
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir)
+            .filter { $0.hasSuffix(".wav") }) ?? []
+        let n = files.count + 1
+        let tag = String(format: "%03d", n)
+
+        // Save WAV
+        let wav = WAVEncoder.encode(
+            pcmData: audio, sampleRate: 16000, channels: 1,
+            bitsPerSample: 16)
+        let wavPath = "\(dir)/sample-\(tag).wav"
+        try? wav.write(to: URL(fileURLWithPath: wavPath))
+
+        // Structured log line
+        let escaped = { (s: String) -> String in
+            s.replacingOccurrences(of: "\\", with: "\\\\")
+             .replacingOccurrences(of: "\"", with: "\\\"")
+             .replacingOccurrences(of: "\n", with: "\\n")
+        }
+        let json = "{\"n\":\(n)"
+            + ",\"stt\":\"\(escaped(rawSTT))\""
+            + ",\"polished\":\"\(escaped(polishedFull))\"}"
+        Log.debug("[SAMPLE] \(json)")
     }
 
     // MARK: - Cloud Dictation
