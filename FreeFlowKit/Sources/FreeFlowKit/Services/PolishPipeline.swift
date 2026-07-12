@@ -1514,32 +1514,7 @@ public enum PolishPipeline {
             return preprocessed
         }
 
-        let inputWords = contentWords(preprocessed)
-        guard inputWords.count >= 3 else { return nil }
-
-        let outputWords = contentWords(polished)
-        let shared = inputWords.intersection(outputWords)
-        let overlap = Double(shared.count) / Double(inputWords.count)
-
-        if overlap < 0.3 {
-            Log.debug(
-                "[HALLUCINATION_GUARD] overlap=\(String(format: "%.0f", overlap * 100))%"
-                + " shared=\(shared.count)/\(inputWords.count) words"
-                + " — falling back to preprocessed"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
-            return preprocessed
-        }
         return nil
-    }
-
-    /// Extract lowercased content words (3+ characters, letters only).
-    private static func contentWords(_ text: String) -> Set<String> {
-        Set(
-            text.lowercased()
-                .components(separatedBy: .alphanumerics.inverted)
-                .filter { $0.count >= 3 }
-        )
     }
 
     /// Count sentence-ending punctuation marks in text.
