@@ -612,6 +612,10 @@ public enum PolishPipeline {
             of: " *\u{00b6} *", with: "\n\n", options: .regularExpression)
         result = result.replacingOccurrences(
             of: " *\u{21b5} *", with: "\n", options: .regularExpression)
+        // Drop a stray period a line break inherited from "new paragraph"
+        // that followed a sentence period in the input.
+        result = result.replacingOccurrences(
+            of: "\n( *\\.)+ *", with: "\n", options: .regularExpression)
 
         // Clean up whitespace around symbols that were inside tags.
         // Punctuation that attaches to preceding word.
@@ -987,25 +991,12 @@ public enum PolishPipeline {
             return normalizeFormatting(stripped, casual: casual)
         }
 
-        var prompt = systemPromptQwen
-        if let tone {
-            prompt += "\nStyle: \(tone)"
-        }
-        if let preceding = precedingText, !preceding.isEmpty {
-            let suffix = preceding.count > 80
-                ? String(preceding.suffix(80))
-                : preceding
-            prompt += "\nPreceding text: \(suffix)"
-            Log.debug("[PolishPipeline] preceding: \"\(suffix)\"")
-        }
-
         let noPreceding = precedingText == nil || precedingText!.isEmpty
 
         do {
-            let polished = try await chatClient.complete(
-                model: model,
-                systemPrompt: prompt,
-                userPrompt: stripped)
+            let polished = try await polishThroughModel(
+                stripped, chatClient: chatClient, model: model,
+                tone: tone, precedingText: precedingText)
             if polished.isEmpty {
                 return normalizeFormatting(stripped, casual: casual)
             }
@@ -1515,6 +1506,45 @@ public enum PolishPipeline {
         }
 
         return nil
+    }
+
+    /// Send preprocessed text through the model, dropping the preceding
+    /// context for a long, mostly-unpunctuated run — with that context
+    /// the model summarizes such a run and drops content, without it the
+    /// content is preserved. Returns the raw model output, before the
+    /// echo/hallucination/truncation guards.
+    private static func polishThroughModel(
+        _ stripped: String, chatClient: any PolishChatClient, model: String,
+        tone: String?, precedingText: String?
+    ) async throws -> String {
+        // A long, mostly-unpunctuated run makes the model summarize and
+        // drop content — but only when it also has preceding context.
+        // Drop the preceding for such input so it preserves what the user
+        // said. Short input keeps its context for casing continuity.
+        let wordCount = stripped.split(separator: " ").count
+        let longRun = wordCount > 30 && countSentences(stripped) <= 1
+        let prompt = buildPolishPrompt(
+            tone: tone, precedingText: longRun ? nil : precedingText)
+        return try await chatClient.complete(
+            model: model, systemPrompt: prompt, userPrompt: stripped)
+    }
+
+    /// Build the model system prompt with optional style and preceding
+    /// context lines.
+    private static func buildPolishPrompt(
+        tone: String?, precedingText: String?
+    ) -> String {
+        var prompt = systemPromptQwen
+        if let tone {
+            prompt += "\nStyle: \(tone)"
+        }
+        if let preceding = precedingText, !preceding.isEmpty {
+            let suffix = preceding.count > 80
+                ? String(preceding.suffix(80)) : preceding
+            prompt += "\nPreceding text: \(suffix)"
+            Log.debug("[PolishPipeline] preceding: \"\(suffix)\"")
+        }
+        return prompt
     }
 
     /// Count sentence-ending punctuation marks in text.
