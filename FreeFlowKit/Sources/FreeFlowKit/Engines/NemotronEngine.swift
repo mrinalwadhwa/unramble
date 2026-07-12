@@ -653,4 +653,264 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         }
         return samples
     }
+
+    /// Detokenize RNNT output IDs to text.
+    fileprivate func detokenize(_ tokens: [Int], vocab: [String]) -> String {
+        tokens
+            .filter { $0 >= 0 && $0 < vocab.count }
+            .map { vocab[$0] }
+            .joined()
+            .replacingOccurrences(of: "\u{2581}", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+    }
+}
+
+// MARK: - Incremental Streaming
+
+/// Mutable state for an incremental Nemotron transcription session.
+///
+/// Carries the encoder and decoder streaming caches across audio chunks
+/// so a long utterance is transcribed continuously, instead of being
+/// re-processed in fixed windows with the caches reset. Create one with
+/// `NemotronEngine.makeStreamingState()`, feed audio with
+/// `NemotronEngine.feed(_:into:)`, and read the running transcript with
+/// `NemotronEngine.transcript(_:)`.
+public final class NemotronStreamingState: @unchecked Sendable {
+    fileprivate var cacheChannel: MLMultiArray
+    fileprivate var cacheTime: MLMultiArray
+    fileprivate var cacheLen: MLMultiArray
+    fileprivate var hState: MLMultiArray
+    fileprivate var cState: MLMultiArray
+    fileprivate var decoderOut: MLMultiArray
+    fileprivate var lastToken: Int
+    /// Last `preEncodeCache` mel frames of the previous chunk, kept as
+    /// left context for the next chunk's encoder input.
+    fileprivate var melCache: MLMultiArray?
+    fileprivate var tokens: [Int] = []
+    /// Audio samples buffered below one full chunk.
+    fileprivate var pending: [Float] = []
+
+    fileprivate init(
+        cacheChannel: MLMultiArray, cacheTime: MLMultiArray,
+        cacheLen: MLMultiArray, hState: MLMultiArray, cState: MLMultiArray,
+        decoderOut: MLMultiArray, lastToken: Int
+    ) {
+        self.cacheChannel = cacheChannel
+        self.cacheTime = cacheTime
+        self.cacheLen = cacheLen
+        self.hState = hState
+        self.cState = cState
+        self.decoderOut = decoderOut
+        self.lastToken = lastToken
+    }
+}
+
+extension NemotronEngine {
+
+    /// Samples per streaming chunk: `chunkMelFrames` × 10ms stride.
+    static let chunkSamples = chunkMelFrames * 160  // 56 * 160 = 8960
+
+    /// Open a new incremental streaming session. Requires the models to
+    /// be loaded.
+    public func makeStreamingState() throws -> NemotronStreamingState {
+        guard isReady else { throw LocalModelError.modelNotLoaded }
+        let dec = lock.withLock { decoder! }
+
+        let cacheChannel = try zeroArray(shape: Self.cacheChannelShape)
+        let cacheTime = try zeroArray(shape: Self.cacheTimeShape)
+        let cacheLen = try zeroArray(shape: [1], dataType: .int32)
+        let decoderShape: [NSNumber] = [
+            Self.decoderLayers as NSNumber, 1,
+            Self.decoderHidden as NSNumber,
+        ]
+        let hState = try zeroArray(shape: decoderShape)
+        let cState = try zeroArray(shape: decoderShape)
+        let (decoderOut, _, _) = try runDecoder(
+            decoder: dec, token: Self.blankID,
+            hState: hState, cState: cState)
+
+        return NemotronStreamingState(
+            cacheChannel: cacheChannel, cacheTime: cacheTime,
+            cacheLen: cacheLen, hState: hState, cState: cState,
+            decoderOut: decoderOut, lastToken: Self.blankID)
+    }
+
+    /// Feed audio samples. Complete chunks are transcribed immediately;
+    /// a partial remainder is buffered for the next call or `finish`.
+    public func feed(
+        _ samples: [Float], into state: NemotronStreamingState
+    ) throws {
+        guard isReady else { throw LocalModelError.modelNotLoaded }
+        state.pending.append(contentsOf: samples)
+        while state.pending.count >= Self.chunkSamples {
+            let chunk = Array(state.pending.prefix(Self.chunkSamples))
+            state.pending.removeFirst(Self.chunkSamples)
+            try processStreamingChunk(chunk, state: state)
+        }
+    }
+
+    /// Flush any buffered remainder (zero-padded to a full chunk) and
+    /// return the final transcript.
+    public func finishStreaming(
+        _ state: NemotronStreamingState
+    ) throws -> String {
+        guard isReady else { throw LocalModelError.modelNotLoaded }
+        if !state.pending.isEmpty {
+            var chunk = state.pending
+            state.pending.removeAll()
+            if chunk.count < Self.chunkSamples {
+                chunk.append(contentsOf: [Float](
+                    repeating: 0, count: Self.chunkSamples - chunk.count))
+            }
+            try processStreamingChunk(chunk, state: state)
+        }
+        return transcript(state)
+    }
+
+    /// The running transcript for everything committed so far.
+    public func transcript(_ state: NemotronStreamingState) -> String {
+        let vocab = lock.withLock { vocabulary! }
+        return detokenize(state.tokens, vocab: vocab)
+    }
+
+    /// Transcribe a complete WAV through the streaming path in one call.
+    /// Equivalent to feeding the audio incrementally, since chunking is
+    /// driven by the internal buffer, not the call boundaries.
+    public func transcribeStreaming(audio: Data) throws -> String {
+        guard isReady else { throw LocalModelError.modelNotLoaded }
+        let samples = try decodeWAV(audio)
+        let state = try makeStreamingState()
+        try feed(samples, into: state)
+        return try finishStreaming(state)
+    }
+
+    // MARK: - Chunk Processing
+
+    private func processStreamingChunk(
+        _ samples: [Float], state: NemotronStreamingState
+    ) throws {
+        let (prep, enc, dec, jnt) = lock.withLock {
+            (preprocessor!, encoder!, decoder!, joint!)
+        }
+
+        let (chunkMel, melFrames) = try runPreprocessor(
+            prep, samples: samples)
+
+        let inputMel = try buildStreamingMelInput(
+            chunkMel: chunkMel, chunkFrames: melFrames,
+            melCache: state.melCache)
+        state.melCache = try extractMelTail(
+            chunkMel, chunkFrames: melFrames)
+
+        let melLen = try MLMultiArray(shape: [1], dataType: .int32)
+        melLen[0] = NSNumber(value: Int32(Self.totalMelFrames))
+
+        let encInput = try MLDictionaryFeatureProvider(dictionary: [
+            "mel": MLFeatureValue(multiArray: inputMel),
+            "mel_length": MLFeatureValue(multiArray: melLen),
+            "cache_channel": MLFeatureValue(multiArray: state.cacheChannel),
+            "cache_time": MLFeatureValue(multiArray: state.cacheTime),
+            "cache_len": MLFeatureValue(multiArray: state.cacheLen),
+        ])
+        let encOutput = try enc.prediction(from: encInput)
+
+        let encoded = encOutput.featureValue(
+            for: "encoded")!.multiArrayValue!
+        let encodedLen = encOutput.featureValue(
+            for: "encoded_length")!.multiArrayValue!
+        state.cacheChannel = encOutput.featureValue(
+            for: "cache_channel_out")!.multiArrayValue!
+        state.cacheTime = encOutput.featureValue(
+            for: "cache_time_out")!.multiArrayValue!
+        state.cacheLen = encOutput.featureValue(
+            for: "cache_len_out")!.multiArrayValue!
+
+        let numFrames = encodedLen[0].intValue
+
+        var decoderOut = state.decoderOut
+        var hState = state.hState
+        var cState = state.cState
+        var lastToken = state.lastToken
+        let tokens = try rnntDecode(
+            encoded: encoded, numFrames: numFrames,
+            decoder: dec, joint: jnt,
+            decoderOut: &decoderOut, hState: &hState,
+            cState: &cState, lastToken: &lastToken)
+        state.decoderOut = decoderOut
+        state.hState = hState
+        state.cState = cState
+        state.lastToken = lastToken
+        state.tokens.append(contentsOf: tokens)
+    }
+
+    /// Build the `[1, melBins, totalMelFrames]` encoder input: the
+    /// previous chunk's `preEncodeCache` mel frames (or zeros on the
+    /// first chunk) followed by this chunk's mel frames.
+    private func buildStreamingMelInput(
+        chunkMel: MLMultiArray, chunkFrames: Int, melCache: MLMultiArray?
+    ) throws -> MLMultiArray {
+        let result = try zeroArray(shape: [
+            1, Self.melBins as NSNumber, Self.totalMelFrames as NSNumber,
+        ])
+        if let melCache {
+            copyMelFrames(
+                from: melCache, srcStart: 0, count: Self.preEncodeCache,
+                to: result, dstStart: 0)
+        }
+        let n = min(chunkFrames, Self.chunkMelFrames)
+        copyMelFrames(
+            from: chunkMel, srcStart: 0, count: n,
+            to: result, dstStart: Self.preEncodeCache)
+        return result
+    }
+
+    /// Extract the last `preEncodeCache` mel frames of a chunk as a
+    /// float32 `[1, melBins, preEncodeCache]` array for the next chunk.
+    private func extractMelTail(
+        _ chunkMel: MLMultiArray, chunkFrames: Int
+    ) throws -> MLMultiArray {
+        let result = try zeroArray(shape: [
+            1, Self.melBins as NSNumber, Self.preEncodeCache as NSNumber,
+        ])
+        let n = min(chunkFrames, Self.preEncodeCache)
+        let srcStart = max(0, chunkFrames - Self.preEncodeCache)
+        copyMelFrames(
+            from: chunkMel, srcStart: srcStart, count: n,
+            to: result, dstStart: 0)
+        return result
+    }
+
+    /// Copy `count` mel frames between arrays, converting float16 to
+    /// float32. The destination is assumed float32.
+    private func copyMelFrames(
+        from src: MLMultiArray, srcStart: Int, count: Int,
+        to dst: MLMultiArray, dstStart: Int
+    ) {
+        let srcStrides = src.strides.map { $0.intValue }
+        let dstStrides = dst.strides.map { $0.intValue }
+        let dstPtr = dst.dataPointer.assumingMemoryBound(to: Float.self)
+        if src.dataType == .float16 {
+            let srcPtr = src.dataPointer.assumingMemoryBound(to: UInt16.self)
+            for bin in 0..<Self.melBins {
+                for f in 0..<count {
+                    let srcIdx = bin * srcStrides[1]
+                        + (srcStart + f) * srcStrides[2]
+                    let dstIdx = bin * dstStrides[1]
+                        + (dstStart + f) * dstStrides[2]
+                    dstPtr[dstIdx] = float16ToFloat32(srcPtr[srcIdx])
+                }
+            }
+        } else {
+            let srcPtr = src.dataPointer.assumingMemoryBound(to: Float.self)
+            for bin in 0..<Self.melBins {
+                for f in 0..<count {
+                    let srcIdx = bin * srcStrides[1]
+                        + (srcStart + f) * srcStrides[2]
+                    let dstIdx = bin * dstStrides[1]
+                        + (dstStart + f) * dstStrides[2]
+                    dstPtr[dstIdx] = srcPtr[srcIdx]
+                }
+            }
+        }
+    }
 }
