@@ -27,6 +27,11 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private let polishModel: String
     private let cycleInterval: TimeInterval
 
+    /// The STT engine when it supports incremental streaming. When set,
+    /// each cycle feeds only new audio instead of re-transcribing all of
+    /// it, and finish only flushes the pending tail.
+    private let incremental: NemotronEngine?
+
     // MARK: - State (guarded by lock)
 
     private let lock = NSLock()
@@ -44,6 +49,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
     /// Tracks which sentences have stabilized and been committed.
     private var commitTracker = CommitTracker()
+
+    /// Incremental transcription session, when the engine supports it.
+    private var streamingState: NemotronStreamingState?
+
+    /// Bytes of accumulated audio already fed to the streaming session.
+    private var fedBytes = 0
 
     /// Accumulated polished text for all committed sentences. Used as
     /// preceding context for later chunks and as the full result when no
@@ -74,6 +85,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         self.polishChatClient = polishChatClient
         self.polishModel = polishModel
         self.cycleInterval = cycleInterval
+        self.incremental = sttEngine as? NemotronEngine
     }
 
     // MARK: - StreamingDictationProviding
@@ -97,6 +109,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             try await sttEngine.load()
             Log.debug("[LocalStreaming] STT engine loaded")
         }
+        let newState = try incremental?.makeStreamingState()
         lock.withLock {
             accumulatedAudio = Data()
             currentContext = context
@@ -106,6 +119,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             lastPolishedTranscript = ""
             didEmitChunks = false
             finishing = false
+            streamingState = newState
+            fedBytes = 0
         }
 
         backgroundTask = Task.detached(priority: .userInitiated) { [weak self] in
@@ -133,11 +148,27 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             return rolling ? "" : committedSoFar
         }
 
-        // Final authoritative transcription.
-        let wav = WAVEncoder.encode(
-            pcmData: audio, sampleRate: 16000, channels: 1, bitsPerSample: 16)
+        // Final transcription. With incremental streaming only the
+        // pending tail is flushed; otherwise re-transcribe all audio.
         let sttStart = CFAbsoluteTimeGetCurrent()
-        let raw = try await sttEngine.transcribe(audio: wav)
+        let raw: String
+        if let incremental, let state = streamingState {
+            let newAudio = lock.withLock { () -> Data in
+                let end = accumulatedAudio.count
+                let start = min(fedBytes, end)
+                fedBytes = end
+                return accumulatedAudio.subdata(in: start..<end)
+            }
+            if !newAudio.isEmpty {
+                try incremental.feed(Self.pcmToFloat(newAudio), into: state)
+            }
+            raw = try incremental.finishStreaming(state)
+        } else {
+            let wav = WAVEncoder.encode(
+                pcmData: audio, sampleRate: 16000, channels: 1,
+                bitsPerSample: 16)
+            raw = try await sttEngine.transcribe(audio: wav)
+        }
         let sttElapsed = CFAbsoluteTimeGetCurrent() - sttStart
 
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -184,6 +215,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             accumulatedAudio = Data()
             didEmitChunks = false
             finishing = true
+            streamingState = nil
+            fedBytes = 0
         }
         backgroundTask?.cancel()
         await backgroundTask?.value
@@ -206,18 +239,34 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     }
 
     private func runOneCycle() async {
-        let (audio, context) = lock.withLock {
-            (accumulatedAudio, currentContext)
-        }
+        let context = lock.withLock { currentContext }
 
-        guard audio.count > 16_000 else { return }
-
-        let wav = WAVEncoder.encode(
-            pcmData: audio, sampleRate: 16000, channels: 1, bitsPerSample: 16)
         let sttStart = CFAbsoluteTimeGetCurrent()
-        guard let raw = try? await sttEngine.transcribe(audio: wav) else { return }
+        let trimmed: String
+        if let incremental, let state = streamingState {
+            // Feed only audio arrived since the last cycle.
+            let newAudio = lock.withLock { () -> Data in
+                let end = accumulatedAudio.count
+                let start = min(fedBytes, end)
+                fedBytes = end
+                return accumulatedAudio.subdata(in: start..<end)
+            }
+            if !newAudio.isEmpty {
+                try? incremental.feed(Self.pcmToFloat(newAudio), into: state)
+            }
+            trimmed = incremental.transcript(state)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            let audio = lock.withLock { accumulatedAudio }
+            guard audio.count > 16_000 else { return }
+            let wav = WAVEncoder.encode(
+                pcmData: audio, sampleRate: 16000, channels: 1,
+                bitsPerSample: 16)
+            guard let raw = try? await sttEngine.transcribe(audio: wav)
+            else { return }
+            trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let sttElapsed = CFAbsoluteTimeGetCurrent() - sttStart
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
         // Commit any sentences that have stabilized since the last cycle.
@@ -249,6 +298,21 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             lock.withLock { didEmitChunks = true }
             await handler(polished)
         }
+    }
+
+    // MARK: - Audio
+
+    /// Convert 16-bit little-endian PCM to normalized float samples.
+    private static func pcmToFloat(_ data: Data) -> [Float] {
+        let count = data.count / 2
+        var samples = [Float](repeating: 0, count: count)
+        data.withUnsafeBytes { raw in
+            let i16 = raw.bindMemory(to: Int16.self)
+            for i in 0..<count {
+                samples[i] = Float(i16[i]) / 32768.0
+            }
+        }
+        return samples
     }
 
     // MARK: - Polishing
