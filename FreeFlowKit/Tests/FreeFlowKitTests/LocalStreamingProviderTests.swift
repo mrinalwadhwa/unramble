@@ -198,6 +198,42 @@ struct LocalStreamingProviderTests {
         #expect(!tail.contains("Hi there"))
     }
 
+    // MARK: - Paragraph breaks
+
+    @Test("A committed chunk carries a paragraph break")
+    func paragraphBreakInChunk() async throws {
+        let engine = ProgressiveSTTEngine(results: [
+            "Alpha bravo.",
+            "Alpha bravo. new paragraph charlie delta.",
+            "Alpha bravo. new paragraph charlie delta. Echo foxtrot.",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: engine, polishChatClient: nil, cycleInterval: 0.05)
+
+        let collector = ChunkCollector()
+        provider.setChunkHandler { text in await collector.append(text) }
+
+        try await provider.startStreaming(
+            context: .empty, language: nil, micProximity: .farField)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await provider.sendAudio(makePCM(bytes: 32_000))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        provider.setChunkHandler(nil)
+        let tail = try await provider.finishStreaming()
+
+        let chunks = await collector.all()
+        let all = (chunks + [tail]).joined(separator: "|")
+        // "new paragraph" became a break, carried on a committed chunk,
+        // with no stray space before it.
+        #expect(all.contains("\n\n"),
+            "a chunk should carry the paragraph break: \(all)")
+        #expect(!all.contains(" \n\n"),
+            "no stray space before the break: \(all)")
+    }
+
     // MARK: - Polish failure fallback
 
     @Test("Falls back to deterministic polish when client throws")

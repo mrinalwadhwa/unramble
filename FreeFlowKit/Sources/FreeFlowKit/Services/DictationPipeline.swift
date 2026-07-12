@@ -375,13 +375,19 @@ public actor DictationPipeline: PipelineProviding {
             let chunkFlag = ChunkInjectedFlag()
             self.chunkInjectedFlag = chunkFlag
             streaming.setChunkHandler { text in
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
+                // Trim only horizontal whitespace so a leading or trailing
+                // paragraph/line break at a chunk boundary survives. The
+                // injector suppresses its leading space when the text
+                // begins with a newline.
+                let horizontal = CharacterSet(charactersIn: " \t")
+                let toInject = text.trimmingCharacters(in: horizontal)
+                guard !toInject.trimmingCharacters(
+                    in: .whitespacesAndNewlines).isEmpty else { return }
                 chunkFlag.set()
                 let ctx = await AXAppContextProvider().readContext()
                 do {
-                    try await injector.inject(text: trimmed, into: ctx)
-                    Log.debug("[Pipeline] Injected chunk (\(trimmed.count) chars)")
+                    try await injector.inject(text: toInject, into: ctx)
+                    Log.debug("[Pipeline] Injected chunk (\(toInject.count) chars)")
                 } catch {
                     Log.debug("[Pipeline] Chunk injection failed: \(error)")
                 }

@@ -194,9 +194,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         }
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
 
-        let full = [committedSoFar, tailPolished]
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        let full = Self.joinPolished(committedSoFar, tailPolished)
 
         lock.withLock {
             lastPolishedTranscript = full
@@ -286,8 +284,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
 
         let handler = lock.withLock {
-            committedPolished = committedPolished.isEmpty
-                ? polished : committedPolished + " " + polished
+            committedPolished = Self.joinPolished(committedPolished, polished)
             return chunkHandler
         }
 
@@ -298,6 +295,17 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             lock.withLock { didEmitChunks = true }
             await handler(polished)
         }
+    }
+
+    // MARK: - Joining
+
+    /// Join two polished pieces with a space, unless the next piece
+    /// begins with a line or paragraph break (then the break is the
+    /// separator, so no space is inserted before it).
+    private static func joinPolished(_ acc: String, _ piece: String) -> String {
+        if acc.isEmpty { return piece }
+        if piece.isEmpty { return acc }
+        return piece.hasPrefix("\n") ? acc + piece : acc + " " + piece
     }
 
     // MARK: - Audio
