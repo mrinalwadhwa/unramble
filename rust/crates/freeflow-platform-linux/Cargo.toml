@@ -1,0 +1,15 @@
+[package]
+name = "freeflow-platform-linux"
+description = "Linux desktop integrations for FreeFlow"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+freeflow-core = { path = "../freeflow-core" }
+freeflow-platform = { path = "../freeflow-platform" }
+
+[lints]
+workspace = true
