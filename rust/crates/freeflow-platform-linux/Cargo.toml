@@ -8,8 +8,16 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+arboard.workspace = true
+async-trait.workspace = true
+cpal.workspace = true
 freeflow-core = { path = "../freeflow-core" }
 freeflow-platform = { path = "../freeflow-platform" }
+keyring.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+x11rb.workspace = true
+xkeysym.workspace = true
 
 [lints]
 workspace = true

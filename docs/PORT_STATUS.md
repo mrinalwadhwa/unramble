@@ -44,11 +44,11 @@ The native implementation establishes these concrete rules:
 
 | macOS capability | Linux replacement | Current state |
 | --- | --- | --- |
-| AVFoundation microphone capture | Native Linux audio backend | Not implemented |
-| Carbon event hotkey | X11 global key handling | Not implemented |
-| Accessibility and paste injection | X11 clipboard and synthetic paste | Not implemented |
-| NSWorkspace application context | X11 active-window metadata | Not implemented |
-| Keychain credential storage | Secret Service | Not implemented |
+| AVFoundation microphone capture | CPAL with PulseAudio and ALSA/PipeWire bridges | Implemented |
+| Carbon event hotkey | X11 passive key grab | Implemented for modifier-plus-key shortcuts |
+| Accessibility and paste injection | Desktop clipboard and XTest paste | Implemented with manual-paste fallback |
+| NSWorkspace application context | X11 active-window metadata | Implemented for X11 targets |
+| Keychain credential storage | Secret Service | Implemented with session-only fallback |
 | SwiftUI menu bar and overlay | Electron tray, settings, and HUD | Not implemented |
 
 ## Implementation Status
@@ -59,14 +59,15 @@ The native implementation establishes these concrete rules:
 | Core state machine | Complete | Explicit transitions, cancellation, duplicate-start protection, timeout behavior, and transcript recovery have unit coverage. |
 | OpenAI realtime | Complete | The client streams 24 kHz PCM over the current transcription session protocol and collects partial and final events; the deterministic service verifies the wire flow. Live-service validation remains opt-in. |
 | Batch fallback | Complete | Multipart WAV transcription is cancellable, bounded by a deadline, and covered against the local service. |
-| Audio capture | Not started | Linux backend has not been selected. |
-| X11 shortcut | Not started | Push-to-talk must distinguish press and release. |
-| Wayland shortcut | Deferred | Portal feasibility will follow the X11 path. |
-| X11 injection | Not started | Transcript retention is required on failure. |
+| Audio capture | Complete | CPAL enumerates PulseAudio and ALSA inputs, downmixes and resamples callbacks, bounds recordings, publishes levels, and falls back when a selected device disappears. A live PipeWire-backed preview completed on the development host. |
+| X11 shortcut | Partial | XGrabKey registers ordinary combinations, handles lock modifiers, distinguishes press/release, filters auto-repeat, and unregisters cleanly. Modifier-only XInput2 support and Xvfb verification remain. |
+| Wayland shortcut | Partial | The daemon detects Wayland, refuses misleading XWayland-only registration, and exposes window/tray controls with an actionable limitation. Portal registration remains. |
+| X11 injection | Partial | Clipboard plus XTest selects Ctrl+V or terminal-safe Ctrl+Shift+V and retains the transcript on fallback. X11 target-matrix verification remains. |
 | AT-SPI injection | Deferred | Clipboard delivery has priority. |
-| Application context | Not started | X11 metadata is sufficient for the first build. |
-| Credential storage | Not started | Plaintext persistent secrets are prohibited. |
-| Local RPC | Not started | The listener will bind only to loopback. |
+| Application context | Partial | Active window, PID, process, class, title, desktop, and terminal hints are collected over X11. Toolkit editability remains deferred. |
+| Credential storage | Complete | Secret Service holds persistent keys; environment and explicit session-only keys remain in memory. Ordinary JSON settings contain no credential fields and use mode 0600. |
+| Local RPC | Complete | JSON-RPC WebSockets bind to an ephemeral loopback port, authenticate a random launch token, admit one shell, carry notifications, and pass auth/request/error tests. |
+| Rust daemon | Complete | The daemon supervises the pipeline, hotkey, previews, settings, diagnostics, signals, and authenticated RPC; its ready record is machine-readable. |
 | Electron tray | Not started | Business logic will stay in the daemon. |
 | HUD | Not started | It must never take focus. |
 | Settings and onboarding | Not started | API key, microphone, shortcut, and polish settings are required. |

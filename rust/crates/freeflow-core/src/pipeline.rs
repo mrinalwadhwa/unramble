@@ -109,7 +109,8 @@ impl DictationPipeline {
 
     pub async fn start(&self) -> Result<bool> {
         if !self.state.begin_preparing().await {
-            debug!(state = ?self.state.current().await, "ignoring duplicate dictation start");
+            let state = self.state.current().await;
+            debug!(?state, "ignoring duplicate dictation start");
             return Ok(false);
         }
         self.publish(AppEvent::StatusChanged {
@@ -278,7 +279,8 @@ impl DictationPipeline {
 
     pub async fn stop(&self) -> Result<Option<DictationOutcome>> {
         if self.state.current().await != RecordingState::Recording {
-            debug!(state = ?self.state.current().await, "ignoring dictation stop outside recording");
+            let state = self.state.current().await;
+            debug!(?state, "ignoring dictation stop outside recording");
             return Ok(None);
         }
         self.transition(RecordingState::Finalizing).await?;

@@ -8,7 +8,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+directories.workspace = true
 freeflow-core = { path = "../freeflow-core" }
+serde_json.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
