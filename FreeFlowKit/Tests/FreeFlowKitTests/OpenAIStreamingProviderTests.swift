@@ -311,18 +311,85 @@ struct OpenAIRealtimeTranscriptTimeoutTests {
 @Suite("OpenAIStreamingProvider – event parsing")
 struct OpenAIRealtimeEventTests {
 
+    @Test("parses committed audio item correlation")
+    func inputAudioBufferCommitted() {
+        let withoutPredecessor = """
+            {"type":"input_audio_buffer.committed",
+             "event_id":"event-1","item_id":"item-1"}
+            """
+        #expect(
+            OpenAIStreamingProvider.parseEvent(withoutPredecessor)
+                == .transcription(
+                    .commitAcknowledged(
+                        serverEventID: "event-1",
+                        itemID: "item-1",
+                        previousItemID: nil)))
+
+        let nullPredecessor = """
+            {"type":"input_audio_buffer.committed",
+             "event_id":"event-2","item_id":"item-2",
+             "previous_item_id":null}
+            """
+        #expect(
+            OpenAIStreamingProvider.parseEvent(nullPredecessor)
+                == .transcription(
+                    .commitAcknowledged(
+                        serverEventID: "event-2",
+                        itemID: "item-2",
+                        previousItemID: nil)))
+
+        let priorItem = """
+            {"type":"input_audio_buffer.committed",
+             "event_id":"event-3","item_id":"item-3",
+             "previous_item_id":"item-2"}
+            """
+        #expect(
+            OpenAIStreamingProvider.parseEvent(priorItem)
+                == .transcription(
+                    .commitAcknowledged(
+                        serverEventID: "event-3",
+                        itemID: "item-3",
+                        previousItemID: "item-2")))
+    }
+
+    @Test("rejects malformed committed audio item correlation")
+    func malformedInputAudioBufferCommitted() {
+        let malformedEvents = [
+            #"{"type":"input_audio_buffer.committed","item_id":"item-1"}"#,
+            #"{"type":"input_audio_buffer.committed","event_id":"","item_id":"item-1"}"#,
+            #"{"type":"input_audio_buffer.committed","event_id":"event-1"}"#,
+            #"{"type":"input_audio_buffer.committed","event_id":"event-1","item_id":""}"#,
+            #"{"type":"input_audio_buffer.committed","event_id":"event-1","item_id":"item-1","previous_item_id":""}"#,
+            #"{"type":"input_audio_buffer.committed","event_id":"event-1","item_id":"item-1","previous_item_id":42}"#,
+        ]
+
+        for event in malformedEvents {
+            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+                continue
+            }
+            Issue.record("expected protocolError for \(event)")
+        }
+    }
+
     @Test("parses transcription.completed event")
     func transcriptionCompleted() {
         let event = """
             {"type":"conversation.item.input_audio_transcription.completed",
-             "transcript":"hello world"}
+             "event_id":"event-completed","item_id":"item-1",
+             "content_index":0,
+             "transcript":"hello world",
+             "usage":{"type":"tokens","input_tokens":10,
+                      "output_tokens":2,"total_tokens":12,
+                      "input_token_details":{"audio_tokens":10,"text_tokens":0}}}
             """
-        let parsed = OpenAIStreamingProvider.parseEvent(event)
-        if case .transcriptionCompleted(let transcript) = parsed {
-            #expect(transcript == "hello world")
-        } else {
-            Issue.record("expected transcriptionCompleted, got \(parsed)")
-        }
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .transcription(
+                    .completed(
+                        serverEventID: "event-completed",
+                        itemID: "item-1",
+                        contentIndex: 0,
+                        transcript: "hello world")))
     }
 
     @Test("parses transcription.delta event")
@@ -401,28 +468,74 @@ struct OpenAIRealtimeEventTests {
                 == .error("response.done missing response"))
     }
 
-    @Test("transcription failure becomes an error")
+    @Test("transcription failure retains item correlation and details")
     func transcriptionFailed() {
         let event = """
             {"type":"conversation.item.input_audio_transcription.failed",
-             "error":{"message":"audio rejected"}}
+             "event_id":"event-failed","item_id":"item-2",
+             "content_index":0,
+             "error":{"type":"transcription_error",
+                      "code":"audio_rejected",
+                      "message":"audio rejected","param":"audio"}}
             """
         #expect(
             OpenAIStreamingProvider.parseEvent(event)
-                == .error("audio rejected"))
+                == .transcription(
+                    .failed(
+                        serverEventID: "event-failed",
+                        itemID: "item-2",
+                        contentIndex: 0,
+                        error: OpenAIRealtimeErrorDetails(
+                            type: "transcription_error",
+                            code: "audio_rejected",
+                            message: "audio rejected",
+                            parameter: "audio"))))
+    }
+
+    @Test("transcription failure accepts empty optional details")
+    func transcriptionFailureWithoutDetails() {
+        let event = """
+            {"type":"conversation.item.input_audio_transcription.failed",
+             "event_id":"event-failed","item_id":"item-1",
+             "content_index":0,
+             "error":{"type":null,"code":null,
+                      "message":null,"param":null}}
+            """
+        let details = OpenAIRealtimeErrorDetails(
+            type: nil,
+            code: nil,
+            message: nil,
+            parameter: nil)
+
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .transcription(
+                    .failed(
+                        serverEventID: "event-failed",
+                        itemID: "item-1",
+                        contentIndex: 0,
+                        error: details)))
+        #expect(details.ledgerMessage == "input audio transcription failed")
     }
 
     @Test("parses error event")
     func errorEvent() {
         let event = """
-            {"type":"error","error":{"message":"bad audio","code":"invalid_audio"}}
+            {"type":"error","event_id":"server-error-1",
+             "error":{"type":"invalid_request_error",
+                      "code":"invalid_audio","message":"bad audio",
+                      "param":"audio","event_id":"client-commit-1"}}
             """
-        let parsed = OpenAIStreamingProvider.parseEvent(event)
-        if case .error(let message) = parsed {
-            #expect(message.contains("bad audio"))
-        } else {
-            Issue.record("expected error, got \(parsed)")
-        }
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .serverError(
+                    OpenAIRealtimeServerError(
+                        serverEventID: "server-error-1",
+                        type: "invalid_request_error",
+                        code: "invalid_audio",
+                        message: "bad audio",
+                        parameter: "audio",
+                        clientEventID: "client-commit-1")))
     }
 
     @Test("ignores unknown event types")
@@ -436,13 +549,19 @@ struct OpenAIRealtimeEventTests {
         }
     }
 
-    @Test("returns other for malformed JSON")
+    @Test("rejects malformed event envelopes")
     func malformedJSON() {
-        let parsed = OpenAIStreamingProvider.parseEvent("not json")
-        if case .other = parsed {
-            // Expected.
-        } else {
-            Issue.record("expected other, got \(parsed)")
+        let malformedEvents = [
+            "not json",
+            "[]",
+            #"{"event_id":"event-1"}"#,
+            #"{"type":42}"#,
+        ]
+        for event in malformedEvents {
+            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+                continue
+            }
+            Issue.record("expected protocolError for \(event)")
         }
     }
 
@@ -450,15 +569,247 @@ struct OpenAIRealtimeEventTests {
     func emptyTranscript() {
         let event = """
             {"type":"conversation.item.input_audio_transcription.completed",
+             "event_id":"event-completed","item_id":"item-1",
+             "content_index":0,
              "transcript":""}
             """
-        let parsed = OpenAIStreamingProvider.parseEvent(event)
-        if case .transcriptionCompleted(let transcript) = parsed {
-            #expect(transcript == "")
-        } else {
-            Issue.record("expected transcriptionCompleted, got \(parsed)")
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .transcription(
+                    .completed(
+                        serverEventID: "event-completed",
+                        itemID: "item-1",
+                        contentIndex: 0,
+                        transcript: "")))
+    }
+
+    @Test("rejects malformed transcription terminal events")
+    func malformedTranscriptionTerminalEvents() {
+        let malformedEvents = [
+            #"{"type":"conversation.item.input_audio_transcription.completed","item_id":"item-1","content_index":0,"transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","content_index":0,"transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","content_index":-1,"transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","content_index":0.5,"transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","content_index":true,"transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","content_index":9223372036854775808,"transcript":"text"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","content_index":0}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"event-1","item_id":"item-1","content_index":0,"transcript":42}"#,
+            #"{"type":"conversation.item.input_audio_transcription.failed","event_id":"event-1","item_id":"item-1","content_index":0}"#,
+            #"{"type":"conversation.item.input_audio_transcription.failed","event_id":"event-1","item_id":"item-1","content_index":0,"error":[]}"#,
+            #"{"type":"conversation.item.input_audio_transcription.failed","event_id":"event-1","item_id":"item-1","content_index":0,"error":{"message":42}}"#,
+        ]
+        for event in malformedEvents {
+            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+                continue
+            }
+            Issue.record("expected protocolError for \(event)")
         }
     }
+
+    @Test("rejects malformed generic error events")
+    func malformedGenericErrors() {
+        let malformedEvents = [
+            #"{"type":"error","error":{"type":"server_error","message":"failed"}}"#,
+            #"{"type":"error","event_id":"event-1"}"#,
+            #"{"type":"error","event_id":"event-1","error":[]}"#,
+            #"{"type":"error","event_id":"event-1","error":{"message":"failed"}}"#,
+            #"{"type":"error","event_id":"event-1","error":{"type":"server_error"}}"#,
+            #"{"type":"error","event_id":"event-1","error":{"type":"","message":"failed"}}"#,
+            #"{"type":"error","event_id":"event-1","error":{"type":"server_error","message":""}}"#,
+            #"{"type":"error","event_id":"event-1","error":{"type":"server_error","message":"failed","code":42}}"#,
+        ]
+        for event in malformedEvents {
+            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+                continue
+            }
+            Issue.record("expected protocolError for \(event)")
+        }
+    }
+}
+
+@Suite("OpenAI Realtime transcript event reducer")
+struct OpenAIRealtimeTranscriptReducerTests {
+
+    @Test("correlates a terminal event that precedes acknowledgement")
+    func terminalBeforeAcknowledgement() throws {
+        var reducer = OpenAIRealtimeTranscriptReducer()
+        _ = try reducer.recordCommit(
+            coverageRange: 0..<100,
+            submittedRange: 0..<100)
+
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"conversation.item.input_audio_transcription.completed",
+             "event_id":"completed-1","item_id":"item-1",
+             "content_index":0,"transcript":"early text"}
+            """))
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"input_audio_buffer.committed",
+             "event_id":"ack-1","item_id":"item-1",
+             "previous_item_id":null}
+            """))
+        try reducer.seal(expectedCoverageEnd: 100)
+
+        let resolved = try reducer.resolvedItems()
+        #expect(resolved.map(\.itemID) == ["item-1"])
+        #expect(resolved.map(\.transcript) == ["early text"])
+    }
+
+    @Test("correlates reversed terminal order by item ID")
+    func reversedTerminalOrder() throws {
+        var reducer = OpenAIRealtimeTranscriptReducer()
+        _ = try reducer.recordCommit(
+            coverageRange: 0..<100,
+            submittedRange: 0..<100)
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"input_audio_buffer.committed",
+             "event_id":"ack-1","item_id":"item-1",
+             "previous_item_id":null}
+            """))
+
+        _ = try reducer.recordCommit(
+            coverageRange: 100..<200,
+            submittedRange: 100..<200)
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"input_audio_buffer.committed",
+             "event_id":"ack-2","item_id":"item-2",
+             "previous_item_id":"item-1"}
+            """))
+
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"conversation.item.input_audio_transcription.completed",
+             "event_id":"completed-2","item_id":"item-2",
+             "content_index":0,"transcript":"second"}
+            """))
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"conversation.item.input_audio_transcription.completed",
+             "event_id":"completed-1","item_id":"item-1",
+             "content_index":0,"transcript":"first"}
+            """))
+        try reducer.seal(expectedCoverageEnd: 200)
+
+        let resolved = try reducer.resolvedItems()
+        #expect(resolved.map(\.itemID) == ["item-1", "item-2"])
+        #expect(resolved.map(\.transcript) == ["first", "second"])
+    }
+
+    @Test("correlates item-scoped transcription failure")
+    func itemScopedFailure() throws {
+        var reducer = OpenAIRealtimeTranscriptReducer()
+        _ = try reducer.recordCommit(
+            coverageRange: 0..<100,
+            submittedRange: 0..<100)
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"input_audio_buffer.committed",
+             "event_id":"ack-1","item_id":"item-1"}
+            """))
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"conversation.item.input_audio_transcription.failed",
+             "event_id":"failed-1","item_id":"item-1",
+             "content_index":0,"error":{"message":"audio rejected"}}
+            """))
+        try reducer.seal(expectedCoverageEnd: 100)
+
+        do {
+            _ = try reducer.resolvedItems()
+            Issue.record("expected item-scoped transcription failure")
+        } catch let failure as RealtimeTranscriptLedger.Failure {
+            #expect(
+                failure == .transcriptionFailed(
+                    itemID: "item-1",
+                    message: "audio rejected"))
+        }
+    }
+
+    @Test("rejects unsupported content index")
+    func unsupportedContentIndex() throws {
+        var reducer = OpenAIRealtimeTranscriptReducer()
+        _ = try reducer.recordCommit(
+            coverageRange: 0..<100,
+            submittedRange: 0..<100)
+
+        do {
+            try reducer.apply(try transcriptionEvent("""
+                {"type":"conversation.item.input_audio_transcription.completed",
+                 "event_id":"completed-wrong","item_id":"item-1",
+                 "content_index":1,"transcript":"wrong part"}
+                """))
+            Issue.record("expected unsupported content index")
+        } catch let failure as OpenAIRealtimeTranscriptReducer.Failure {
+            #expect(
+                failure == .unsupportedContentIndex(
+                    itemID: "item-1",
+                    actual: 1))
+        }
+
+    }
+
+    @Test("deduplicates exact server event replay")
+    func duplicateServerEventReplay() throws {
+        var reducer = OpenAIRealtimeTranscriptReducer()
+        _ = try reducer.recordCommit(
+            coverageRange: 0..<100,
+            submittedRange: 0..<100)
+        let acknowledgement = try transcriptionEvent("""
+            {"type":"input_audio_buffer.committed",
+             "event_id":"ack-1","item_id":"item-1"}
+            """)
+        try reducer.apply(acknowledgement)
+        try reducer.apply(acknowledgement)
+
+        let completion = try transcriptionEvent("""
+            {"type":"conversation.item.input_audio_transcription.completed",
+             "event_id":"terminal-1","item_id":"item-1",
+             "content_index":0,"transcript":"same"}
+            """)
+        try reducer.apply(completion)
+        try reducer.apply(completion)
+        try reducer.seal(expectedCoverageEnd: 100)
+        #expect(try reducer.resolvedItems().map(\.transcript) == ["same"])
+    }
+
+    @Test("rejects a server event ID reused for another payload")
+    func conflictingServerEventID() throws {
+        var reducer = OpenAIRealtimeTranscriptReducer()
+        _ = try reducer.recordCommit(
+            coverageRange: 0..<100,
+            submittedRange: 0..<100)
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"input_audio_buffer.committed",
+             "event_id":"ack-1","item_id":"item-1"}
+            """))
+        try reducer.apply(try transcriptionEvent("""
+            {"type":"conversation.item.input_audio_transcription.completed",
+             "event_id":"terminal-1","item_id":"item-1",
+             "content_index":0,"transcript":"same"}
+            """))
+
+        do {
+            try reducer.apply(try transcriptionEvent("""
+                {"type":"conversation.item.input_audio_transcription.failed",
+                 "event_id":"terminal-1","item_id":"item-1",
+                 "content_index":0,"error":{}}
+                """))
+            Issue.record("expected reused server event ID failure")
+        } catch let failure as OpenAIRealtimeTranscriptReducer.Failure {
+            #expect(failure == .conflictingServerEventID("terminal-1"))
+        }
+    }
+}
+
+private enum OpenAIRealtimeFixtureError: Error {
+    case expectedTranscriptionEvent
+}
+
+private func transcriptionEvent(
+    _ text: String
+) throws -> OpenAIRealtimeTranscriptionEvent {
+    let parsed = OpenAIStreamingProvider.parseEvent(text)
+    guard case .transcription(let event) = parsed else {
+        Issue.record("expected transcription event, got \(parsed)")
+        throw OpenAIRealtimeFixtureError.expectedTranscriptionEvent
+    }
+    return event
 }
 
 // MARK: - Production response flow
@@ -495,8 +846,9 @@ struct OpenAIRealtimeResponseFlowTests {
     @Test("transcript is polished on the same connection")
     func completeFlow() async throws {
         let exchange = ScriptedRealtimeExchange(events: [
-            #"{"type":"conversation.item.input_audio_transcription.delta","delta":"raw"}"#,
-            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw words"}"#,
+            #"{"type":"input_audio_buffer.committed","event_id":"ack-1","item_id":"item-1","previous_item_id":null}"#,
+            #"{"type":"conversation.item.input_audio_transcription.delta","event_id":"delta-1","item_id":"item-1","content_index":0,"delta":"raw"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"completed-1","item_id":"item-1","content_index":0,"transcript":"raw words"}"#,
             #"{"type":"response.output_text.delta","delta":"Polished "}"#,
             #"{"type":"response.output_text.delta","delta":"words."}"#,
             #"{"type":"response.done","response":{"status":"completed"}}"#,
@@ -525,7 +877,7 @@ struct OpenAIRealtimeResponseFlowTests {
     @Test("empty transcript sends no response request")
     func emptyTranscript() async throws {
         let exchange = ScriptedRealtimeExchange(events: [
-            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":""}"#
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"completed-1","item_id":"item-1","content_index":0,"transcript":""}"#
         ])
 
         let result = try await OpenAIStreamingProvider.runRealtimeResponse(
@@ -539,7 +891,7 @@ struct OpenAIRealtimeResponseFlowTests {
     @Test("text-done result is authoritative over preceding deltas")
     func textDoneResult() async throws {
         let exchange = ScriptedRealtimeExchange(events: [
-            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"completed-1","item_id":"item-1","content_index":0,"transcript":"raw"}"#,
             #"{"type":"response.output_text.delta","delta":"Partial"}"#,
             #"{"type":"response.output_text.done","text":"Final text."}"#,
             #"{"type":"response.done","response":{"status":"completed"}}"#,
@@ -555,7 +907,7 @@ struct OpenAIRealtimeResponseFlowTests {
     @Test("terminal failure overrides a preceding text-done event")
     func failureAfterTextDone() async {
         let exchange = ScriptedRealtimeExchange(events: [
-            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"completed-1","item_id":"item-1","content_index":0,"transcript":"raw"}"#,
             #"{"type":"response.output_text.delta","delta":"Partial"}"#,
             #"{"type":"response.output_text.done","text":"Final text."}"#,
             #"{"type":"response.done","response":{"status":"failed"}}"#,
@@ -568,11 +920,29 @@ struct OpenAIRealtimeResponseFlowTests {
         }
     }
 
-    @Test("response errors are surfaced")
-    func responseError() async {
+    @Test("nonzero transcript content index is rejected before polish")
+    func rejectsUnsupportedTranscriptContentIndex() async {
         let exchange = ScriptedRealtimeExchange(events: [
-            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw"}"#,
-            #"{"type":"error","error":{"message":"response rejected"}}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"completed-1","item_id":"item-1","content_index":1,"transcript":"wrong part"}"#
+        ])
+
+        do {
+            _ = try await OpenAIStreamingProvider.runRealtimeResponse(
+                receive: { try await exchange.receive() },
+                send: { await exchange.send($0) })
+            Issue.record("expected unsupported content index failure")
+        } catch DictationError.networkError(let message) {
+            #expect(message.contains("content_index"))
+        } catch {
+            Issue.record("expected DictationError.networkError, got \(error)")
+        }
+        #expect(await exchange.sent().isEmpty)
+    }
+
+    @Test("item-scoped transcription failure sends no polish request")
+    func transcriptionFailureBeforeCompletion() async {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.failed","event_id":"failed-1","item_id":"item-1","content_index":0,"error":{"message":"audio rejected"}}"#
         ])
 
         await #expect(throws: DictationError.self) {
@@ -580,6 +950,66 @@ struct OpenAIRealtimeResponseFlowTests {
                 receive: { try await exchange.receive() },
                 send: { await exchange.send($0) })
         }
+        #expect(await exchange.sent().isEmpty)
+    }
+
+    @Test("malformed terminal event sends no polish request")
+    func protocolFailureBeforeCompletion() async {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.completed","item_id":"item-1","content_index":0,"transcript":"raw"}"#
+        ])
+
+        await #expect(throws: DictationError.self) {
+            try await OpenAIStreamingProvider.runRealtimeResponse(
+                receive: { try await exchange.receive() },
+                send: { await exchange.send($0) })
+        }
+        #expect(await exchange.sent().isEmpty)
+    }
+
+    @Test("server error before transcript sends no polish request")
+    func serverErrorBeforeCompletion() async {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"error","event_id":"server-error-1","error":{"type":"invalid_request_error","code":"bad_audio","message":"commit rejected","event_id":"commit-1"}}"#
+        ])
+
+        do {
+            _ = try await OpenAIStreamingProvider.runRealtimeResponse(
+                receive: { try await exchange.receive() },
+                send: { await exchange.send($0) })
+            Issue.record("expected server error")
+        } catch DictationError.networkError(let message) {
+            #expect(message.contains("commit rejected"))
+            #expect(message.contains("server-error-1"))
+            #expect(message.contains("commit-1"))
+            #expect(message.contains("bad_audio"))
+        } catch {
+            Issue.record("expected DictationError.networkError, got \(error)")
+        }
+        #expect(await exchange.sent().isEmpty)
+    }
+
+    @Test("response errors are surfaced")
+    func responseError() async {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.completed","event_id":"completed-1","item_id":"item-1","content_index":0,"transcript":"raw"}"#,
+            #"{"type":"error","event_id":"server-error-1","error":{"type":"invalid_request_error","code":"bad_request","message":"response rejected","event_id":"response-create-1"}}"#,
+        ])
+
+        do {
+            _ = try await OpenAIStreamingProvider.runRealtimeResponse(
+                receive: { try await exchange.receive() },
+                send: { await exchange.send($0) })
+            Issue.record("expected server error")
+        } catch DictationError.networkError(let message) {
+            #expect(message.contains("response rejected"))
+            #expect(message.contains("server-error-1"))
+            #expect(message.contains("response-create-1"))
+            #expect(message.contains("bad_request"))
+        } catch {
+            Issue.record("expected DictationError.networkError, got \(error)")
+        }
+        #expect(await exchange.sent().count == 2)
     }
 }
 

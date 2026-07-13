@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 /// Stream audio to the OpenAI Realtime API and return polished text.
@@ -955,33 +956,124 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     // MARK: - Event parsing (testable pure function)
 
     enum ParsedEvent: Equatable {
+        case transcription(OpenAIRealtimeTranscriptionEvent)
         case transcriptionDelta(String)
-        case transcriptionCompleted(String)
         case responseTextDelta(String)
         case responseTextDone(String)
         case responseDone
         case error(String)
+        case serverError(OpenAIRealtimeServerError)
+        case protocolError(String)
         case other
     }
 
     static func parseEvent(_ text: String) -> ParsedEvent {
-        guard
-            let data = text.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let type = obj["type"] as? String
+        guard let data = text.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data),
+            let obj = object as? [String: Any]
         else {
-            return .other
+            return .protocolError("Realtime event is not a JSON object")
+        }
+        guard let type = obj["type"] as? String, !type.isEmpty else {
+            return .protocolError("Realtime event requires nonempty string type")
         }
 
         switch type {
+        case "input_audio_buffer.committed":
+            do {
+                let serverEventID = try requiredNonemptyString(
+                    in: obj,
+                    field: "event_id",
+                    eventType: type)
+                let itemID = try requiredNonemptyString(
+                    in: obj,
+                    field: "item_id",
+                    eventType: type)
+                let previousItemID = try optionalNonemptyString(
+                    in: obj,
+                    field: "previous_item_id",
+                    eventType: type)
+                return .transcription(
+                    .commitAcknowledged(
+                        serverEventID: serverEventID,
+                        itemID: itemID,
+                        previousItemID: previousItemID))
+            } catch let failure as EventFieldFailure {
+                return .protocolError(failure.message)
+            } catch {
+                return .protocolError("Malformed \(type) event")
+            }
         case "conversation.item.input_audio_transcription.completed":
-            let transcript = obj["transcript"] as? String ?? ""
-            return .transcriptionCompleted(transcript)
+            do {
+                return .transcription(
+                    .completed(
+                        serverEventID: try requiredNonemptyString(
+                            in: obj,
+                            field: "event_id",
+                            eventType: type),
+                        itemID: try requiredNonemptyString(
+                            in: obj,
+                            field: "item_id",
+                            eventType: type),
+                        contentIndex: try requiredNonnegativeInteger(
+                            in: obj,
+                            field: "content_index",
+                            eventType: type),
+                        transcript: try requiredString(
+                            in: obj,
+                            field: "transcript",
+                            eventType: type)))
+            } catch let failure as EventFieldFailure {
+                return .protocolError(failure.message)
+            } catch {
+                return .protocolError("Malformed \(type) event")
+            }
         case "conversation.item.input_audio_transcription.delta":
             let delta = obj["delta"] as? String ?? ""
             return .transcriptionDelta(delta)
         case "conversation.item.input_audio_transcription.failed":
-            return .error(errorMessage(in: obj) ?? "transcription failed")
+            do {
+                let error = try requiredObject(
+                    in: obj,
+                    field: "error",
+                    eventType: type)
+                let details = OpenAIRealtimeErrorDetails(
+                    type: try optionalString(
+                        in: error,
+                        field: "type",
+                        eventType: type),
+                    code: try optionalString(
+                        in: error,
+                        field: "code",
+                        eventType: type),
+                    message: try optionalString(
+                        in: error,
+                        field: "message",
+                        eventType: type),
+                    parameter: try optionalString(
+                        in: error,
+                        field: "param",
+                        eventType: type))
+                return .transcription(
+                    .failed(
+                        serverEventID: try requiredNonemptyString(
+                            in: obj,
+                            field: "event_id",
+                            eventType: type),
+                        itemID: try requiredNonemptyString(
+                            in: obj,
+                            field: "item_id",
+                            eventType: type),
+                        contentIndex: try requiredNonnegativeInteger(
+                            in: obj,
+                            field: "content_index",
+                            eventType: type),
+                        error: details))
+            } catch let failure as EventFieldFailure {
+                return .protocolError(failure.message)
+            } catch {
+                return .protocolError("Malformed \(type) event")
+            }
         case "response.text.delta", "response.output_text.delta":
             let delta = obj["delta"] as? String ?? ""
             return .responseTextDelta(delta)
@@ -1003,11 +1095,136 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             }
             return .responseDone
         case "error":
-            return .error(errorMessage(in: obj) ?? "unknown error")
+            do {
+                let error = try requiredObject(
+                    in: obj,
+                    field: "error",
+                    eventType: type)
+                return .serverError(
+                    OpenAIRealtimeServerError(
+                        serverEventID: try requiredNonemptyString(
+                            in: obj,
+                            field: "event_id",
+                            eventType: type),
+                        type: try requiredNonemptyString(
+                            in: error,
+                            field: "type",
+                            eventType: type),
+                        code: try optionalString(
+                            in: error,
+                            field: "code",
+                            eventType: type),
+                        message: try requiredNonemptyString(
+                            in: error,
+                            field: "message",
+                            eventType: type),
+                        parameter: try optionalString(
+                            in: error,
+                            field: "param",
+                            eventType: type),
+                        clientEventID: try optionalString(
+                            in: error,
+                            field: "event_id",
+                            eventType: type)))
+            } catch let failure as EventFieldFailure {
+                return .protocolError(failure.message)
+            } catch {
+                return .protocolError("Malformed \(type) event")
+            }
         default:
             Log.debug("[RealtimeResponse] event type=\(type)")
             return .other
         }
+    }
+
+    private struct EventFieldFailure: Error {
+        let message: String
+    }
+
+    private static func requiredNonemptyString(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> String {
+        guard let value = object[field] as? String, !value.isEmpty else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires nonempty string \(field)")
+        }
+        return value
+    }
+
+    private static func requiredString(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> String {
+        guard let value = object[field] as? String else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires string \(field)")
+        }
+        return value
+    }
+
+    private static func optionalString(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> String? {
+        guard let raw = object[field] else { return nil }
+        if raw is NSNull { return nil }
+        guard let value = raw as? String else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires \(field) to be null or a string")
+        }
+        return value
+    }
+
+    private static func requiredObject(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> [String: Any] {
+        guard let value = object[field] as? [String: Any] else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires object \(field)")
+        }
+        return value
+    }
+
+    private static func requiredNonnegativeInteger(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> Int {
+        guard let number = object[field] as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID()
+        else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires nonnegative integer \(field)")
+        }
+        let int64Value = number.int64Value
+        guard int64Value >= 0,
+            number.compare(NSNumber(value: int64Value)) == .orderedSame,
+            let value = Int(exactly: int64Value)
+        else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires nonnegative integer \(field)")
+        }
+        return value
+    }
+
+    private static func optionalNonemptyString(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> String? {
+        guard let raw = object[field] else { return nil }
+        if raw is NSNull { return nil }
+        guard let value = raw as? String, !value.isEmpty else {
+            throw EventFieldFailure(
+                message: "\(eventType) requires \(field) to be null or a nonempty string")
+        }
+        return value
     }
 
     private static func errorMessage(in object: [String: Any]) -> String? {
@@ -1074,11 +1291,30 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         while true {
             try Task.checkCancellation()
             switch parseEvent(try await receive()) {
-            case .transcriptionCompleted(let transcript):
+            case .transcription(
+                .completed(_, let itemID, let contentIndex, let transcript)):
+                try requirePrimaryAudioContent(
+                    itemID: itemID,
+                    contentIndex: contentIndex)
                 return transcript
+            case .transcription(
+                .failed(_, let itemID, let contentIndex, let error)):
+                try requirePrimaryAudioContent(
+                    itemID: itemID,
+                    contentIndex: contentIndex)
+                throw DictationError.networkError(
+                    "Realtime API error: \(error.ledgerMessage)")
+            case .transcription(.commitAcknowledged):
+                continue
             case .error(let message):
                 throw DictationError.networkError(
                     "Realtime API error: \(message)")
+            case .serverError(let error):
+                throw DictationError.networkError(
+                    "Realtime API error: \(error.diagnosticMessage)")
+            case .protocolError(let message):
+                throw DictationError.networkError(
+                    "Realtime protocol error: \(message)")
             case .transcriptionDelta, .responseTextDelta, .responseTextDone,
                  .responseDone, .other:
                 continue
@@ -1099,6 +1335,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             try Task.checkCancellation()
             let event = parseEvent(try await receive())
             switch event {
+            case .transcription(.commitAcknowledged):
+                continue
+            case .transcription(
+                .failed(_, let itemID, let contentIndex, let error)):
+                try requirePrimaryAudioContent(
+                    itemID: itemID,
+                    contentIndex: contentIndex)
+                throw DictationError.networkError(
+                    "Realtime API error: \(error.ledgerMessage)")
             case .responseTextDone(let polished):
                 Log.debug("[RealtimeResponse] text.done: \"\(polished.prefix(200))\"")
                 completedText = polished.isEmpty ? accumulated : polished
@@ -1112,6 +1357,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 Log.debug("[RealtimeResponse] error: \(message)")
                 throw DictationError.networkError(
                     "Realtime API error: \(message)")
+            case .serverError(let error):
+                Log.debug(
+                    "[RealtimeResponse] error: \(error.diagnosticMessage)")
+                throw DictationError.networkError(
+                    "Realtime API error: \(error.diagnosticMessage)")
+            case .protocolError(let message):
+                Log.debug("[RealtimeResponse] protocol error: \(message)")
+                throw DictationError.networkError(
+                    "Realtime protocol error: \(message)")
             case .responseTextDelta(let delta):
                 accumulated += delta
                 if !firstDeltaReported {
@@ -1119,12 +1373,27 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     onFirstDelta?()
                 }
                 continue
-            case .transcriptionCompleted(let t):
+            case .transcription(
+                .completed(_, let itemID, let contentIndex, let t)):
+                try requirePrimaryAudioContent(
+                    itemID: itemID,
+                    contentIndex: contentIndex)
                 Log.debug("[RealtimeResponse] ignoring transcription: \"\(t.prefix(80))\"")
                 continue
             case .transcriptionDelta, .other:
                 continue
             }
+        }
+    }
+
+    private static func requirePrimaryAudioContent(
+        itemID: String,
+        contentIndex: Int
+    ) throws {
+        guard contentIndex == 0 else {
+            throw DictationError.networkError(
+                "Realtime protocol error: item \(itemID) has unsupported"
+                    + " content_index \(contentIndex)")
         }
     }
 
