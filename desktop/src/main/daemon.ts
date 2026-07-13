@@ -1,6 +1,6 @@
 import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
-import { createWriteStream, existsSync } from 'node:fs';
-import { chmod, mkdir } from 'node:fs/promises';
+import { constants as fsConstants, createWriteStream, existsSync } from 'node:fs';
+import { access, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { app } from 'electron';
 import WebSocket from 'ws';
@@ -115,7 +115,11 @@ export class DaemonSupervisor {
       throw new Error(`FreeFlow daemon was not found at ${daemonPath}`);
     }
     if (app.isPackaged) {
-      await chmod(daemonPath, 0o755);
+      try {
+        await access(daemonPath, fsConstants.X_OK);
+      } catch {
+        throw new Error('The bundled FreeFlow daemon is not executable; reinstall the package');
+      }
     }
     const logPath = join(app.getPath('logs'), 'freeflow-daemon.log');
     await mkdir(dirname(logPath), { recursive: true });
