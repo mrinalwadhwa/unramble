@@ -42,6 +42,11 @@ struct ActiveRun {
     level_task: JoinHandle<()>,
 }
 
+struct PreparingRun {
+    cancel: CancellationToken,
+    finished: CancellationToken,
+}
+
 #[derive(Clone)]
 struct RecoveryData {
     audio: AudioBuffer,
@@ -54,6 +59,7 @@ pub struct DictationPipeline {
     state: Arc<RecordingStateMachine>,
     transcripts: Arc<TranscriptBuffer>,
     settings: RwLock<AppSettings>,
+    preparing: Mutex<Option<Arc<PreparingRun>>>,
     active: Mutex<Option<ActiveRun>>,
     processing_cancel: Mutex<Option<CancellationToken>>,
     recovery: RwLock<Option<RecoveryData>>,
@@ -70,6 +76,7 @@ impl DictationPipeline {
             state: Arc::new(RecordingStateMachine::new()),
             transcripts: Arc::new(TranscriptBuffer::new()),
             settings: RwLock::new(settings),
+            preparing: Mutex::new(None),
             active: Mutex::new(None),
             processing_cancel: Mutex::new(None),
             recovery: RwLock::new(None),
@@ -108,11 +115,18 @@ impl DictationPipeline {
     }
 
     pub async fn start(&self) -> Result<bool> {
+        let preparation = Arc::new(PreparingRun {
+            cancel: CancellationToken::new(),
+            finished: CancellationToken::new(),
+        });
+        let mut preparing = self.preparing.lock().await;
         if !self.state.begin_preparing().await {
             let state = self.state.current().await;
             debug!(?state, "ignoring duplicate dictation start");
             return Ok(false);
         }
+        *preparing = Some(Arc::clone(&preparation));
+        drop(preparing);
         self.publish(AppEvent::StatusChanged {
             state: RecordingState::Preparing,
         });
@@ -144,15 +158,31 @@ impl DictationPipeline {
         let capture = match capture {
             Ok(Ok(capture)) => capture,
             Ok(Err(error)) => {
+                self.finish_preparing(&preparation).await;
+                if preparation.cancel.is_cancelled() {
+                    self.reset_to_idle().await;
+                    return Ok(false);
+                }
                 self.fail(&error).await;
                 return Err(error);
             }
             Err(_) => {
                 let error = FreeFlowError::Timeout("microphone startup".into());
+                self.finish_preparing(&preparation).await;
+                if preparation.cancel.is_cancelled() {
+                    self.reset_to_idle().await;
+                    return Ok(false);
+                }
                 self.fail(&error).await;
                 return Err(error);
             }
         };
+        if preparation.cancel.is_cancelled() {
+            let _ = self.services.audio.stop().await;
+            self.reset_to_idle().await;
+            self.finish_preparing(&preparation).await;
+            return Ok(false);
+        }
 
         let settings = self.settings.read().await.clone();
         let stop_forwarding = CancellationToken::new();
@@ -274,6 +304,7 @@ impl DictationPipeline {
         self.publish(AppEvent::RecordingStarted {
             device_name: capture.device.name,
         });
+        self.finish_preparing(&preparation).await;
         Ok(true)
     }
 
@@ -534,6 +565,11 @@ impl DictationPipeline {
             return Ok(false);
         }
 
+        let preparation = { self.preparing.lock().await.clone() };
+        if let Some(preparation) = preparation {
+            preparation.cancel.cancel();
+            let _ = timeout(Duration::from_secs(6), preparation.finished.cancelled()).await;
+        }
         if let Some(run) = self.active.lock().await.take() {
             run.stop_forwarding.cancel();
             let _ = self.services.audio.stop().await;
@@ -546,10 +582,7 @@ impl DictationPipeline {
         if let Some(cancellation) = self.processing_cancel.lock().await.take() {
             cancellation.cancel();
         }
-        self.state.reset().await;
-        self.publish(AppEvent::StatusChanged {
-            state: RecordingState::Idle,
-        });
+        self.reset_to_idle().await;
         Ok(true)
     }
 
@@ -658,6 +691,24 @@ impl DictationPipeline {
         Ok(())
     }
 
+    async fn finish_preparing(&self, preparation: &Arc<PreparingRun>) {
+        let mut active = self.preparing.lock().await;
+        if active
+            .as_ref()
+            .is_some_and(|candidate| Arc::ptr_eq(candidate, preparation))
+        {
+            active.take();
+        }
+        preparation.finished.cancel();
+    }
+
+    async fn reset_to_idle(&self) {
+        self.state.reset().await;
+        self.publish(AppEvent::StatusChanged {
+            state: RecordingState::Idle,
+        });
+    }
+
     async fn fail(&self, error: &FreeFlowError) {
         *self.last_error.write().await = Some(error.to_string());
         let current = self.state.current().await;
@@ -693,6 +744,7 @@ mod tests {
 
     struct MockAudio {
         recording: AtomicBool,
+        startup_delay: Duration,
         output: AudioBuffer,
         chunks: broadcast::Sender<AudioChunk>,
         levels: broadcast::Sender<f32>,
@@ -705,6 +757,7 @@ mod tests {
             let (levels, _) = broadcast::channel(16);
             Self {
                 recording: AtomicBool::new(false),
+                startup_delay: Duration::ZERO,
                 output: AudioBuffer {
                     samples,
                     sample_rate: 16_000,
@@ -724,6 +777,7 @@ mod tests {
     #[async_trait]
     impl AudioProvider for MockAudio {
         async fn start(&self) -> Result<AudioCaptureInfo> {
+            tokio::time::sleep(self.startup_delay).await;
             if self.recording.swap(true, Ordering::SeqCst) {
                 return Err(FreeFlowError::Audio("already recording".into()));
             }
@@ -990,6 +1044,44 @@ mod tests {
         assert!(pipeline.cancel().await.unwrap());
         assert_eq!(pipeline.state.current().await, RecordingState::Idle);
         assert!(pipeline.start().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancel_waits_for_microphone_startup_to_release_audio() {
+        let mut delayed_audio = MockAudio::speaking();
+        delayed_audio.startup_delay = Duration::from_millis(100);
+        let audio = Arc::new(delayed_audio);
+        let batch = Arc::new(MockBatch {
+            calls: AtomicUsize::new(0),
+            response: Ok("unused".into()),
+        });
+        let injector = Arc::new(MockInjector {
+            fail: AtomicBool::new(false),
+            copied: RwLock::new(None),
+        });
+        let pipeline = Arc::new(DictationPipeline::new(
+            PipelineServices {
+                audio: audio.clone(),
+                context: Arc::new(MockContext),
+                batch,
+                streaming: None,
+                polish: None,
+                injector,
+            },
+            AppSettings::default(),
+        ));
+
+        let starting = {
+            let pipeline = pipeline.clone();
+            tokio::spawn(async move { pipeline.start().await })
+        };
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(pipeline.state.current().await, RecordingState::Preparing);
+        assert!(pipeline.cancel().await.unwrap());
+
+        assert!(!starting.await.unwrap().unwrap());
+        assert!(!audio.recording.load(Ordering::SeqCst));
+        assert_eq!(pipeline.state.current().await, RecordingState::Idle);
     }
 
     #[test]
