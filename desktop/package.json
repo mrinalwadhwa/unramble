@@ -1,0 +1,40 @@
+{
+  "name": "freeflow-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Experimental Linux desktop shell for FreeFlow",
+  "homepage": "https://github.com/mrinalwadhwa/freeflow",
+  "author": "Mrinal Wadhwa <mrinalwadhwa@users.noreply.github.com>",
+  "desktopName": "FreeFlow",
+  "main": "out/main/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "typegen": "../scripts/generate-rpc-types.sh",
+    "daemon:build": "cargo build --manifest-path ../rust/Cargo.toml -p freeflow-daemon",
+    "dev": "npm run daemon:build && npm run typegen && electron-vite dev",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "vitest run",
+    "build": "npm run typegen && npm run typecheck && electron-vite build",
+    "package": "npm run build && electron-builder --linux AppImage deb"
+  },
+  "dependencies": {
+    "@fontsource-variable/archivo": "^5.2.8",
+    "@fontsource-variable/azeret-mono": "^5.2.8",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "5.0.4",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.0"
+  }
+}
