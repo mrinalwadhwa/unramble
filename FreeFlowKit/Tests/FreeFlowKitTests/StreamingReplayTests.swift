@@ -71,8 +71,8 @@ struct StreamingReplay {
                 "adapters.safetensors").path)
         let engine = MLXLLMEngine(
             name: "Qwen3 0.6B Polish",
-            modelID: "mlx-community/Qwen3-0.6B-4bit",
-            adapterPath: hasAdapter ? adapterDir.path : nil)
+            modelDirectory: try LocalModelTestSupport.directory(),
+            adapterDirectory: hasAdapter ? adapterDir : nil)
         let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
         let log = ReplayLog(path: "/tmp/freeflow-streaming-replay.log")

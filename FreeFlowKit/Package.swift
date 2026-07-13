@@ -18,9 +18,6 @@ let package = Package(
             url: "https://github.com/ml-explore/mlx-swift-lm",
             exact: "3.31.3"),
         .package(
-            url: "https://github.com/huggingface/swift-huggingface",
-            exact: "0.9.0"),
-        .package(
             url: "https://github.com/huggingface/swift-transformers",
             exact: "1.3.0"),
     ],
@@ -36,7 +33,6 @@ let package = Package(
                 "ObjCExceptionCatcher",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
             ],
             path: "Sources/FreeFlowKit"

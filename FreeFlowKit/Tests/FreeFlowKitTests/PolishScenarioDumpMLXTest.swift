@@ -53,21 +53,18 @@ private func logTag() -> String {
 
 private func runMLXDump(
     name: String,
-    modelID: String,
-    adapterPath: String? = nil,
+    modelDirectory: URL,
+    adapterDirectory: URL? = nil,
     logPath: String = "/tmp/freeflow-mlx-eval.log"
 ) async throws {
     let tag = logTag()
     let taggedPath = tag.isEmpty ? logPath : logPath.replacingOccurrences(
         of: ".log", with: "\(tag).log")
     let log = EvalLogger(path: taggedPath)
-    let engine: MLXLLMEngine
-    if let adapterPath {
-        engine = MLXLLMEngine(
-            name: name, modelID: modelID, adapterPath: adapterPath)
-    } else {
-        engine = MLXLLMEngine(name: name, modelID: modelID)
-    }
+    let engine = MLXLLMEngine(
+        name: name,
+        modelDirectory: modelDirectory,
+        adapterDirectory: adapterDirectory)
     let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
     let evalSet = evalScenarios()
@@ -123,7 +120,7 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Qwen3 0.6B",
-            modelID: "mlx-community/Qwen3-0.6B-4bit",
+            modelDirectory: try LocalModelTestSupport.directory(),
             logPath: "/tmp/freeflow-mlx-eval-base.log")
     }
 
@@ -133,7 +130,8 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Qwen3 1.7B",
-            modelID: "mlx-community/Qwen3-1.7B-4bit",
+            modelDirectory: try LocalModelTestSupport.directory(
+                environmentVariable: "FREEFLOW_QWEN_17_MODEL_PATH"),
             logPath: "/tmp/freeflow-mlx-eval-17.log")
     }
 
@@ -143,7 +141,8 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Gemma 3 1B",
-            modelID: "mlx-community/gemma-3-1b-it-qat-4bit",
+            modelDirectory: try LocalModelTestSupport.directory(
+                environmentVariable: "FREEFLOW_GEMMA_MODEL_PATH"),
             logPath: "/tmp/freeflow-mlx-eval-gemma.log")
     }
 
@@ -158,8 +157,9 @@ struct PolishScenarioDumpMLX {
         else { return }
         try await runMLXDump(
             name: "Qwen3 0.6B Fine-tuned",
-            modelID: "mlx-community/Qwen3-0.6B-4bit",
-            adapterPath: adapterPath,
+            modelDirectory: try LocalModelTestSupport.directory(),
+            adapterDirectory: URL(
+                fileURLWithPath: adapterPath, isDirectory: true),
             logPath: "/tmp/freeflow-mlx-eval.log")
     }
 }

@@ -6,8 +6,8 @@ import Testing
 /// Integration tests that call real local models.
 ///
 /// Gated behind `FREEFLOW_TEST_LOCAL_MODELS=1`. The MLX LLM test
-/// downloads ~400 MB on first run. The Parakeet test requires model
-/// files to be pre-downloaded to the app's models directory.
+/// requires `FREEFLOW_QWEN_MODEL_PATH` to point to a local model.
+/// The Parakeet test requires model files in the app's models directory.
 @Suite("Local model integration", .enabled(if: ProcessInfo.processInfo.environment["FREEFLOW_TEST_LOCAL_MODELS"] != nil))
 struct LocalModelIntegrationTests {
 
@@ -17,7 +17,7 @@ struct LocalModelIntegrationTests {
     func mlxLLMEngineCompletion() async throws {
         let engine = MLXLLMEngine(
             name: "Qwen3 0.6B",
-            modelID: "mlx-community/Qwen3-0.6B-4bit")
+            modelDirectory: try LocalModelTestSupport.directory())
 
         #expect(!engine.isReady)
         try await engine.load()
@@ -41,7 +41,7 @@ struct LocalModelIntegrationTests {
     func mlxPolishClientIntegration() async throws {
         let engine = MLXLLMEngine(
             name: "Qwen3 0.6B",
-            modelID: "mlx-community/Qwen3-0.6B-4bit")
+            modelDirectory: try LocalModelTestSupport.directory())
         try await engine.load()
 
         let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)

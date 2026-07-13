@@ -86,7 +86,8 @@ struct NemotronBaseline {
 
         // Stock Qwen3 0.6B — no adapter.
         let engine = MLXLLMEngine(
-            name: "Qwen3 0.6B", modelID: "mlx-community/Qwen3-0.6B-4bit")
+            name: "Qwen3 0.6B",
+            modelDirectory: try LocalModelTestSupport.directory())
         let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
         let log = BaselineLogger(path: "/tmp/freeflow-nemotron-baseline.log")

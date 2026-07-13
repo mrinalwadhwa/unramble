@@ -1,32 +1,35 @@
 import Foundation
-import HuggingFace
 import MLXLLM
 import MLXLMCommon
 import Tokenizers
 
 /// On-device LLM engine using MLX via mlx-swift-lm.
 ///
-/// Load a HuggingFace model (e.g. "mlx-community/Qwen3-0.6B-4bit")
-/// and run text completions on Apple Silicon GPU via the MLX runtime.
-/// Thread-safe: all model access is serialized through `ModelContainer`.
+/// Load a model from a local directory and run text completions on
+/// Apple Silicon GPU via the MLX runtime.
+/// Completion access is serialized through `ModelContainer`.
 public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
 
     public let name: String
-    private let modelID: String
-    private let adapterPath: String?
+    private let modelDirectory: URL
+    private let adapterDirectory: URL?
     private let lock = NSLock()
     private var container: ModelContainer?
 
     /// - Parameters:
     ///   - name: Display name for diagnostics.
-    ///   - modelID: HuggingFace model ID (e.g. "mlx-community/Qwen3-0.6B-4bit")
-    ///     or absolute path to a local model directory.
-    ///   - adapterPath: Optional path to a LoRA adapter directory
+    ///   - modelDirectory: Local directory containing model configuration,
+    ///     tokenizer, and weights.
+    ///   - adapterDirectory: Optional local LoRA adapter directory
     ///     containing `adapter_config.json` and `adapters.safetensors`.
-    public init(name: String, modelID: String, adapterPath: String? = nil) {
+    public init(
+        name: String,
+        modelDirectory: URL,
+        adapterDirectory: URL? = nil
+    ) {
         self.name = name
-        self.modelID = modelID
-        self.adapterPath = adapterPath
+        self.modelDirectory = modelDirectory
+        self.adapterDirectory = adapterDirectory
     }
 
     public var isReady: Bool { lock.withLock { container != nil } }
@@ -34,28 +37,22 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
     public func load() async throws {
         guard !isReady else { return }
 
-        // Support both HuggingFace repo IDs and local directory paths.
-        let configuration: ModelConfiguration
-        if modelID.hasPrefix("/") {
-            configuration = ModelConfiguration(
-                directory: URL(fileURLWithPath: modelID))
-        } else {
-            configuration = ModelConfiguration(id: modelID)
-        }
+        try validateModelDirectory()
+        try validateAdapterDirectory()
 
         let loaded = try await loadModelContainer(
-            from: HubDownloaderBridge(),
-            using: TokenizerLoaderBridge(),
-            configuration: configuration)
+            from: modelDirectory,
+            using: TokenizerLoaderBridge())
 
         // Apply LoRA adapter if provided.
-        if let adapterPath {
-            let adapterURL = URL(fileURLWithPath: adapterPath)
-            let adapter = try LoRAContainer.from(directory: adapterURL)
+        if let adapterDirectory {
+            let adapter = try LoRAContainer.from(directory: adapterDirectory)
             try await loaded.perform { context in
                 try context.model.load(adapter: adapter)
             }
-            Log.debug("[MLXLLMEngine] \(name) adapter loaded from \(adapterPath)")
+            Log.debug(
+                "[MLXLLMEngine] \(name) adapter loaded from "
+                    + adapterDirectory.path)
         }
 
         lock.withLock { container = loaded }
@@ -65,6 +62,62 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
     public func unload() async {
         lock.withLock { container = nil }
         Log.debug("[MLXLLMEngine] \(name) unloaded")
+    }
+
+    private func validateModelDirectory() throws {
+        guard modelDirectory.isFileURL else {
+            throw LocalModelError.modelLoadFailed(
+                "Model directory must be a local file URL")
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: modelDirectory.path, isDirectory: &isDirectory
+        ), isDirectory.boolValue else {
+            throw LocalModelError.modelNotFound(modelDirectory.path)
+        }
+
+        let requiredFiles = ["config.json", "tokenizer.json"]
+        let missing = requiredFiles.filter {
+            !FileManager.default.fileExists(
+                atPath: modelDirectory.appendingPathComponent($0).path)
+        }
+        let files = (try? FileManager.default.contentsOfDirectory(
+            atPath: modelDirectory.path)) ?? []
+        let hasWeights = files.contains { $0.hasSuffix(".safetensors") }
+
+        guard missing.isEmpty, hasWeights else {
+            let details = missing + (hasWeights ? [] : ["*.safetensors"])
+            throw LocalModelError.modelLoadFailed(
+                "Incomplete local model at \(modelDirectory.path); missing "
+                    + details.joined(separator: ", "))
+        }
+    }
+
+    private func validateAdapterDirectory() throws {
+        guard let adapterDirectory else { return }
+        guard adapterDirectory.isFileURL else {
+            throw LocalModelError.modelLoadFailed(
+                "Adapter directory must be a local file URL")
+        }
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: adapterDirectory.path, isDirectory: &isDirectory
+        ), isDirectory.boolValue else {
+            throw LocalModelError.modelNotFound(adapterDirectory.path)
+        }
+
+        let requiredFiles = ["adapter_config.json", "adapters.safetensors"]
+        let missing = requiredFiles.filter {
+            !FileManager.default.fileExists(
+                atPath: adapterDirectory.appendingPathComponent($0).path)
+        }
+        guard missing.isEmpty else {
+            throw LocalModelError.modelLoadFailed(
+                "Incomplete local adapter at \(adapterDirectory.path); missing "
+                    + missing.joined(separator: ", "))
+        }
     }
 
     public func complete(
@@ -91,35 +144,6 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return cleaned
-    }
-}
-
-// MARK: - HuggingFace Bridge Types
-
-/// Bridge `HuggingFace.HubClient` to the `MLXLMCommon.Downloader` protocol.
-private struct HubDownloaderBridge: MLXLMCommon.Downloader {
-    private let hub = HubClient()
-
-    func download(
-        id: String,
-        revision: String?,
-        matching patterns: [String],
-        useLatest: Bool,
-        progressHandler: @Sendable @escaping (Progress) -> Void
-    ) async throws -> URL {
-        guard let repoID = HuggingFace.Repo.ID(rawValue: id) else {
-            throw LocalModelError.modelLoadFailed(
-                "Invalid HuggingFace repository ID: '\(id)'")
-        }
-        let revision = revision ?? "main"
-
-        return try await hub.downloadSnapshot(
-            of: repoID,
-            revision: revision,
-            matching: patterns,
-            progressHandler: { @MainActor progress in
-                progressHandler(progress)
-            })
     }
 }
 

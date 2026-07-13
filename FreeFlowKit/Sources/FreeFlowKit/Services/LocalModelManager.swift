@@ -1,11 +1,10 @@
 import Foundation
 
-/// Manage local model files: download, cache, and verify.
+/// Manage local model files stored outside the app bundle.
 ///
-/// Models are stored under the app's Application Support directory.
-/// The Parakeet ONNX model is downloaded and extracted by this
-/// manager. The MLX LLM model is managed by mlx-swift-lm's own
-/// download system — this manager only handles ONNX models.
+/// Model directories can be stored under the app's Application Support
+/// directory. This manager provides an explicit path and archive
+/// installation utility; it does not resolve remote registry IDs.
 public final class LocalModelManager: @unchecked Sendable {
 
     /// Root directory where model directories are stored.

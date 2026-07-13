@@ -283,12 +283,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let modelManager = LocalModelManager()
 
             // Resolve model paths: app bundle first, then Application Support.
-            let qwenModelPath = Self.resolveModelPath(
+            guard let qwenModelPath = Self.resolveModelPath(
                 "qwen3-0.6b-4bit", file: "model.safetensors",
                 modelManager: modelManager)
-            let adapterPath = Self.resolveModelPath(
+            else {
+                fatalError(
+                    "Required local model is missing: qwen3-0.6b-4bit")
+            }
+            guard let adapterPath = Self.resolveModelPath(
                 "qwen3-0.6b-4bit-polish-adapter", file: "adapters.safetensors",
                 modelManager: modelManager)
+            else {
+                fatalError(
+                    "Required local model is missing: "
+                        + "qwen3-0.6b-4bit-polish-adapter")
+            }
 
             let sttEngine: any LocalSTTEngine
             let nemotronDir = modelManager.modelPath(
@@ -312,8 +321,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let llmEngine = MLXLLMEngine(
                 name: "Qwen3 0.6B Polish",
-                modelID: qwenModelPath ?? "mlx-community/Qwen3-0.6B-4bit",
-                adapterPath: adapterPath)
+                modelDirectory: URL(
+                    fileURLWithPath: qwenModelPath, isDirectory: true),
+                adapterDirectory: URL(
+                    fileURLWithPath: adapterPath, isDirectory: true))
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
             batchProvider = nil
@@ -338,7 +349,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try await llm
                     Log.debug("[AppDelegate] Models preloaded")
                 } catch {
-                    Log.debug("[AppDelegate] Preload failed (will retry on first use): \(error)")
+                    fatalError(
+                        "Required local models failed to preload: \(error)")
                 }
             }
             #else
