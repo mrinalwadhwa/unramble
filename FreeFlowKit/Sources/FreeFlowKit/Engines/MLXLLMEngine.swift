@@ -15,6 +15,8 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
     private let adapterDirectory: URL?
     private let lock = NSLock()
     private var container: ModelContainer?
+    private var loadGeneration: UInt = 0
+    private let loadFlight = AsyncSingleFlight<Void>()
 
     /// - Parameters:
     ///   - name: Display name for diagnostics.
@@ -35,36 +37,64 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
     public var isReady: Bool { lock.withLock { container != nil } }
 
     public func load() async throws {
-        guard !isReady else { return }
-
-        try validateModelDirectory()
-        try validateAdapterDirectory()
-
-        let loaded = try await loadModelContainer(
-            from: modelDirectory,
-            using: TokenizerLoaderBridge())
-
-        // Apply LoRA adapter if provided.
-        if let adapterDirectory {
-            let adapter = try LoRAContainer.from(directory: adapterDirectory)
-            try await loaded.perform { context in
-                try context.model.load(adapter: adapter)
-            }
-            Log.debug(
-                "[MLXLLMEngine] \(name) adapter loaded from "
-                    + adapterDirectory.path)
+        let generation = lock.withLock { () -> UInt? in
+            container == nil ? loadGeneration : nil
         }
+        guard let generation else { return }
 
-        lock.withLock { container = loaded }
-        Log.debug("[MLXLLMEngine] \(name) loaded")
+        try await loadFlight.run { [self] in
+            let shouldLoad = lock.withLock {
+                container == nil && loadGeneration == generation
+            }
+            guard shouldLoad else {
+                if isReady { return }
+                throw CancellationError()
+            }
+
+            try Self.validateModelDirectory(modelDirectory)
+            try Self.validateAdapterDirectory(adapterDirectory)
+            try Task.checkCancellation()
+
+            let loaded = try await loadModelContainer(
+                from: modelDirectory,
+                using: TokenizerLoaderBridge())
+            try Task.checkCancellation()
+
+            if let adapterDirectory {
+                let adapter = try LoRAContainer.from(
+                    directory: adapterDirectory)
+                try await loaded.perform { context in
+                    try context.model.load(adapter: adapter)
+                }
+                Log.debug(
+                    "[MLXLLMEngine] \(name) adapter loaded from "
+                        + adapterDirectory.path)
+            }
+
+            try Task.checkCancellation()
+            let installed = lock.withLock {
+                guard loadGeneration == generation else { return false }
+                container = loaded
+                return true
+            }
+            guard installed else { throw CancellationError() }
+            Log.debug("[MLXLLMEngine] \(name) loaded")
+        }
     }
 
+    /// Cancel and drain an in-progress load before releasing the container.
+    /// A concurrent `load()` may receive `CancellationError` and should retry
+    /// after this method returns if it still requires the model.
     public func unload() async {
-        lock.withLock { container = nil }
+        lock.withLock {
+            loadGeneration &+= 1
+            container = nil
+        }
+        await loadFlight.cancel()
         Log.debug("[MLXLLMEngine] \(name) unloaded")
     }
 
-    private func validateModelDirectory() throws {
+    private static func validateModelDirectory(_ modelDirectory: URL) throws {
         guard modelDirectory.isFileURL else {
             throw LocalModelError.modelLoadFailed(
                 "Model directory must be a local file URL")
@@ -94,7 +124,7 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
         }
     }
 
-    private func validateAdapterDirectory() throws {
+    private static func validateAdapterDirectory(_ adapterDirectory: URL?) throws {
         guard let adapterDirectory else { return }
         guard adapterDirectory.isFileURL else {
             throw LocalModelError.modelLoadFailed(

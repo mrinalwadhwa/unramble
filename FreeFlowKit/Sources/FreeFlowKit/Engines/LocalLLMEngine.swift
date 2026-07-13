@@ -16,7 +16,7 @@ public protocol LocalLLMEngine: Sendable {
 
     /// Load the model into memory.
     ///
-    /// No-op if already loaded. Throws on failure (download error,
+    /// No-op if already loaded. Throws on failure (missing model files,
     /// unsupported hardware, etc.).
     func load() async throws
 
