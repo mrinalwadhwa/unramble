@@ -38,8 +38,8 @@ export function Hud(): React.JSX.Element {
 
   const bars = useMemo(
     () =>
-      Array.from({ length: 13 }, (_, index) => {
-        const distance = Math.abs(index - 6) / 6;
+      Array.from({ length: 9 }, (_, index) => {
+        const distance = Math.abs(index - 4) / 4;
         const threshold = 0.06 + distance * 0.48;
         return Math.max(0.14, Math.min(1, level * 1.8 - threshold + 0.35));
       }),

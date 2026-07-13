@@ -14,9 +14,10 @@ so your audio and transcripts never pass through anyone else's servers.
 
 FreeFlow now has a separate experimental Linux application beside the native
 macOS source. It combines a Rust dictation daemon with an Electron tray, settings
-window, and recording HUD. X11 supports global push-to-talk and clipboard paste;
-Wayland provides explicit window and tray controls with a safe manual-paste
-fallback when the compositor blocks automation.
+window, and recording HUD. X11 supports global push-to-talk and clipboard paste.
+Wayland uses the Global Shortcuts portal and compositor-assisted paste when
+available, with a visible clipboard recovery action when a compositor blocks
+automation.
 
 ```bash
 ./scripts/bootstrap-linux.sh
@@ -27,7 +28,8 @@ freeflow
 
 The user-local install appears as FreeFlow in application launchers and as the
 `freeflow` command in dmenu-style command launchers. It starts in the tray when
-you sign in and uses `Ctrl+Win` as the default hold-to-talk shortcut under X11.
+you sign in and uses `Ctrl+Win` as the default hold-to-talk shortcut. Hyprland
+supports the complete hold-to-talk and automatic-insertion path.
 
 See [docs/LINUX.md](docs/LINUX.md) for distribution packages, build commands,
 credential-store requirements, Wayland restrictions, and troubleshooting. The

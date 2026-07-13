@@ -162,6 +162,33 @@ async fn reports_a_realtime_disconnect_for_batch_fallback() {
 }
 
 #[tokio::test]
+async fn preserves_the_server_error_after_the_realtime_socket_closes() {
+    let (_server, providers) = providers(Scenario::RealtimeError).await;
+    let session = providers
+        .realtime
+        .begin("en", MicProximity::NearField, CancellationToken::new())
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let error = session
+        .send_audio(AudioChunk {
+            samples: vec![1_000; 320],
+            sample_rate: CAPTURE_SAMPLE_RATE,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        FreeFlowError::Api {
+            status: 0,
+            message: "scripted realtime failure".into()
+        }
+    );
+}
+
+#[tokio::test]
 async fn cancellation_stops_batch_requests() {
     let (server, providers) = providers(Scenario::Delayed).await;
     let cancellation = CancellationToken::new();
@@ -173,4 +200,42 @@ async fn cancellation_stops_batch_requests() {
         .unwrap_err();
     assert_eq!(error, FreeFlowError::Cancelled);
     assert_eq!(server.metrics().await.batch_requests, 0);
+}
+
+#[tokio::test]
+async fn live_realtime_transcribes_opt_in_pcm() {
+    if std::env::var("FREEFLOW_TEST_OPENAI").as_deref() != Ok("1") {
+        return;
+    }
+    let key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY is required");
+    let path = std::env::var("FREEFLOW_TEST_OPENAI_PCM")
+        .expect("FREEFLOW_TEST_OPENAI_PCM must point to 16 kHz mono PCM16 audio");
+    let bytes = std::fs::read(path).expect("test PCM should be readable");
+    assert_eq!(bytes.len() % 2, 0, "PCM16 must have complete samples");
+    let samples = bytes
+        .chunks_exact(2)
+        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+        .collect::<Vec<_>>();
+    let credentials = MemoryCredentials::with_api_key(&key).await;
+    let providers = OpenAIProviders::new(AppSettings::default(), credentials);
+    let session = providers
+        .realtime
+        .begin("en", MicProximity::NearField, CancellationToken::new())
+        .await
+        .expect("live realtime session should connect");
+    for chunk in samples.chunks((CAPTURE_SAMPLE_RATE / 10) as usize) {
+        session
+            .send_audio(AudioChunk {
+                samples: chunk.to_vec(),
+                sample_rate: CAPTURE_SAMPLE_RATE,
+            })
+            .await
+            .expect("live realtime audio should stream");
+    }
+    let transcript = session
+        .finish()
+        .await
+        .expect("live realtime session should finalize");
+
+    assert!(!transcript.trim().is_empty());
 }

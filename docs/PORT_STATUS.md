@@ -45,9 +45,9 @@ The native implementation establishes these concrete rules:
 | macOS capability | Linux replacement | Current state |
 | --- | --- | --- |
 | AVFoundation microphone capture | CPAL with PulseAudio and ALSA/PipeWire bridges | Implemented |
-| Carbon event hotkey | X11 passive key grab | Implemented for modifier chords and modifier-plus-key shortcuts |
-| Accessibility and paste injection | Desktop clipboard and XTest paste | Implemented with manual-paste fallback |
-| NSWorkspace application context | X11 active-window metadata | Implemented for X11 targets |
+| Carbon event hotkey | X11 passive grabs and the XDG Global Shortcuts portal | Implemented on X11 and verified on Hyprland |
+| Accessibility and paste injection | Clipboard, XTest, Hyprland dispatch, and `wtype` | Implemented with retained-clipboard recovery |
+| NSWorkspace application context | X11 and Hyprland active-window metadata | Implemented for X11 and Hyprland targets |
 | Keychain credential storage | Secret Service | Implemented with session-only fallback |
 | SwiftUI menu bar and overlay | Electron tray, settings, and non-focusable HUD | Implemented |
 
@@ -57,23 +57,24 @@ The native implementation establishes these concrete rules:
 | --- | --- | --- |
 | Rust workspace | Complete | Six bounded application crates and a deterministic mock-service crate build together. |
 | Core state machine | Complete | Explicit transitions, duplicate-start protection, startup-safe cancellation, timeout behavior, and transcript recovery have unit coverage. |
-| OpenAI realtime | Complete | The client streams 24 kHz PCM over the current transcription session protocol and collects partial and final events; the deterministic service verifies the wire flow. Live-service validation remains opt-in. |
+| OpenAI realtime | Complete | The client uses the current transcription-session WebSocket intent, streams 24 kHz PCM, preserves server errors, and collects partial/final events. Deterministic and opt-in live-service tests pass. |
 | Batch fallback | Complete | Multipart WAV transcription is cancellable, bounded by a deadline, and covered against the local service. |
-| Audio capture | Complete | CPAL enumerates PulseAudio and ALSA inputs, downmixes and resamples callbacks, bounds recordings, publishes levels, and falls back when a selected device disappears. A live PipeWire-backed preview completed on the development host. |
+| Audio capture | Complete | CPAL enumerates and persists devices, resolves a selected backend without rescanning every host, pre-opens and pauses streams, requests low-latency buffers, publishes levels, and falls back when a device disappears. A real Kiyo preview starts in about 200 ms after warm-up. |
 | X11 shortcut | Partial | XGrabKey registers modifier chords and ordinary combinations, handles either Ctrl+Win key order and lock modifiers, distinguishes press/release, filters auto-repeat, and unregisters cleanly. A real X11/XWayland Ctrl+Win press and release drove live microphone capture successfully. Xvfb CI remains. |
-| Wayland shortcut | Partial | The daemon detects Wayland, refuses misleading XWayland-only registration, and exposes window/tray controls with an actionable limitation. Portal registration remains. |
-| X11 injection | Partial | Clipboard plus XTest selects Ctrl+V or terminal-safe Ctrl+Shift+V and retains the transcript on fallback. X11 target-matrix verification remains. |
+| Wayland shortcut | Partial | XDG portal registration and press/release work end to end on Hyprland 0.55 with the default modifier-only Ctrl+Win chord. GNOME, KDE, and other portal backends remain unverified. |
+| X11 injection | Partial | Clipboard plus XTest selects Ctrl+V or terminal-safe Ctrl+Shift+V and retains the transcript on fallback. The broad X11 target matrix remains. |
+| Wayland injection | Partial | Hyprland restores the captured target and dispatches paste; `wtype` covers virtual-keyboard-capable compositors. A native-Wayland Chromium field passed the physical-shortcut cloud test. Other compositors remain unverified. |
 | AT-SPI injection | Deferred | Clipboard delivery has priority. |
-| Application context | Partial | Active window, PID, process, class, title, desktop, and terminal hints are collected over X11. Toolkit editability remains deferred. |
+| Application context | Partial | Active window, PID, process, class, title, desktop, and terminal hints are collected over X11 and Hyprland. Toolkit editability remains deferred. |
 | Credential storage | Complete | Secret Service holds persistent keys; environment and explicit session-only keys remain in memory. Ordinary JSON settings contain no credential fields and use mode 0600. |
 | Local RPC | Complete | JSON-RPC WebSockets bind to an ephemeral loopback port, authenticate a random launch token, admit one shell, carry notifications, and pass auth/request/error tests. |
 | Rust daemon | Complete | The daemon supervises the pipeline, hotkey, previews, settings, diagnostics, signals, and authenticated RPC; its ready record is machine-readable. |
 | Electron tray | Complete | The tray exposes recording, cancellation, transcript recovery, microphone status, settings, diagnostics, and quit actions. It supervises the daemon with bounded restarts. |
-| HUD | Complete | The transparent always-on-top HUD ignores focus and pointer input and displays state and audio level. |
+| HUD | Complete | The compact 260×64 transparent HUD ignores pointer input and displays state and audio level. The pipeline restores the captured target after compositors temporarily activate the overlay. |
 | Settings and onboarding | Complete | The renderer configures credentials, microphone preview, language, models, shortcut, polish, context sharing, and XDG start-on-login through typed RPC. Fresh installs enable hidden tray startup and Ctrl+Win by default. |
 | Diagnostics | Complete | The UI displays environment and backend status; private JSON exports contain only a fixed sanitized diagnostics model. |
 | Transcript polish | Complete | The deterministic cleanup, clean-input bypass, restrained prompt, safe-output check, and API failure fallback have coverage. |
-| Mock service and smoke test | Partial | The service scripts realtime, batch, polish, authentication, rate-limit, delay, malformed-response, and disconnect behaviors. Provider integration tests and packaged daemon startup pass; deterministic audio-to-GUI injection remains. |
+| Mock service and smoke test | Partial | The service scripts realtime, batch, polish, authentication, rate-limit, delay, malformed-response, and disconnect behaviors. A deterministic virtual microphone plus a live API completed physical Ctrl+Win-to-Chromium insertion; the same path still needs a fully offline CI driver. |
 | Linux packaging | Complete | The release build produces an AppImage and Debian package containing the daemon. A tested user installer adds a stable AppImage, icon, desktop launcher, dmenu command, and autostart entry without root. |
 | Linux CI | Complete | A separate Ubuntu workflow checks formatting, Clippy, all Rust tests, generated RPC drift, TypeScript, desktop tests, and the production Electron bundle. |
 
@@ -82,7 +83,7 @@ The native implementation establishes these concrete rules:
 - Offline speech models and Apple-specific model runtimes.
 - Full Windows support.
 - Direct AT-SPI editing unless the clipboard path is complete and reliable.
-- Broad Wayland compositor support beyond honest detection and safe fallback.
+- Portal and virtual-keyboard validation across GNOME, KDE, and other Wayland compositors.
 - Release signing and automatic updates beyond package metadata scaffolding.
 
 ## Algorithms Suitable for Direct Porting

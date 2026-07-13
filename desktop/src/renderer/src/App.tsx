@@ -158,13 +158,15 @@ export function App(): React.JSX.Element {
         {permissions.sessionType === 'wayland' && (
           <div className="wayland-note">
             <span>WAYLAND</span>
-            <p>{permissions.message ?? 'Use the on-screen control. Text remains copied when automatic paste is blocked.'}</p>
+            <p>{permissions.message ?? 'FreeFlow uses the desktop shortcut portal and compositor-assisted automatic paste.'}</p>
           </div>
         )}
 
         {view === 'flow' && (
           <FlowView
             status={status}
+            settings={settings}
+            devices={devices}
             shortcut={shortcut}
             level={level}
             busy={busy !== null}
@@ -172,6 +174,7 @@ export function App(): React.JSX.Element {
             onCopy={() => void run('copy', () => window.freeflow.invoke('dictation.copyLastTranscript'), 'Last transcript copied.')}
             onPaste={() => void run('paste', () => window.freeflow.invoke('dictation.injectLastTranscript'))}
             onCancel={() => void run('cancel', () => window.freeflow.invoke('dictation.cancel'))}
+            onDevice={(id) => void run('device', () => window.freeflow.invoke('audio.selectDevice', { id }), 'Microphone updated.')}
           />
         )}
         {view === 'voice' && (
@@ -181,7 +184,10 @@ export function App(): React.JSX.Element {
             devices={devices}
             level={level}
             busy={busy}
-            onSaveKey={(apiKey, persist) => void run('api-key', () => window.freeflow.invoke('credentials.setApiKey', { apiKey, persist }), persist ? 'API key saved in Secret Service.' : 'API key active for this session.')}
+            onSaveKey={async (apiKey, persist) => {
+              const result = await run('api-key', () => window.freeflow.invoke('credentials.setApiKey', { apiKey, persist }), persist ? 'API key saved in Secret Service.' : 'API key active for this session.');
+              return result !== null;
+            }}
             onDeleteKey={() => void run('delete-key', () => window.freeflow.invoke('credentials.deleteApiKey'), 'API key removed.')}
             onDevice={(id) => void run('device', () => window.freeflow.invoke('audio.selectDevice', { id }), 'Microphone updated.')}
             onPreview={(active) => void run('preview', () => window.freeflow.invoke(active ? 'audio.stopPreview' : 'audio.startPreview'))}
@@ -244,6 +250,8 @@ export function App(): React.JSX.Element {
 
 function FlowView(props: {
   status: AppStatus;
+  settings: AppSettings;
+  devices: AudioDevice[];
   shortcut: string;
   level: number;
   busy: boolean;
@@ -251,6 +259,7 @@ function FlowView(props: {
   onCopy(): void;
   onPaste(): void;
   onCancel(): void;
+  onDevice(id: string | null): void;
 }): React.JSX.Element {
   const { status, shortcut, level } = props;
   const active = status.state === 'recording' || status.state === 'preparing';
@@ -279,9 +288,9 @@ function FlowView(props: {
         <span className="panel-index">SIGNAL PATH / 01</span>
         <h2>Ready where your cursor is.</h2>
         <dl className="health-list">
-          <div><dt>Microphone</dt><dd>{status.selectedDevice?.name ?? 'System default'}</dd></div>
+          <div><dt>Microphone</dt><dd><select aria-label="Microphone" value={props.settings.selectedAudioDevice ?? ''} disabled={props.busy} onChange={(event) => props.onDevice(event.target.value || null)}><option value="">System default</option>{props.devices.map((device) => <option key={device.id} value={device.id}>{device.name} · {device.backend}{device.isDefault ? ' · default' : ''}</option>)}</select></dd></div>
           <div><dt>Global trigger</dt><dd>{status.hotkeyRegistered ? 'Armed' : 'Window control'}</dd></div>
-          <div><dt>Delivery</dt><dd>{status.sessionType === 'x11' ? 'Automatic paste' : 'Clipboard safe'}</dd></div>
+          <div><dt>Delivery</dt><dd>{status.sessionType === 'unknown' ? 'Clipboard recovery' : 'Automatic paste'}</dd></div>
         </dl>
       </section>
 
@@ -303,7 +312,7 @@ function VoiceView(props: {
   devices: AudioDevice[];
   level: number;
   busy: string | null;
-  onSaveKey(apiKey: string, persist: boolean): void;
+  onSaveKey(apiKey: string, persist: boolean): Promise<boolean>;
   onDeleteKey(): void;
   onDevice(id: string | null): void;
   onPreview(active: boolean): void;
@@ -318,7 +327,7 @@ function VoiceView(props: {
         <div className="credential-state"><StatusLamp active={props.credentials.hasApiKey} /><strong>{props.credentials.hasApiKey ? 'Credential configured' : 'Credential required'}</strong><span>{props.credentials.secureStoreAvailable ? 'Secret Service available' : 'Session storage only'}</span></div>
         <label className="field field--wide"><span>API key</span><input type="password" value={key} autoComplete="off" placeholder={props.credentials.hasApiKey ? 'Replace existing credential' : 'Paste API key'} onChange={(event) => setKey(event.target.value)} /></label>
         {!props.credentials.secureStoreAvailable && <p className="field-warning">No Secret Service is available. The key will stay in memory and disappear when FreeFlow quits.</p>}
-        <div className="button-row"><button className="button button--acid" disabled={key.length < 8} onClick={() => { props.onSaveKey(key, props.credentials.secureStoreAvailable); setKey(''); }}>Save credential</button>{props.credentials.hasApiKey && <button className="button button--danger" onClick={props.onDeleteKey}>Delete</button>}</div>
+        <div className="button-row"><button className="button button--acid" disabled={key.length < 8 || props.busy !== null} onClick={async () => { if (await props.onSaveKey(key, props.credentials.secureStoreAvailable)) setKey(''); }}>Save credential</button>{props.credentials.hasApiKey && <button className="button button--danger" onClick={props.onDeleteKey}>Delete</button>}</div>
       </section>
 
       <section className="panel form-panel">
@@ -366,7 +375,7 @@ function DeliveryView(props: {
           <span>+</span>
           <input value={key} placeholder="modifier only" aria-label="Shortcut key" onChange={(event) => setKey(event.target.value)} onBlur={() => props.onShortcut({ modifiers, key: key || null })} />
         </div>
-        <p className="field-note">{props.status.sessionType === 'wayland' ? 'Your compositor blocks this global trigger. The tray and Flow button remain available.' : props.status.hotkeyRegistered ? 'Registered globally. Key auto-repeat is ignored.' : 'Not registered. Choose a combination that another application does not own.'}</p>
+        <p className="field-note">{props.status.hotkeyRegistered ? props.status.sessionType === 'wayland' ? 'Registered through the desktop shortcut portal. Key auto-repeat is ignored.' : 'Registered globally. Key auto-repeat is ignored.' : props.status.sessionType === 'wayland' ? 'The compositor did not register this trigger. The tray and Flow button remain available.' : 'Not registered. Choose a combination that another application does not own.'}</p>
       </section>
 
       <section className="panel form-panel">

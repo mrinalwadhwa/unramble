@@ -232,26 +232,32 @@ export class DaemonSupervisor {
   }
 
   private receive(raw: string): void {
+    let message: JsonRpcResponse | RpcNotification;
     try {
-      const message = JSON.parse(raw) as JsonRpcResponse | RpcNotification;
-      if ('method' in message) {
-        this.options.onNotification(message.method, message.params);
-        return;
-      }
-      if (typeof message.id !== 'number') return;
-      const pending = this.pending.get(message.id);
-      if (!pending) return;
-      clearTimeout(pending.timer);
-      this.pending.delete(message.id);
-      if (message.error) {
-        pending.reject(
-          new RpcCallError(message.error.message, message.error.code, message.error.data)
-        );
-      } else {
-        pending.resolve(message.result);
-      }
+      message = JSON.parse(raw) as JsonRpcResponse | RpcNotification;
     } catch {
       this.options.onCrash('The background service sent an unreadable response.');
+      return;
+    }
+    if ('method' in message) {
+      try {
+        this.options.onNotification(message.method, message.params);
+      } catch {
+        console.error(`FreeFlow could not display the ${message.method} notification`);
+      }
+      return;
+    }
+    if (typeof message.id !== 'number') return;
+    const pending = this.pending.get(message.id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pending.delete(message.id);
+    if (message.error) {
+      pending.reject(
+        new RpcCallError(message.error.message, message.error.code, message.error.data)
+      );
+    } else {
+      pending.resolve(message.result);
     }
   }
 

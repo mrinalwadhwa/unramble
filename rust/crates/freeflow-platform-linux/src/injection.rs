@@ -15,6 +15,9 @@ use x11rb::{
 
 use crate::{detect_session_type, x11};
 
+const PASTE_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+const CLIPBOARD_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(800);
+
 #[derive(Clone)]
 pub struct LinuxTextInjector {
     clipboard: Arc<Mutex<Option<Clipboard>>>,
@@ -79,6 +82,104 @@ impl LinuxTextInjector {
         connection.flush().map_err(injection_error)?;
         Ok(())
     }
+
+    async fn paste_wayland(
+        use_terminal_shortcut: bool,
+        target_window_id: Option<u64>,
+    ) -> Result<()> {
+        if is_hyprland() {
+            if let Some(target_window_id) = target_window_id {
+                let target = format!("address:0x{target_window_id:x}");
+                let output = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    tokio::process::Command::new("hyprctl")
+                        .args(["dispatch", "focuswindow"])
+                        .arg(target)
+                        .output(),
+                )
+                .await
+                .map_err(|_| {
+                    FreeFlowError::Injection("restoring the target window timed out".into())
+                })?
+                .map_err(|error| {
+                    FreeFlowError::Injection(format!(
+                        "could not restore the dictation target: {error}"
+                    ))
+                })?;
+                if !output.status.success() {
+                    return Err(FreeFlowError::Injection(
+                        "Hyprland could not restore the dictation target".into(),
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            }
+            let modifiers = if use_terminal_shortcut {
+                "CTRL SHIFT"
+            } else {
+                "CTRL"
+            };
+            let shortcut = format!("{modifiers},V,activewindow");
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                tokio::process::Command::new("hyprctl")
+                    .args(["dispatch", "sendshortcut"])
+                    .arg(shortcut)
+                    .output(),
+            )
+            .await
+            .map_err(|_| FreeFlowError::Injection("Hyprland paste timed out".into()))?
+            .map_err(|error| {
+                FreeFlowError::Injection(format!(
+                    "the Hyprland input dispatcher is unavailable: {error}"
+                ))
+            })?;
+            if output.status.success() {
+                return Ok(());
+            }
+        }
+
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            tokio::process::Command::new("wtype")
+                .args(wayland_paste_args(use_terminal_shortcut))
+                .output(),
+        )
+        .await
+        .map_err(|_| FreeFlowError::Injection("Wayland paste timed out".into()))?
+        .map_err(|error| {
+            FreeFlowError::Injection(format!(
+                "the Wayland virtual-keyboard helper is unavailable: {error}"
+            ))
+        })?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            return Err(FreeFlowError::Injection(format!(
+                "the compositor rejected automatic paste: {}",
+                detail.trim().chars().take(240).collect::<String>()
+            )));
+        }
+        Ok(())
+    }
+
+    async fn wait_for_wayland_clipboard(text: &str) {
+        let deadline = tokio::time::Instant::now() + CLIPBOARD_READY_TIMEOUT;
+        while tokio::time::Instant::now() < deadline {
+            let output = tokio::time::timeout(
+                std::time::Duration::from_millis(120),
+                tokio::process::Command::new("wl-paste")
+                    .arg("--no-newline")
+                    .output(),
+            )
+            .await;
+            match output {
+                Ok(Ok(output)) if output.status.success() && output.stdout == text.as_bytes() => {
+                    return;
+                }
+                Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => return,
+                _ => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
+            }
+        }
+    }
 }
 
 impl Default for LinuxTextInjector {
@@ -91,43 +192,41 @@ impl Default for LinuxTextInjector {
 impl TextInjector for LinuxTextInjector {
     async fn inject(&self, text: &str, context: &AppContext) -> Result<InjectionResult> {
         self.set_clipboard(text).await?;
-        if detect_session_type() != SessionType::X11 {
-            return Ok(InjectionResult {
-                strategy: "clipboard".into(),
-                pasted: false,
-                clipboard_retained: true,
-                requires_manual_paste: true,
-                message: Some(
-                    "Wayland blocks unrestricted keyboard injection; press paste in the target application."
-                        .into(),
-                ),
-            });
+        let session = detect_session_type();
+        if session == SessionType::Wayland {
+            Self::wait_for_wayland_clipboard(text).await;
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(35)).await;
+        // Give the push-to-talk keys time to reach their released state before
+        // synthesizing paste. Compositors otherwise combine Ctrl+V with a
+        // modifier that still belongs to the shortcut release event.
+        tokio::time::sleep(PASTE_SETTLE_DELAY).await;
         let terminal = context.is_terminal;
-        match tokio::task::spawn_blocking(move || Self::paste_x11(terminal)).await {
-            Ok(Ok(())) => Ok(InjectionResult {
-                strategy: if terminal {
-                    "x11ClipboardCtrlShiftV".into()
-                } else {
-                    "x11ClipboardCtrlV".into()
+        let paste = match session {
+            SessionType::X11 => tokio::task::spawn_blocking(move || Self::paste_x11(terminal))
+                .await
+                .map_err(|error| FreeFlowError::Internal(error.to_string()))?,
+            SessionType::Wayland => Self::paste_wayland(terminal, context.active_window_id).await,
+            SessionType::Unknown => Err(FreeFlowError::Injection(
+                "no supported desktop input service is available".into(),
+            )),
+        };
+        match paste {
+            Ok(()) => Ok(InjectionResult {
+                strategy: match (session, terminal) {
+                    (SessionType::X11, true) => "x11ClipboardCtrlShiftV".into(),
+                    (SessionType::X11, false) => "x11ClipboardCtrlV".into(),
+                    (SessionType::Wayland, true) => "waylandClipboardCtrlShiftV".into(),
+                    (SessionType::Wayland, false) => "waylandClipboardCtrlV".into(),
+                    (SessionType::Unknown, _) => unreachable!("unknown sessions cannot paste"),
                 },
                 pasted: true,
                 clipboard_retained: true,
                 requires_manual_paste: false,
                 message: None,
             }),
-            Ok(Err(error)) => Ok(InjectionResult {
-                strategy: "clipboardFallback".into(),
-                pasted: false,
-                clipboard_retained: true,
-                requires_manual_paste: true,
-                message: Some(format!(
-                    "Automatic paste failed: {error}. The transcript remains in the clipboard."
-                )),
-            }),
-            Err(error) => Err(FreeFlowError::Internal(error.to_string())),
+            Err(error) => Err(FreeFlowError::Injection(format!(
+                "automatic paste failed: {error}. The transcript remains in the clipboard"
+            ))),
         }
     }
 
@@ -136,6 +235,50 @@ impl TextInjector for LinuxTextInjector {
     }
 }
 
+fn is_hyprland() -> bool {
+    std::env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .contains("hyprland")
+        || std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+}
+
+fn wayland_paste_args(use_terminal_shortcut: bool) -> Vec<&'static str> {
+    let mut arguments = vec!["-M", "ctrl"];
+    if use_terminal_shortcut {
+        arguments.extend(["-M", "shift"]);
+    }
+    arguments.extend(["-k", "v"]);
+    if use_terminal_shortcut {
+        arguments.extend(["-m", "shift"]);
+    }
+    arguments.extend(["-m", "ctrl"]);
+    arguments
+}
+
 fn injection_error(error: impl std::fmt::Display) -> FreeFlowError {
     FreeFlowError::Injection(format!("X11 synthetic paste failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wayland_paste_uses_ctrl_v_for_regular_fields() {
+        assert_eq!(
+            wayland_paste_args(false),
+            ["-M", "ctrl", "-k", "v", "-m", "ctrl"]
+        );
+    }
+
+    #[test]
+    fn wayland_paste_uses_ctrl_shift_v_for_terminals() {
+        assert_eq!(
+            wayland_paste_args(true),
+            [
+                "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"
+            ]
+        );
+    }
 }

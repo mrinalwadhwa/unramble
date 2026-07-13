@@ -212,7 +212,7 @@ pub enum HotkeyEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppContext {
-    pub active_window_id: Option<u32>,
+    pub active_window_id: Option<u64>,
     pub process_id: Option<u32>,
     pub app_class: String,
     pub app_name: String,

@@ -33,7 +33,7 @@ cmp "$source" "$application"
 [[ $(readlink "$command") == "$application" ]]
 grep -Fqx 'Name=FreeFlow' "$desktop"
 grep -Fqx "Exec=\"$command\"" "$desktop"
-grep -Fqx "Exec=\"$command\" --hidden" "$autostart"
+grep -Fqx "Exec=/usr/bin/env FREEFLOW_START_HIDDEN=1 \"$command\"" "$autostart"
 grep -Fqx 'X-GNOME-Autostart-enabled=true' "$autostart"
 [[ -f "$data/icons/hicolor/1024x1024/apps/freeflow.png" ]]
 

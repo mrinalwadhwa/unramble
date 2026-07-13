@@ -14,6 +14,7 @@ import {
 
 import { DaemonSupervisor } from './daemon';
 import { AUTOSTART_DESKTOP_FILENAME, autostartDesktopEntry } from './autostart';
+import { sendToWindow, useWindow } from './window-lifecycle';
 import type { AppStatus, RecordingState } from '../shared/models';
 import {
   RPC_METHODS,
@@ -29,15 +30,21 @@ let quitting = false;
 let connected = false;
 let currentStatus: AppStatus | null = null;
 let hudHideTimer: NodeJS.Timeout | null = null;
+const HUD_WIDTH = 260;
+const HUD_HEIGHT = 64;
 
 const allowedMethods = new Set<string>(RPC_METHODS);
-const launchHidden = process.argv.includes('--hidden');
+const launchHidden = process.env.FREEFLOW_START_HIDDEN === '1';
 
-if (!app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock({ launchHidden })) {
   app.quit();
 } else {
-  app.on('second-instance', (_event, commandLine) => {
-    if (!commandLine.includes('--hidden')) showSettings();
+  app.on('second-instance', (_event, _commandLine, _workingDirectory, additionalData) => {
+    const hidden =
+      typeof additionalData === 'object' &&
+      additionalData !== null &&
+      (additionalData as { launchHidden?: unknown }).launchHidden === true;
+    if (!hidden) showSettings();
   });
   void app.whenReady().then(startApplication);
 }
@@ -51,18 +58,20 @@ async function startApplication(): Promise<void> {
   supervisor = new DaemonSupervisor({
     onNotification: receiveNotification,
     onCrash: (message) => {
+      if (quitting) return;
       broadcastNotification('error.occurred', {
         category: 'daemon',
         message,
         recoverable: false
       });
+      if (!app.isReady()) return;
       void dialog.showMessageBox({
         type: 'error',
         title: 'FreeFlow background service stopped',
         message,
         buttons: ['Open settings', 'Close']
       }).then(({ response }) => {
-        if (response === 0) showSettings();
+        if (!quitting && response === 0) showSettings();
       });
     },
     onConnectionChange: (value) => {
@@ -122,15 +131,18 @@ function createWindows(): void {
   settingsWindow.on('close', (event) => {
     if (!quitting) {
       event.preventDefault();
-      settingsWindow?.hide();
+      useWindow(settingsWindow, (window) => window.hide());
     }
+  });
+  settingsWindow.on('closed', () => {
+    settingsWindow = null;
   });
   settingsWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   void loadRenderer(settingsWindow, 'app');
 
   hudWindow = new BrowserWindow({
-    width: 360,
-    height: 96,
+    width: HUD_WIDTH,
+    height: HUD_HEIGHT,
     frame: false,
     transparent: true,
     resizable: false,
@@ -149,6 +161,9 @@ function createWindows(): void {
   });
   hudWindow.setAlwaysOnTop(true, 'floating');
   hudWindow.setIgnoreMouseEvents(true);
+  hudWindow.on('closed', () => {
+    hudWindow = null;
+  });
   void loadRenderer(hudWindow, 'hud');
 }
 
@@ -214,7 +229,7 @@ function rebuildTray(): void {
       label: 'Open diagnostics',
       click: () => {
         showSettings();
-        settingsWindow?.webContents.send('freeflow:navigate', 'diagnostics');
+        sendToWindow(settingsWindow, 'freeflow:navigate', 'diagnostics');
       }
     },
     { type: 'separator' },
@@ -242,7 +257,9 @@ function registerIpc(): void {
     }
     return result;
   });
-  ipcMain.on('freeflow:window-hide', () => settingsWindow?.hide());
+  ipcMain.on('freeflow:window-hide', () => {
+    useWindow(settingsWindow, (window) => window.hide());
+  });
   ipcMain.on('freeflow:open-settings', showSettings);
 }
 
@@ -255,14 +272,17 @@ function receiveNotification(method: RpcNotificationMethod, params: unknown): vo
   }
   if (method === 'injection.completed' || method === 'injection.failed') {
     if (hudHideTimer) clearTimeout(hudHideTimer);
-    hudHideTimer = setTimeout(() => hudWindow?.hide(), method === 'injection.failed' ? 2_400 : 750);
+    hudHideTimer = setTimeout(
+      () => useWindow(hudWindow, (window) => window.hide()),
+      method === 'injection.failed' ? 2_400 : 750
+    );
   }
   broadcastNotification(method, params);
 }
 
 function broadcastNotification(method: RpcNotificationMethod, params: unknown): void {
-  settingsWindow?.webContents.send('freeflow:notification', method, params);
-  hudWindow?.webContents.send('freeflow:notification', method, params);
+  sendToWindow(settingsWindow, 'freeflow:notification', method, params);
+  sendToWindow(hudWindow, 'freeflow:notification', method, params);
 }
 
 async function refreshStatus(): Promise<void> {
@@ -276,22 +296,28 @@ async function refreshStatus(): Promise<void> {
 }
 
 function updateHud(state: RecordingState): void {
-  if (!hudWindow) return;
   if (state === 'idle') {
     if (hudHideTimer) clearTimeout(hudHideTimer);
-    hudHideTimer = setTimeout(() => hudWindow?.hide(), 600);
+    hudHideTimer = setTimeout(() => useWindow(hudWindow, (window) => window.hide()), 600);
     return;
   }
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const { x, y, width, height } = display.workArea;
-  hudWindow.setPosition(Math.round(x + (width - 360) / 2), y + height - 130, false);
-  hudWindow.showInactive();
+  useWindow(hudWindow, (window) => {
+    window.setPosition(
+      Math.round(x + (width - HUD_WIDTH) / 2),
+      y + height - HUD_HEIGHT - 18,
+      false
+    );
+    window.showInactive();
+  });
 }
 
 function showSettings(): void {
-  if (!settingsWindow) return;
-  settingsWindow.show();
-  settingsWindow.focus();
+  useWindow(settingsWindow, (window) => {
+    window.show();
+    window.focus();
+  });
 }
 
 async function applyStartOnLogin(enabled: boolean): Promise<void> {

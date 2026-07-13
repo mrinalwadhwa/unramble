@@ -16,7 +16,7 @@ export function autostartDesktopEntry(executable: string): string {
     'Type=Application',
     'Name=FreeFlow',
     'Comment=Keep push-to-talk dictation ready',
-    `Exec=${desktopExecArgument(executable)} --hidden`,
+    `Exec=/usr/bin/env FREEFLOW_START_HIDDEN=1 ${desktopExecArgument(executable)}`,
     'Icon=freeflow',
     'Terminal=false',
     'Categories=Utility;',

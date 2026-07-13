@@ -5,7 +5,7 @@ use std::sync::{
 
 use async_trait::async_trait;
 use cpal::{
-    Device, HostId, SampleFormat, Stream,
+    BufferSize, Device, HostId, SampleFormat, Stream, SupportedBufferSize,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use freeflow_core::{
@@ -30,6 +30,7 @@ struct CaptureSession {
     stream: Stream,
     data: Arc<Mutex<CaptureData>>,
     device: AudioDevice,
+    source_rate: u32,
 }
 
 #[derive(Clone)]
@@ -84,30 +85,42 @@ impl LinuxAudioProvider {
         }
     }
 
-    fn enumerate_devices() -> Result<Vec<LocatedDevice>> {
-        let mut found = Vec::new();
-        for host_id in cpal::available_hosts() {
-            let Ok(host) = cpal::host_from_id(host_id) else {
-                continue;
-            };
-            let default_id = host
-                .default_input_device()
-                .and_then(|device| device.id().ok());
-            let devices = match host.input_devices() {
-                Ok(devices) => devices,
-                Err(error) => {
-                    warn!(backend = host_id.name(), %error, "could not enumerate audio backend");
-                    continue;
-                }
-            };
-            for device in devices {
-                let Ok(native_id) = device.id() else {
-                    continue;
-                };
+    pub async fn warm_up(&self) -> Result<AudioCaptureInfo> {
+        let capture = self.start().await?;
+        if let Some(data) = self
+            .session
+            .lock()
+            .await
+            .as_ref()
+            .map(|session| session.data.clone())
+        {
+            let _ = wait_for_first_sample(&data, std::time::Duration::from_secs(1)).await;
+        }
+        self.stop().await?;
+        Ok(capture)
+    }
+
+    fn enumerate_host(host_id: HostId) -> Vec<LocatedDevice> {
+        let Ok(host) = cpal::host_from_id(host_id) else {
+            return Vec::new();
+        };
+        let default_id = host
+            .default_input_device()
+            .and_then(|device| device.id().ok());
+        let devices = match host.input_devices() {
+            Ok(devices) => devices,
+            Err(error) => {
+                warn!(backend = host_id.name(), %error, "could not enumerate audio backend");
+                return Vec::new();
+            }
+        };
+        devices
+            .filter_map(|device| {
+                let native_id = device.id().ok()?;
                 let name = device.to_string();
                 let id = format!("{}::{native_id}", host_id.name().to_ascii_lowercase());
                 let is_default = default_id.as_ref() == Some(&native_id);
-                found.push(LocatedDevice {
+                Some(LocatedDevice {
                     host_id,
                     device,
                     metadata: AudioDevice {
@@ -116,9 +129,16 @@ impl LinuxAudioProvider {
                         is_default,
                         backend: host_id.name().to_owned(),
                     },
-                });
-            }
-        }
+                })
+            })
+            .collect()
+    }
+
+    fn enumerate_devices() -> Result<Vec<LocatedDevice>> {
+        let mut found: Vec<_> = cpal::available_hosts()
+            .into_iter()
+            .flat_map(Self::enumerate_host)
+            .collect();
         if found.is_empty() {
             return Err(FreeFlowError::NoAudioDevice);
         }
@@ -127,14 +147,18 @@ impl LinuxAudioProvider {
     }
 
     fn resolve_device(selected_id: Option<&str>) -> Result<(LocatedDevice, bool)> {
-        let devices = Self::enumerate_devices()?;
         if let Some(selected_id) = selected_id
-            && let Some(device) = devices
-                .iter()
+            && let Some((backend, _)) = selected_id.split_once("::")
+            && let Some(host_id) = cpal::available_hosts()
+                .into_iter()
+                .find(|host_id| host_id.name().eq_ignore_ascii_case(backend))
+            && let Some(device) = Self::enumerate_host(host_id)
+                .into_iter()
                 .find(|device| device.metadata.id == selected_id)
         {
-            return Ok((device.clone(), false));
+            return Ok((device, false));
         }
+        let devices = Self::enumerate_devices()?;
         let fallback = devices
             .iter()
             .find(|device| {
@@ -160,8 +184,12 @@ impl LinuxAudioProvider {
             ))
         })?;
         let sample_format = supported.sample_format();
-        let config = supported.config();
+        let mut config = supported.config();
         let source_rate = config.sample_rate;
+        if let SupportedBufferSize::Range { min, max } = supported.buffer_size() {
+            let low_latency_frames = (source_rate / 50).max(64).clamp(*min, *max);
+            config.buffer_size = BufferSize::Fixed(low_latency_frames);
+        }
         let channels = config.channels;
         if channels == 0 || source_rate == 0 {
             return Err(FreeFlowError::Audio(format!(
@@ -169,12 +197,7 @@ impl LinuxAudioProvider {
                 located.metadata.name
             )));
         }
-        let data = Arc::new(Mutex::new(CaptureData {
-            samples: Vec::with_capacity(CAPTURE_SAMPLE_RATE as usize * 30),
-            resampler: StreamingResampler::new(source_rate, CAPTURE_SAMPLE_RATE),
-            meter: AudioMeter::new(proximity),
-            error: None,
-        }));
+        let data = Arc::new(Mutex::new(fresh_capture_data(source_rate, proximity)));
         let make_error_callback = || {
             let error_data = data.clone();
             move |error: cpal::Error| {
@@ -256,6 +279,7 @@ impl LinuxAudioProvider {
                 stream,
                 data,
                 device: located.metadata,
+                source_rate,
             },
             info,
         ))
@@ -293,6 +317,42 @@ impl AudioProvider for LinuxAudioProvider {
             );
             *self.selected_id.write().await = None;
         }
+        let mut cached = self.session.lock().await;
+        if let Some(session) = cached.as_mut()
+            && session.device.id == located.metadata.id
+        {
+            if let Ok(mut data) = session.data.lock() {
+                *data = fresh_capture_data(session.source_rate, self.proximity());
+            } else {
+                self.recording.store(false, Ordering::SeqCst);
+                return Err(FreeFlowError::Audio(
+                    "audio capture lock was poisoned".into(),
+                ));
+            }
+            if let Err(error) = session.stream.play() {
+                self.recording.store(false, Ordering::SeqCst);
+                return Err(FreeFlowError::Audio(format!(
+                    "could not resume {} through {}: {error}",
+                    session.device.name, session.device.backend
+                )));
+            }
+            let info = AudioCaptureInfo {
+                device: session.device.clone(),
+                sample_rate: CAPTURE_SAMPLE_RATE,
+                channels: 1,
+            };
+            let data = session.data.clone();
+            let source_rate = session.source_rate;
+            drop(cached);
+            if wait_for_first_sample(&data, std::time::Duration::from_millis(1_500)).await {
+                let mut data = data
+                    .lock()
+                    .map_err(|_| FreeFlowError::Audio("audio capture lock was poisoned".into()))?;
+                *data = fresh_capture_data(source_rate, self.proximity());
+            }
+            return Ok(info);
+        }
+        *cached = None;
         let result = Self::build_session(
             located,
             self.proximity(),
@@ -301,7 +361,7 @@ impl AudioProvider for LinuxAudioProvider {
         );
         match result {
             Ok((session, info)) => {
-                *self.session.lock().await = Some(session);
+                *cached = Some(session);
                 Ok(info)
             }
             Err(error) => {
@@ -312,14 +372,17 @@ impl AudioProvider for LinuxAudioProvider {
     }
 
     async fn stop(&self) -> Result<AudioBuffer> {
-        let session = self
-            .session
-            .lock()
-            .await
-            .take()
+        let mut cached = self.session.lock().await;
+        let session = cached
+            .as_mut()
             .ok_or_else(|| FreeFlowError::Audio("microphone capture is not active".into()))?;
         self.recording.store(false, Ordering::SeqCst);
-        drop(session.stream);
+        session.stream.pause().map_err(|error| {
+            FreeFlowError::Audio(format!(
+                "could not pause {} through {}: {error}",
+                session.device.name, session.device.backend
+            ))
+        })?;
         let mut data = session
             .data
             .lock()
@@ -353,7 +416,7 @@ impl AudioProvider for LinuxAudioProvider {
             peak_rms: data.meter.peak_rms(),
             ambient_rms: data.meter.ambient_rms(),
             gain,
-            device_name: session.device.name,
+            device_name: session.device.name.clone(),
             proximity: self.proximity(),
         })
     }
@@ -397,7 +460,12 @@ impl AudioProvider for LinuxAudioProvider {
                 )));
             }
         }
-        *self.selected_id.write().await = id.map(ToOwned::to_owned);
+        let next = id.map(ToOwned::to_owned);
+        let changed = *self.selected_id.read().await != next;
+        *self.selected_id.write().await = next;
+        if changed {
+            *self.session.lock().await = None;
+        }
         Ok(())
     }
 
@@ -444,5 +512,30 @@ fn process_input<T: Copy>(
             samples: streamed,
             sample_rate: CAPTURE_SAMPLE_RATE,
         });
+    }
+}
+
+fn fresh_capture_data(source_rate: u32, proximity: MicProximity) -> CaptureData {
+    CaptureData {
+        samples: Vec::with_capacity(CAPTURE_SAMPLE_RATE as usize * 30),
+        resampler: StreamingResampler::new(source_rate, CAPTURE_SAMPLE_RATE),
+        meter: AudioMeter::new(proximity),
+        error: None,
+    }
+}
+
+async fn wait_for_first_sample(
+    data: &Arc<Mutex<CaptureData>>,
+    timeout: std::time::Duration,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if data.lock().is_ok_and(|data| !data.samples.is_empty()) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }

@@ -8,27 +8,31 @@ behavior under X11. The native macOS application remains the supported release.
 
 FreeFlow needs a Rust toolchain, Node.js 22 or newer, a C/C++ build toolchain,
 ALSA and PulseAudio development headers, X11/XTest headers, and Secret Service.
-PipeWire desktops normally expose compatible PulseAudio and ALSA bridges.
+Wayland automation also uses the Global Shortcuts portal, `wtype`, and
+`wl-clipboard`. PipeWire desktops normally expose compatible PulseAudio and ALSA
+bridges.
 
 Ubuntu or Debian:
 
 ```bash
 sudo apt install build-essential pkg-config libasound2-dev libpulse-dev \
-  libx11-dev libxtst-dev libsecret-1-dev nodejs npm
+  libx11-dev libxtst-dev libsecret-1-dev nodejs npm \
+  xdg-desktop-portal wtype wl-clipboard
 ```
 
 Fedora:
 
 ```bash
 sudo dnf install @development-tools pkgconf-pkg-config alsa-lib-devel \
-  pulseaudio-libs-devel libX11-devel libXtst-devel libsecret-devel nodejs npm
+  pulseaudio-libs-devel libX11-devel libXtst-devel libsecret-devel nodejs npm \
+  xdg-desktop-portal wtype wl-clipboard
 ```
 
 Arch Linux:
 
 ```bash
 sudo pacman -S --needed base-devel pkgconf alsa-lib libpulse libx11 libxtst \
-  libsecret nodejs npm
+  libsecret nodejs npm xdg-desktop-portal wtype wl-clipboard
 ```
 
 Install Rust through [rustup](https://rustup.rs/). The dependency checker only
@@ -74,8 +78,8 @@ file or symlink at that command path.
 
 FreeFlow starts in the tray on login by default. The installer creates the XDG
 autostart entry immediately, and the packaged application keeps it synchronized
-with the Start FreeFlow on login toggle. Login startup passes `--hidden`, so it
-does not steal focus by opening the settings window.
+with the Start FreeFlow on login toggle. Login startup sets a dedicated launch
+environment flag, so it does not steal focus by opening the settings window.
 
 The AppImage supports `--appimage-extract-and-run` on systems where FUSE is not
 available. Package builds embed the release daemon under Electron resources and
@@ -105,13 +109,17 @@ The shortcut editor also supports modifier-plus-key combinations.
 
 ## Wayland
 
-Wayland deliberately restricts global key observation and synthetic keyboard
-input. FreeFlow detects the session and does not pretend an XWayland key grab can
-control native applications. Use Start/Stop in the tray or Flow window. The
-transcript stays in the clipboard and the HUD tells you when to paste manually.
+FreeFlow registers push-to-talk through the XDG Global Shortcuts portal. The
+default `Ctrl+Win` modifier chord is verified on Hyprland, including either key
+order, press/release events, native-Wayland microphone capture, and automatic
+paste into the field that was focused when dictation started.
 
-A compositor portal global-shortcut implementation remains incomplete. Results
-therefore vary by GNOME, KDE, Hyprland, and other compositors.
+Hyprland delivery restores the captured target and uses the compositor's input
+dispatcher. Other compositors use `wtype` when the virtual-keyboard protocol is
+available. If the portal or virtual-keyboard protocol is unavailable, tray and
+window start/stop controls remain available, the transcript stays in the
+clipboard, and FreeFlow reports the limitation instead of silently failing.
+GNOME and KDE portal behavior still needs broader distribution testing.
 
 Electron can report a Wayland/Vulkan warning on some compositors. If the window
 does not render, run with `ELECTRON_OZONE_PLATFORM_HINT=x11` to use XWayland;
@@ -123,14 +131,16 @@ Audio:
 
 - Run `pactl list short sources` to verify that PipeWire or PulseAudio exposes
   the microphone.
-- Open Voice input and run the level test. FreeFlow reports the selected backend,
-  native device error, format, and fallback rather than a generic denial.
+- Choose the microphone directly on Flow or under Voice input, then run the
+  level test. FreeFlow persists the stable device ID, pre-opens it during daemon
+  startup, and pauses it while idle so later push-to-talk capture starts quickly.
 - If an unplugged selected device fails, choose System default and retry.
 
 Shortcut:
 
-- Confirm `echo "$XDG_SESSION_TYPE"`. Automatic global shortcuts currently need
-  `x11`.
+- Confirm `echo "$XDG_SESSION_TYPE"`. On Wayland, verify that
+  `org.freedesktop.portal.GlobalShortcuts` is available and that the desktop's
+  matching portal backend is running.
 - Choose a different combination if registration says another application owns
   it.
 - Window managers often reserve Win-key combinations. FreeFlow reports the
@@ -140,8 +150,11 @@ Text delivery:
 
 - Under X11, confirm the XTest extension with `xdpyinfo -queryExtensions | grep XTEST`.
 - Terminals use `Ctrl+Shift+V`; other detected targets use `Ctrl+V`.
-- Under Wayland, use the explicit Copy/Paste recovery action when automatic input
-  is prohibited.
+- On Hyprland, install `wtype` and `wl-clipboard`; FreeFlow prefers Hyprland's
+  dispatcher and retains `wtype` as a fallback. Other compositors must expose the
+  virtual-keyboard protocol for automatic paste.
+- Protected fields and applications that reject synthetic paste still require
+  the explicit recovery action; the transcript remains on the clipboard.
 
 Credentials:
 

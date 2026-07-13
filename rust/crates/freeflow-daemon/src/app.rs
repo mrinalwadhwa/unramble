@@ -16,7 +16,7 @@ use freeflow_core::{
 use freeflow_openai::{OPENAI_API_KEY_CREDENTIAL, OpenAIProviders};
 use freeflow_platform::JsonSettingsStore;
 use freeflow_platform_linux::{
-    LinuxAppContextProvider, LinuxAudioProvider, LinuxTextInjector, X11HotkeyProvider,
+    LinuxAppContextProvider, LinuxAudioProvider, LinuxHotkeyProvider, LinuxTextInjector,
     desktop_environment, detect_session_type,
 };
 use freeflow_rpc::{PROTOCOL_VERSION, RpcError, RpcHandler, RpcNotification};
@@ -33,7 +33,7 @@ pub struct DaemonApp {
     settings: RwLock<AppSettings>,
     credentials: Arc<DaemonCredentialStore>,
     audio: Arc<LinuxAudioProvider>,
-    hotkey: Arc<X11HotkeyProvider>,
+    hotkey: Arc<LinuxHotkeyProvider>,
     pipeline: Arc<DictationPipeline>,
     openai: OpenAIProviders,
     notifications: broadcast::Sender<RpcNotification>,
@@ -62,7 +62,19 @@ impl DaemonApp {
             settings.selected_audio_device = None;
             settings_store.save(&settings).await?;
         }
-        let hotkey = Arc::new(X11HotkeyProvider::new());
+        match tokio::time::timeout(std::time::Duration::from_secs(5), audio.warm_up()).await {
+            Ok(Ok(capture)) => debug!(
+                device = capture.device.name,
+                backend = capture.device.backend,
+                "microphone is ready for push-to-talk"
+            ),
+            Ok(Err(error)) => debug!(
+                category = error.category(),
+                "microphone warm-up was unavailable; capture will retry on demand"
+            ),
+            Err(_) => debug!("microphone warm-up timed out; capture will retry on demand"),
+        }
+        let hotkey = Arc::new(LinuxHotkeyProvider::new());
         let injector = Arc::new(LinuxTextInjector::new());
         let context = Arc::new(LinuxAppContextProvider::new());
         let openai = OpenAIProviders::new(settings.clone(), credentials.clone());
@@ -138,20 +150,11 @@ impl DaemonApp {
         });
         self.tasks.lock().await.extend([event_task, hotkey_task]);
 
-        if detect_session_type() == SessionType::X11 {
-            let shortcut = self.settings.read().await.shortcut.clone();
-            if let Err(error) = self.hotkey.register(shortcut).await {
-                let _ = self.notifications.send(RpcNotification::new(
-                    "hotkey.registrationFailed",
-                    json!({"message": error.to_string()}),
-                ));
-            }
-        } else {
+        let shortcut = self.settings.read().await.shortcut.clone();
+        if let Err(error) = self.hotkey.register(shortcut).await {
             let _ = self.notifications.send(RpcNotification::new(
                 "hotkey.registrationFailed",
-                json!({
-                    "message": "The Wayland compositor did not expose a supported global-shortcut portal. Use the tray or window controls to start and stop dictation."
-                }),
+                json!({"message": error.to_string()}),
             ));
         }
     }
@@ -235,12 +238,6 @@ impl DaemonApp {
     }
 
     async fn register_hotkey(&self) -> Result<()> {
-        if detect_session_type() != SessionType::X11 {
-            return Err(FreeFlowError::Hotkey(
-                "global shortcuts are unavailable under this Wayland compositor; use the tray controls"
-                    .into(),
-            ));
-        }
         let shortcut = self.settings.read().await.shortcut.clone();
         self.hotkey.register(shortcut).await
     }
@@ -305,17 +302,18 @@ impl DaemonApp {
             global_shortcut: match session {
                 SessionType::X11 if self.hotkey.is_registered().await => "registered".into(),
                 SessionType::X11 => "available".into(),
-                SessionType::Wayland => "portalUnavailable".into(),
+                SessionType::Wayland if self.hotkey.is_registered().await => "registered".into(),
+                SessionType::Wayland => "portalAvailable".into(),
                 SessionType::Unknown => "unavailable".into(),
             },
-            text_injection: if session == SessionType::X11 {
-                "clipboardAndXTest".into()
-            } else {
-                "clipboardOnly".into()
+            text_injection: match session {
+                SessionType::X11 => "clipboardAndXTest".into(),
+                SessionType::Wayland => "clipboardAndVirtualKeyboard".into(),
+                SessionType::Unknown => "clipboardOnly".into(),
             },
             session_type: session,
             message: (session == SessionType::Wayland).then(|| {
-                "Wayland may require tray activation and a manual paste. FreeFlow keeps the transcript in the clipboard."
+                "FreeFlow uses the desktop shortcut portal and compositor virtual keyboard. Text remains in the clipboard if automatic paste is rejected."
                     .into()
             }),
         }
@@ -344,12 +342,12 @@ impl DaemonApp {
             shortcut_backend: if detect_session_type() == SessionType::X11 {
                 "XGrabKey".into()
             } else {
-                "none".into()
+                "XDG GlobalShortcuts portal".into()
             },
             injection_backend: if detect_session_type() == SessionType::X11 {
                 "clipboard + XTest".into()
             } else {
-                "clipboard".into()
+                "clipboard + Wayland virtual keyboard".into()
             },
             config_path: self.settings_store.path().display().to_string(),
             log_path: std::env::var("FREEFLOW_LOG_PATH").unwrap_or_default(),
@@ -469,7 +467,7 @@ impl RpcHandler for DaemonApp {
             }
             "permissions.getStatus" => serde_json::to_value(self.permission_status().await),
             "permissions.request" => {
-                if detect_session_type() == SessionType::X11 && !self.hotkey.is_registered().await {
+                if !self.hotkey.is_registered().await {
                     let _ = self.register_hotkey().await;
                 }
                 serde_json::to_value(self.permission_status().await)

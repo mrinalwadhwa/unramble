@@ -9,7 +9,7 @@ use std::{
 
 use async_trait::async_trait;
 use freeflow_core::{
-    FreeFlowError, HotkeyEvent, HotkeyProvider, Result, Shortcut, ShortcutModifier,
+    FreeFlowError, HotkeyEvent, HotkeyProvider, Result, SessionType, Shortcut, ShortcutModifier,
 };
 use tokio::sync::broadcast;
 use x11rb::{
@@ -20,7 +20,7 @@ use x11rb::{
     },
 };
 
-use crate::x11;
+use crate::{PortalHotkeyProvider, detect_session_type, x11};
 
 enum Command {
     Stop,
@@ -125,6 +125,64 @@ impl HotkeyProvider for X11HotkeyProvider {
 
     async fn is_registered(&self) -> bool {
         self.registered.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Clone)]
+pub struct LinuxHotkeyProvider {
+    x11: X11HotkeyProvider,
+    portal: PortalHotkeyProvider,
+}
+
+impl Default for LinuxHotkeyProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LinuxHotkeyProvider {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            x11: X11HotkeyProvider::new(),
+            portal: PortalHotkeyProvider::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl HotkeyProvider for LinuxHotkeyProvider {
+    async fn register(&self, shortcut: Shortcut) -> Result<()> {
+        match detect_session_type() {
+            SessionType::X11 => self.x11.register(shortcut).await,
+            SessionType::Wayland => self.portal.register(shortcut).await,
+            SessionType::Unknown => Err(FreeFlowError::Hotkey(
+                "no supported desktop shortcut service is available".into(),
+            )),
+        }
+    }
+
+    async fn unregister(&self) -> Result<()> {
+        match detect_session_type() {
+            SessionType::X11 => self.x11.unregister().await,
+            SessionType::Wayland => self.portal.unregister().await,
+            SessionType::Unknown => Ok(()),
+        }
+    }
+
+    fn events(&self) -> broadcast::Receiver<HotkeyEvent> {
+        match detect_session_type() {
+            SessionType::Wayland => self.portal.events(),
+            SessionType::X11 | SessionType::Unknown => self.x11.events(),
+        }
+    }
+
+    async fn is_registered(&self) -> bool {
+        match detect_session_type() {
+            SessionType::X11 => self.x11.is_registered().await,
+            SessionType::Wayland => self.portal.is_registered().await,
+            SessionType::Unknown => false,
+        }
     }
 }
 

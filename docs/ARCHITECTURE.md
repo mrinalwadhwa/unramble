@@ -39,8 +39,9 @@ subscription. Context isolation and the renderer sandbox remain enabled.
   polish requests directly to an OpenAI-compatible service.
 - `freeflow-platform` persists validated ordinary settings atomically with
   private Unix permissions.
-- `freeflow-platform-linux` captures audio and implements X11 context, shortcut,
-  clipboard, synthetic paste, session detection, and Secret Service access.
+- `freeflow-platform-linux` captures audio and implements X11 and portal
+  shortcuts, X11 and Hyprland context, clipboard delivery, compositor-assisted
+  paste, session detection, and Secret Service access.
 - `freeflow-rpc` owns the authenticated transport and the canonical method and
   notification contract. It generates the TypeScript transport declarations.
 - `freeflow-daemon` assembles the providers, supervises resources, handles RPC,
@@ -63,7 +64,9 @@ leaves copy and retry-paste actions available.
 
 ## Audio and cloud flow
 
-CPAL opens the selected input or falls back to the current default. The callback
+CPAL opens the selected input or falls back to the current default. The daemon
+pre-opens the stream at startup, pauses it while idle, and resumes it with a
+small supported callback buffer for low-latency push-to-talk. The callback
 downmixes to mono, measures RMS and ambient noise, resamples to 16 kHz, applies
 bounded far-field gain, publishes HUD levels, and retains signed 16-bit PCM.
 
@@ -85,6 +88,11 @@ places the transcript on the clipboard and sends `Ctrl+V`; known terminal target
 use `Ctrl+Shift+V`. The clipboard keeps the transcript because restoring it before
 confirmed consumption risks data loss.
 
-On Wayland, FreeFlow uses the clipboard and reports when the compositor requires
-a manual paste. The HUD never accepts focus or pointer events. Direct AT-SPI
-editing remains separate from the initial reliable fallback.
+On Wayland, FreeFlow registers through the Global Shortcuts portal. Hyprland
+modifier-only bindings expand into both key orders so the portal emits distinct
+activation and deactivation events. The pipeline captures the target before the
+HUD appears, then restores that target and invokes compositor-assisted paste.
+Other compositors use `wtype` when their virtual-keyboard protocol permits it.
+Every delivery writes the clipboard first, so a blocked synthetic event retains
+the transcript for recovery. Direct AT-SPI editing remains separate from this
+fallback chain.

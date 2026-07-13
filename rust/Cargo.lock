@@ -74,6 +74,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ashpd"
+version = "0.13.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "281e6645758940dee594495e28807a7672ce40f11ebf4df6c22c4fcd59e2689f"
+dependencies = [
+ "enumflags2",
+ "futures-util",
+ "getrandom 0.4.3",
+ "serde",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -869,11 +883,14 @@ name = "freeflow-platform-linux"
 version = "0.2.0"
 dependencies = [
  "arboard",
+ "ashpd",
  "async-trait",
  "cpal",
  "freeflow-core",
  "freeflow-platform",
+ "futures-util",
  "keyring",
+ "serde_json",
  "tokio",
  "tracing",
  "x11rb",
@@ -2796,6 +2813,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -3672,6 +3690,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",

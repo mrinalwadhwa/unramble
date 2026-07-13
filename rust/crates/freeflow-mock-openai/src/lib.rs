@@ -30,6 +30,7 @@ pub enum Scenario {
     #[default]
     Success,
     RealtimeDisconnect,
+    RealtimeError,
     BatchFallback,
     AuthenticationFailure,
     RateLimit,
@@ -45,6 +46,7 @@ impl FromStr for Scenario {
         match value {
             "success" => Ok(Self::Success),
             "realtime-disconnect" => Ok(Self::RealtimeDisconnect),
+            "realtime-error" => Ok(Self::RealtimeError),
             "batch-fallback" => Ok(Self::BatchFallback),
             "authentication-failure" => Ok(Self::AuthenticationFailure),
             "rate-limit" => Ok(Self::RateLimit),
@@ -211,6 +213,20 @@ async fn realtime_session(socket: WebSocket, state: MockState) {
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned);
                 state.metrics.lock().await.realtime_model = model;
+                if state.scenario == Scenario::RealtimeError {
+                    let _ = sender
+                        .send(Message::Text(
+                            json!({
+                                "type": "error",
+                                "error": {"message": "scripted realtime failure"}
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .await;
+                    let _ = sender.send(Message::Close(None)).await;
+                    return;
+                }
                 let _ = sender
                     .send(Message::Text(
                         json!({"type": "session.updated"}).to_string().into(),

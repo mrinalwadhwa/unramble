@@ -71,8 +71,7 @@ impl OpenAIClient {
         url.set_scheme(scheme).map_err(|()| {
             FreeFlowError::Configuration("could not construct the realtime URL".into())
         })?;
-        url.query_pairs_mut()
-            .append_pair("model", &settings.realtime_model);
+        url.query_pairs_mut().append_pair("intent", "transcription");
         Ok(url)
     }
 
@@ -155,7 +154,7 @@ mod tests {
             OpenAIClient::websocket_endpoint(&settings)
                 .unwrap()
                 .as_str(),
-            "ws://127.0.0.1:8080/v1/realtime?model=test+model"
+            "ws://127.0.0.1:8080/v1/realtime?intent=transcription"
         );
     }
 }

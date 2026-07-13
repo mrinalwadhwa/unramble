@@ -99,7 +99,7 @@ mv -f "$desktop_temporary" "$DESKTOP_ENTRY"
     'Type=Application' \
     'Name=FreeFlow' \
     'Comment=Keep push-to-talk dictation ready' \
-    "Exec=$quoted_command --hidden" \
+    "Exec=/usr/bin/env FREEFLOW_START_HIDDEN=1 $quoted_command" \
     'Icon=freeflow' \
     'Terminal=false' \
     'Categories=Utility;' \

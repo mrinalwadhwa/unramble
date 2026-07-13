@@ -127,6 +127,7 @@ pub struct OpenAIRealtimeSession {
     resampler: Mutex<Option<(u32, StreamingResampler)>>,
     partial_sender: broadcast::Sender<String>,
     final_receiver: Mutex<mpsc::Receiver<Result<String>>>,
+    terminal_error: Arc<Mutex<Option<FreeFlowError>>>,
     cancellation: CancellationToken,
     request_timeout: Duration,
 }
@@ -165,22 +166,31 @@ impl OpenAIRealtimeSession {
         let (partial_sender, _) = broadcast::channel(64);
         let partials = partial_sender.clone();
         let (final_sender, final_receiver) = mpsc::channel(4);
+        let terminal_error = Arc::new(Mutex::new(None));
+        let reader_terminal_error = terminal_error.clone();
         let reader_cancellation = cancellation.clone();
         tokio::spawn(async move {
             loop {
                 let message = tokio::select! {
                     () = reader_cancellation.cancelled() => {
-                        let _ = final_sender.send(Err(FreeFlowError::Cancelled)).await;
+                        report_terminal_error(
+                            &reader_terminal_error,
+                            &final_sender,
+                            FreeFlowError::Cancelled,
+                        ).await;
                         break;
                     }
                     message = source.next() => message,
                 };
                 let Some(message) = message else {
-                    let _ = final_sender
-                        .send(Err(FreeFlowError::Network(
+                    report_terminal_error(
+                        &reader_terminal_error,
+                        &final_sender,
+                        FreeFlowError::Network(
                             "realtime connection closed before a final transcript".into(),
-                        )))
-                        .await;
+                        ),
+                    )
+                    .await;
                     break;
                 };
                 match message {
@@ -216,27 +226,39 @@ impl OpenAIRealtimeSession {
                                     .pointer("/error/message")
                                     .and_then(Value::as_str)
                                     .unwrap_or("the realtime service returned an error");
-                                let _ = final_sender
-                                    .send(Err(FreeFlowError::Api {
+                                report_terminal_error(
+                                    &reader_terminal_error,
+                                    &final_sender,
+                                    FreeFlowError::Api {
                                         status: 0,
                                         message: message.chars().take(300).collect(),
-                                    }))
-                                    .await;
+                                    },
+                                )
+                                .await;
+                                break;
                             }
                             _ => {}
                         }
                     }
                     Ok(Message::Close(_)) => {
-                        let _ = final_sender
-                            .send(Err(FreeFlowError::Network(
+                        report_terminal_error(
+                            &reader_terminal_error,
+                            &final_sender,
+                            FreeFlowError::Network(
                                 "realtime connection closed before a final transcript".into(),
-                            )))
-                            .await;
+                            ),
+                        )
+                        .await;
                         break;
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        let _ = final_sender.send(Err(map_websocket_error(error))).await;
+                        report_terminal_error(
+                            &reader_terminal_error,
+                            &final_sender,
+                            map_websocket_error(error),
+                        )
+                        .await;
                         break;
                     }
                 }
@@ -248,12 +270,33 @@ impl OpenAIRealtimeSession {
             resampler: Mutex::new(None),
             partial_sender,
             final_receiver: Mutex::new(final_receiver),
+            terminal_error,
             cancellation,
             request_timeout: Duration::from_secs(request_timeout_seconds),
         })
     }
 
+    async fn send_message(&self, message: Message) -> Result<()> {
+        if let Some(error) = self.terminal_error.lock().await.clone() {
+            return Err(error);
+        }
+        let result = self.sink.lock().await.send(message).await;
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if let Some(terminal) = self.terminal_error.lock().await.clone() {
+                    Err(terminal)
+                } else {
+                    Err(map_websocket_error(error))
+                }
+            }
+        }
+    }
+
     async fn send_pcm(&self, samples: &[i16]) -> Result<()> {
+        if let Some(error) = self.terminal_error.lock().await.clone() {
+            return Err(error);
+        }
         if samples.is_empty() {
             return Ok(());
         }
@@ -265,12 +308,8 @@ impl OpenAIRealtimeSession {
             "type": "input_audio_buffer.append",
             "audio": BASE64.encode(bytes)
         });
-        self.sink
-            .lock()
+        self.send_message(Message::Text(append.to_string().into()))
             .await
-            .send(Message::Text(append.to_string().into()))
-            .await
-            .map_err(map_websocket_error)
     }
 }
 
@@ -327,16 +366,12 @@ impl StreamingSession for OpenAIRealtimeSession {
             })
         };
         self.send_pcm(&tail).await?;
-        self.sink
-            .lock()
-            .await
-            .send(Message::Text(
-                json!({"type": "input_audio_buffer.commit"})
-                    .to_string()
-                    .into(),
-            ))
-            .await
-            .map_err(map_websocket_error)?;
+        self.send_message(Message::Text(
+            json!({"type": "input_audio_buffer.commit"})
+                .to_string()
+                .into(),
+        ))
+        .await?;
         debug!("committed realtime audio buffer");
 
         let result = tokio::time::timeout(
@@ -360,6 +395,20 @@ impl StreamingSession for OpenAIRealtimeSession {
     fn partials(&self) -> broadcast::Receiver<String> {
         self.partial_sender.subscribe()
     }
+}
+
+async fn report_terminal_error(
+    terminal_error: &Mutex<Option<FreeFlowError>>,
+    final_sender: &mpsc::Sender<Result<String>>,
+    error: FreeFlowError,
+) {
+    let mut terminal = terminal_error.lock().await;
+    if terminal.is_some() {
+        return;
+    }
+    *terminal = Some(error.clone());
+    drop(terminal);
+    let _ = final_sender.send(Err(error)).await;
 }
 
 fn map_websocket_error(error: tokio_tungstenite::tungstenite::Error) -> FreeFlowError {

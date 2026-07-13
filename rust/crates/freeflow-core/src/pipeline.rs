@@ -37,7 +37,8 @@ struct ActiveRun {
     started_at: Instant,
     context: AppContext,
     streaming: Arc<RwLock<Option<Arc<dyn StreamingSession>>>>,
-    stop_forwarding: CancellationToken,
+    stop_tasks: CancellationToken,
+    session_cancel: CancellationToken,
     stream_task: JoinHandle<()>,
     level_task: JoinHandle<()>,
 }
@@ -127,13 +128,17 @@ impl DictationPipeline {
         }
         *preparing = Some(Arc::clone(&preparation));
         drop(preparing);
-        self.publish(AppEvent::StatusChanged {
-            state: RecordingState::Preparing,
-        });
         *self.last_error.write().await = None;
 
         let mut audio_chunks = self.services.audio.audio_chunks();
         let mut audio_levels = self.services.audio.audio_levels();
+        let audio_provider = Arc::clone(&self.services.audio);
+        let capture_task = tokio::spawn(async move {
+            match timeout(Duration::from_secs(5), audio_provider.start()).await {
+                Ok(result) => result,
+                Err(_) => Err(FreeFlowError::Timeout("microphone startup".into())),
+            }
+        });
         let context_provider = Arc::clone(&self.services.context);
         let context_future = async move {
             match timeout(
@@ -153,9 +158,11 @@ impl DictationPipeline {
                 Err(_) => AppContext::default(),
             }
         };
-        let capture_future = timeout(Duration::from_secs(5), self.services.audio.start());
-        let (context, capture) = tokio::join!(context_future, capture_future);
-        let capture = match capture {
+        let context = context_future.await;
+        self.publish(AppEvent::StatusChanged {
+            state: RecordingState::Preparing,
+        });
+        let capture = match capture_task.await {
             Ok(Ok(capture)) => capture,
             Ok(Err(error)) => {
                 self.finish_preparing(&preparation).await;
@@ -166,8 +173,10 @@ impl DictationPipeline {
                 self.fail(&error).await;
                 return Err(error);
             }
-            Err(_) => {
-                let error = FreeFlowError::Timeout("microphone startup".into());
+            Err(error) => {
+                let error = FreeFlowError::Internal(format!(
+                    "microphone startup task stopped unexpectedly: {error}"
+                ));
                 self.finish_preparing(&preparation).await;
                 if preparation.cancel.is_cancelled() {
                     self.reset_to_idle().await;
@@ -177,6 +186,8 @@ impl DictationPipeline {
                 return Err(error);
             }
         };
+        while audio_chunks.try_recv().is_ok() {}
+        while audio_levels.try_recv().is_ok() {}
         if preparation.cancel.is_cancelled() {
             let _ = self.services.audio.stop().await;
             self.reset_to_idle().await;
@@ -185,12 +196,13 @@ impl DictationPipeline {
         }
 
         let settings = self.settings.read().await.clone();
-        let stop_forwarding = CancellationToken::new();
+        let stop_tasks = CancellationToken::new();
+        let session_cancel = CancellationToken::new();
         let streaming_slot: Arc<RwLock<Option<Arc<dyn StreamingSession>>>> =
             Arc::new(RwLock::new(None));
 
         let level_events = self.events.clone();
-        let level_cancel = stop_forwarding.clone();
+        let level_cancel = stop_tasks.clone();
         let level_task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -212,7 +224,8 @@ impl DictationPipeline {
             None
         };
         let streaming_for_task = Arc::clone(&streaming_slot);
-        let stream_cancel = stop_forwarding.clone();
+        let stream_stop = stop_tasks.clone();
+        let stream_session_cancel = session_cancel.clone();
         let stream_events = self.events.clone();
         let language = settings.language.clone();
         let proximity = capture.device.name.to_ascii_lowercase();
@@ -226,12 +239,12 @@ impl DictationPipeline {
         };
         let stream_task = tokio::spawn(async move {
             let Some(provider) = streaming_provider else {
-                stream_cancel.cancelled().await;
+                stream_stop.cancelled().await;
                 return;
             };
-            let begin = provider.begin(&language, proximity, stream_cancel.clone());
+            let begin = provider.begin(&language, proximity, stream_session_cancel);
             let session = tokio::select! {
-                _ = stream_cancel.cancelled() => return,
+                _ = stream_stop.cancelled() => return,
                 result = timeout(Duration::from_secs(5), begin) => match result {
                     Ok(Ok(session)) => session,
                     Ok(Err(error)) => {
@@ -256,7 +269,7 @@ impl DictationPipeline {
             let mut partials = session.partials();
             loop {
                 tokio::select! {
-                    _ = stream_cancel.cancelled() => {
+                    _ = stream_stop.cancelled() => {
                         while let Ok(chunk) = audio_chunks.try_recv() {
                             if session.send_audio(chunk).await.is_err() {
                                 break;
@@ -295,7 +308,8 @@ impl DictationPipeline {
             started_at: Instant::now(),
             context,
             streaming: streaming_slot,
-            stop_forwarding,
+            stop_tasks,
+            session_cancel,
             stream_task,
             level_task,
         };
@@ -324,18 +338,20 @@ impl DictationPipeline {
         let audio = match timeout(Duration::from_secs(5), self.services.audio.stop()).await {
             Ok(Ok(audio)) => audio,
             Ok(Err(error)) => {
-                run.stop_forwarding.cancel();
+                run.stop_tasks.cancel();
+                run.session_cancel.cancel();
                 self.fail(&error).await;
                 return Err(error);
             }
             Err(_) => {
-                run.stop_forwarding.cancel();
+                run.stop_tasks.cancel();
+                run.session_cancel.cancel();
                 let error = FreeFlowError::Timeout("microphone shutdown".into());
                 self.fail(&error).await;
                 return Err(error);
             }
         };
-        run.stop_forwarding.cancel();
+        run.stop_tasks.cancel();
         if timeout(Duration::from_secs(2), &mut run.stream_task)
             .await
             .is_err()
@@ -358,6 +374,7 @@ impl DictationPipeline {
         });
 
         if audio.duration_seconds() < crate::MINIMUM_AUDIO_DURATION_SECONDS {
+            run.session_cancel.cancel();
             self.state.reset().await;
             self.publish(AppEvent::StatusChanged {
                 state: RecordingState::Idle,
@@ -365,6 +382,7 @@ impl DictationPipeline {
             return Ok(None);
         }
         if audio::is_silent(&audio) {
+            run.session_cancel.cancel();
             debug!(
                 peak_rms = audio.peak_rms,
                 ambient_rms = audio.ambient_rms,
@@ -571,7 +589,8 @@ impl DictationPipeline {
             let _ = timeout(Duration::from_secs(6), preparation.finished.cancelled()).await;
         }
         if let Some(run) = self.active.lock().await.take() {
-            run.stop_forwarding.cancel();
+            run.stop_tasks.cancel();
+            run.session_cancel.cancel();
             let _ = self.services.audio.stop().await;
             if let Some(session) = run.streaming.read().await.clone() {
                 session.cancel().await;
@@ -858,6 +877,7 @@ mod tests {
     struct MockStream {
         response: Result<String>,
         partials: broadcast::Sender<String>,
+        cancellation: RwLock<Option<CancellationToken>>,
     }
 
     #[async_trait]
@@ -867,6 +887,15 @@ mod tests {
         }
 
         async fn finish(&self) -> Result<String> {
+            if self
+                .cancellation
+                .read()
+                .await
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
+            {
+                return Err(FreeFlowError::Cancelled);
+            }
             self.response.clone()
         }
 
@@ -883,8 +912,9 @@ mod tests {
             &self,
             _language: &str,
             _proximity: MicProximity,
-            _cancellation: CancellationToken,
+            cancellation: CancellationToken,
         ) -> Result<Arc<dyn StreamingSession>> {
+            *self.session.cancellation.write().await = Some(cancellation);
             Ok(self.session.clone())
         }
     }
@@ -950,7 +980,11 @@ mod tests {
         let streaming = stream_response.map(|response| {
             let (partials, _) = broadcast::channel(4);
             Arc::new(MockStreamProvider {
-                session: Arc::new(MockStream { response, partials }),
+                session: Arc::new(MockStream {
+                    response,
+                    partials,
+                    cancellation: RwLock::new(None),
+                }),
             }) as Arc<dyn StreamingDictationProvider>
         });
         let polish = polish_response

@@ -13,7 +13,8 @@ describe('Linux autostart integration', () => {
     const entry = autostartDesktopEntry('/home/Gabriel/Applications/FreeFlow.AppImage');
 
     expect(entry).toContain(
-      'Exec="/home/Gabriel/Applications/FreeFlow.AppImage" --hidden\n'
+      'Exec=/usr/bin/env FREEFLOW_START_HIDDEN=1 "' +
+        '/home/Gabriel/Applications/FreeFlow.AppImage"\n'
     );
     expect(entry).toContain('X-GNOME-Autostart-enabled=true\n');
     expect(entry.endsWith('\n')).toBe(true);
