@@ -274,11 +274,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ modelID: String, file: String,
         modelManager: LocalModelManager
     ) -> String? {
-        if let bundled = Bundle.main.path(
-            forResource: (file as NSString).deletingPathExtension,
-            ofType: (file as NSString).pathExtension,
-            inDirectory: "models/\(modelID)") {
-            return (bundled as NSString).deletingLastPathComponent
+        if let resources = Bundle.main.resourceURL {
+            let bundled = resources
+                .appendingPathComponent("models")
+                .appendingPathComponent(modelID)
+            if FileManager.default.fileExists(
+                atPath: bundled.appendingPathComponent(file).path) {
+                return bundled.path
+            }
         }
         let appSupport = modelManager.modelPath(for: modelID)
         if FileManager.default.fileExists(
@@ -322,17 +325,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             let sttEngine: any LocalSTTEngine
-            let nemotronDir = modelManager.modelPath(
-                for: "nemotron-speech-streaming-en-0.6b-coreml")
-            let nemotronVariant = nemotronDir.appendingPathComponent(
-                "nemotron_coreml_560ms")
-            if FileManager.default.fileExists(
-                atPath: nemotronVariant.appendingPathComponent(
-                    "tokenizer.json").path) {
+            if let nemotronPath = Self.resolveModelPath(
+                "nemotron-speech-streaming-en-0.6b-coreml",
+                file: "nemotron_coreml_560ms/tokenizer.json",
+                modelManager: modelManager
+            ) {
                 Log.debug("[AppDelegate] Nemotron model found, using NemotronEngine")
                 sttEngine = NemotronEngine(
                     modelManager: modelManager,
-                    modelPath: nemotronDir.path)
+                    modelPath: nemotronPath)
             } else {
                 let parakeetPath = Self.resolveModelPath(
                     "parakeet-tdt-0.6b-v3-coreml", file: "tokens.txt",

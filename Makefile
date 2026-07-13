@@ -1,14 +1,22 @@
-.PHONY: build run test clean xcode generate models release archive sign notarize appcast version
+.PHONY: build run test test-all test-model-pack clean xcode generate models \
+	model-venv model-venv-hf verify-models verify-app-models release archive \
+	sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
 XCODEGEN := $(shell command -v xcodegen 2>/dev/null)
 PROJECT  := FreeFlow.xcodeproj
 SCHEME   := FreeFlowApp
 CONFIG   := Debug
+XCODE_FLAGS := -skipPackagePluginValidation
+MODEL_MANIFEST := FreeFlowApp/models.json
+MODEL_VENV     := FreeFlowApp/.model-work/venv
+MODEL_PYTHON   := $(MODEL_VENV)/bin/python3
+HF_VERSION     := 1.11.0
+MODEL_REQUIREMENTS := scripts/model-requirements.txt
 
 # Release settings
-TEAM_ID          := 3A56YKKGA5
-SIGN_IDENTITY    := Developer ID Application: Ockam Inc. ($(TEAM_ID))
+TEAM_ID          := U5Y82TZF5K
+SIGN_IDENTITY    := Developer ID Application: Mrinal Wadhwa ($(TEAM_ID))
 NOTARIZE_PROFILE := freeflow-notarize
 ARCHIVE_PATH     := build/FreeFlow.xcarchive
 APP_PATH         := build/FreeFlow.app
@@ -20,16 +28,13 @@ DOWNLOAD_URL     := https://github.com/mrinalwadhwa/freeflow/releases/latest/dow
 SPARKLE_BIN      := $(shell find ~/Library/Developer/Xcode/DerivedData/FreeFlow-*/SourcePackages/artifacts/sparkle/Sparkle/bin -maxdepth 0 2>/dev/null | head -1)
 
 # Optional: set KEYCHAIN to a keychain path for CI builds.
-# When set, codesign and xcodebuild use --keychain/OTHER_CODE_SIGN_FLAGS
-# to find the signing identity. Leave unset for local builds (uses
-# default keychain search list).
+# When set, codesign uses the specified keychain. Leave unset for local
+# builds, which use the default keychain search list.
 KEYCHAIN         ?=
 ifdef KEYCHAIN
   KEYCHAIN_FLAGS := --keychain $(KEYCHAIN)
-  XCODE_SIGN_FLAGS := OTHER_CODE_SIGN_FLAGS="--keychain $(KEYCHAIN)"
 else
   KEYCHAIN_FLAGS :=
-  XCODE_SIGN_FLAGS :=
 endif
 
 # Generate the Xcode project from project.yml
@@ -39,9 +44,34 @@ ifndef XCODEGEN
 endif
 	xcodegen generate
 
-# Download models listed in FreeFlowApp/models.json
-models:
-	@./scripts/download-models.sh
+# Create or repair the isolated, repository-local model-tools environment.
+# These are phony so a stale marker cannot hide a missing Python or package.
+model-venv: scripts/bootstrap-model-venv.py
+	@echo "Ensuring model-tools venv at $(MODEL_VENV)"
+	@python3 scripts/bootstrap-model-venv.py --venv $(MODEL_VENV)
+
+# Install the pinned network client only for explicit model materialization.
+model-venv-hf: model-venv $(MODEL_REQUIREMENTS)
+	@python3 scripts/bootstrap-model-venv.py \
+		--venv $(MODEL_VENV) \
+		--requirements $(MODEL_REQUIREMENTS) \
+		--huggingface-version $(HF_VERSION)
+
+# Download models listed in FreeFlowApp/models.json.
+models: model-venv-hf
+	@PATH="$(abspath $(MODEL_VENV)/bin):$$PATH" \
+		$(MODEL_PYTHON) scripts/download-models.py
+
+# Verify the complete model pack without network access.
+verify-models: model-venv
+	@$(MODEL_PYTHON) scripts/download-models.py --verify
+
+# Verify the model pack copied into an extracted app archive.
+verify-app-models: model-venv
+	@cmp $(MODEL_MANIFEST) "$(APP_PATH)/Contents/Resources/models.json"
+	@$(MODEL_PYTHON) scripts/verify-model-pack.py \
+		--manifest "$(APP_PATH)/Contents/Resources/models.json" \
+		--models-dir "$(APP_PATH)/Contents/Resources/models"
 
 # Generate training data from YAML, then train a LoRA adapter
 train:
@@ -49,8 +79,10 @@ train:
 	@cd training && python3 -u -m mlx_lm.lora --config lora-config.yaml
 
 # Build the app (generates project first if missing)
-build: $(PROJECT)
-	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) build
+build: model-venv $(PROJECT)
+	$(MODEL_PYTHON) scripts/download-models.py --run \
+		xcodebuild $(XCODE_FLAGS) -project $(PROJECT) -scheme $(SCHEME) \
+		-configuration $(CONFIG) build
 
 # Build and launch
 run: build
@@ -65,7 +97,10 @@ run: build
 # Only the summary line is printed. Inspect the log for details on failures.
 TEST_LOG := /tmp/freeflow-test.log
 
-test:
+test-model-pack: model-venv
+	@$(MODEL_PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
+
+test: test-model-pack
 	@echo "Running fast tests… output → $(TEST_LOG)"
 	@cd FreeFlowKit && swift test > $(TEST_LOG) 2>&1; \
 	exit_code=$$?; \
@@ -91,7 +126,7 @@ test:
 	exit $$exit_code
 
 # Run all tests including Keychain-dependent suites (requires macOS login Keychain access).
-test-all:
+test-all: test-model-pack
 	@echo "Running all tests (including Keychain + slow)… output → $(TEST_LOG)"
 	@cd FreeFlowKit && FREEFLOW_TEST_KEYCHAIN=1 FREEFLOW_TEST_SLOW=1 swift test > $(TEST_LOG) 2>&1; \
 	exit_code=$$?; \
@@ -134,8 +169,13 @@ $(PROJECT): project.yml
 # Release pipeline: archive → sign → dmg → notarize → staple → appcast
 # ---------------------------------------------------------------------------
 
-# Full release pipeline
-release: archive sign dmg notarize appcast
+# Full release pipeline. Sub-makes preserve this order even under `make -j`.
+release:
+	@$(MAKE) archive
+	@$(MAKE) sign
+	@$(MAKE) dmg
+	@$(MAKE) notarize
+	@$(MAKE) appcast
 	@echo ""
 	@echo "══════════════════════════════════════════════════"
 	@echo "  Release complete!"
@@ -144,26 +184,27 @@ release: archive sign dmg notarize appcast
 	@echo "══════════════════════════════════════════════════"
 
 # Archive a Release build and export the app
-archive: $(PROJECT)
+archive: model-venv $(PROJECT)
 	@echo "── Archiving Release build ──"
-	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Release \
-		-archivePath $(ARCHIVE_PATH) \
-		CODE_SIGN_IDENTITY="$(SIGN_IDENTITY)" \
-		DEVELOPMENT_TEAM=$(TEAM_ID) \
-		ENABLE_HARDENED_RUNTIME=YES \
-		$(XCODE_SIGN_FLAGS) \
-		archive
+	$(MODEL_PYTHON) scripts/download-models.py --run \
+		xcodebuild $(XCODE_FLAGS) -project $(PROJECT) -scheme $(SCHEME) \
+		-configuration Release -archivePath $(ARCHIVE_PATH) \
+		CODE_SIGNING_ALLOWED=NO archive
 	@echo "── Extracting app from archive ──"
 	@rm -rf $(APP_PATH)
 	@cp -R "$(ARCHIVE_PATH)/Products/Applications/FreeFlow.app" $(APP_PATH)
+	@$(MAKE) verify-app-models APP_PATH="$(APP_PATH)"
 
 # Sign the app bundle with hardened runtime and entitlements.
 # Sparkle embeds XPC services and a nested Updater.app that must be
 # signed inside-out: innermost bundles first, then the framework, then
 # the outer app. codesign --deep cannot handle this reliably.
 sign:
+	@echo "── Stripping extended attributes before signing ──"
+	xattr -cr $(APP_PATH)
 	@echo "── Signing Sparkle nested components ──"
-	@SPARKLE_FW="$(APP_PATH)/Contents/Frameworks/Sparkle.framework/Versions/B"; \
+	@set -e; \
+	SPARKLE_FW="$(APP_PATH)/Contents/Frameworks/Sparkle.framework/Versions/B"; \
 	for xpc in "$$SPARKLE_FW/XPCServices/Installer.xpc" \
 	           "$$SPARKLE_FW/XPCServices/Downloader.xpc"; do \
 		if [ -d "$$xpc" ]; then \
@@ -194,8 +235,6 @@ sign:
 		$(APP_PATH)
 	@echo "── Verifying signature ──"
 	codesign --verify --deep --strict --verbose=2 $(APP_PATH)
-	@echo "── Stripping extended attributes ──"
-	xattr -cr $(APP_PATH)
 
 # Create a DMG with the signed app and an Applications symlink
 dmg:

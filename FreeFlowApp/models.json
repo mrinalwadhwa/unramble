@@ -1,27 +1,187 @@
 {
+  "schemaVersion": 1,
   "models": {
-    "parakeet-tdt-0.6b-v3-coreml": {
-      "source": "huggingface",
-      "repo": "mrinalwadhwa/parakeet-tdt-0.6b-v3-coreml",
-      "revision": "a2aeaa3aab2b4ec131b18f1b6fd238d6cf69c04c",
-      "include": [
-        "Decoder.mlmodelc/*",
-        "Encoder.mlmodelc/*",
-        "JointDecisionv3.mlmodelc/*",
-        "Preprocessor.mlmodelc/*",
-        "parakeet_v3_vocab.json"
-      ],
-      "sha256": "c140798baed20562bca6e020d950a4d22fede2d4ea8542b5f1644623d6e34297"
+    "nemotron-speech-streaming-en-0.6b-coreml": {
+      "role": "speech-to-text",
+      "source": {
+        "type": "huggingface",
+        "repo": "mrinalwadhwa/nemotron-speech-streaming-en-0.6b-coreml",
+        "revision": "c812c6604ec09800084fa8c38bacb6748239c48c"
+      },
+      "treeSha256": "b5b3b8c5e86c4feb2daa8a90285e5110bf46d519568b8ba9e93a9550e94b7b0a",
+      "files": [
+        {
+          "path": "nemotron_coreml_560ms/decoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "sha256": "bca0e343fa0d698de8bdb22c66fd377b79104f606b1bfffc90931fe2161029b8"
+        },
+        {
+          "path": "nemotron_coreml_560ms/decoder.mlmodelc/coremldata.bin",
+          "size": 493,
+          "sha256": "4d0549ac72a38abdcbe7927f2b7d488386d6b96f1f5e837d93ba9e379de04f4e"
+        },
+        {
+          "path": "nemotron_coreml_560ms/decoder.mlmodelc/model.mil",
+          "size": 13093,
+          "sha256": "8298f16d3926565b77732b549fa9c64fedebb2e5a29a76e33d0b2e970e93ae69"
+        },
+        {
+          "path": "nemotron_coreml_560ms/decoder.mlmodelc/weights/weight.bin",
+          "size": 14429952,
+          "sha256": "d9758e49f9b2b9a0462c933256663d4174209739e62f0ddc14e4147bc50e7818"
+        },
+        {
+          "path": "nemotron_coreml_560ms/encoder/encoder_int8.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "sha256": "ef51dbab5c6ce310ce1a537538a4df6b88f13ad5c45c0acaddca055503896daa"
+        },
+        {
+          "path": "nemotron_coreml_560ms/encoder/encoder_int8.mlmodelc/coremldata.bin",
+          "size": 608,
+          "sha256": "864a357ae2eb7d6b38ced73d5f23c908096a256516afa498c6730778767ec404"
+        },
+        {
+          "path": "nemotron_coreml_560ms/encoder/encoder_int8.mlmodelc/model.mil",
+          "size": 968920,
+          "sha256": "4b903ee4f401d81add07d1252192a486bd07154174818902f03bca38b2f293f6"
+        },
+        {
+          "path": "nemotron_coreml_560ms/encoder/encoder_int8.mlmodelc/weights/weight.bin",
+          "size": 589057600,
+          "sha256": "8ced31411f7903eaec52de85e94c7847228f3e44028d8f0040800e5603943a40"
+        },
+        {
+          "path": "nemotron_coreml_560ms/joint.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "sha256": "478804308534c7f9cab1030aa9ce19ddf672fcd15deba633fe3ed5da8f53b103"
+        },
+        {
+          "path": "nemotron_coreml_560ms/joint.mlmodelc/coremldata.bin",
+          "size": 401,
+          "sha256": "46363626fd89730ade6e6461e8be808c7fade198fb0df63db83fb00ed033abb2"
+        },
+        {
+          "path": "nemotron_coreml_560ms/joint.mlmodelc/model.mil",
+          "size": 5064,
+          "sha256": "73bcc51b58ff73c7620e31a2c32dc5ef4939e8ec2a77ec22242303422bfafba4"
+        },
+        {
+          "path": "nemotron_coreml_560ms/joint.mlmodelc/weights/weight.bin",
+          "size": 3446978,
+          "sha256": "d1d45514a91da39f24e264712a9f8b5a2a90e9cbce04bad3f3f74242bea106d5"
+        },
+        {
+          "path": "nemotron_coreml_560ms/metadata.json",
+          "size": 438,
+          "sha256": "e8d93e5afa1e5c87257f6e31a5c336058eeba7d6cacd36ba80fbf9758c3916dc"
+        },
+        {
+          "path": "nemotron_coreml_560ms/preprocessor.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "sha256": "6f7478ac6121c7738735bf8cf630fc3f235a6039ae84d49bdd4b5fa077436ebb"
+        },
+        {
+          "path": "nemotron_coreml_560ms/preprocessor.mlmodelc/coremldata.bin",
+          "size": 431,
+          "sha256": "92a11fb7f8e6f61a15d29437ff1d6cabc077519fc1a9be68354f8fb339fbfbd7"
+        },
+        {
+          "path": "nemotron_coreml_560ms/preprocessor.mlmodelc/model.mil",
+          "size": 18545,
+          "sha256": "24a26b36944798b1884048ae3fb6ae66b16db0f701d977b9ee3bc276c2f90549"
+        },
+        {
+          "path": "nemotron_coreml_560ms/preprocessor.mlmodelc/weights/weight.bin",
+          "size": 592384,
+          "sha256": "297514e2b211d14b0e53cb97193d679bb89ead98d28e578f3f1d049ddbcc36b3"
+        },
+        {
+          "path": "nemotron_coreml_560ms/tokenizer.json",
+          "size": 18374,
+          "sha256": "a87b5b8a0e0a989fa7db3121f279ce6af70e337feb55ab553b8d0658db70b9d3"
+        }
+      ]
     },
     "qwen3-0.6b-4bit": {
-      "source": "huggingface",
-      "repo": "mrinalwadhwa/Qwen3-0.6B-4bit",
-      "revision": "44c9f61dea041165b988662ba914dbfef0e0d096",
-      "sha256": "325144df29dbb6f0b8d5a775eb333fe7f4fdf22d1c18c589a15894540a1c5287"
+      "role": "language-model",
+      "source": {
+        "type": "huggingface",
+        "repo": "mrinalwadhwa/Qwen3-0.6B-4bit",
+        "revision": "44c9f61dea041165b988662ba914dbfef0e0d096"
+      },
+      "treeSha256": "804e0d54468b8768a3a1f4b0b57e85ac5d7f0fdf396e676218352dee41173e95",
+      "files": [
+        {
+          "path": "added_tokens.json",
+          "size": 707,
+          "sha256": "c0284b582e14987fbd3d5a2cb2bd139084371ed9acbae488829a1c900833c680"
+        },
+        {
+          "path": "config.json",
+          "size": 937,
+          "sha256": "15d3ac26c043ae477273ed5802ee0f0b33bb14f18c9d3dd70910c02d906e3f1f"
+        },
+        {
+          "path": "merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "path": "model.safetensors",
+          "size": 335450584,
+          "sha256": "392e8d466d56100ada00eb82031fb854297fc9e389b7d303eba3af114e87bce2"
+        },
+        {
+          "path": "model.safetensors.index.json",
+          "size": 49731,
+          "sha256": "7b294141456f6904936db03c00bca50fb5f6198f652fe8483f9cd2a1018accfb"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 613,
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd"
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 9706,
+          "sha256": "253153d0738ceb4c668d2eff957714dd2bea0b56de772a9fdccd96cbf517e6a0"
+        },
+        {
+          "path": "vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ]
     },
     "qwen3-0.6b-4bit-polish-adapter": {
-      "source": "bundled",
-      "sha256": "b513f277b978db326552174472428e0e83eddf488e08bbfbb8a3e92b7bcc9943"
+      "role": "polish-adapter",
+      "source": {
+        "type": "repository",
+        "path": "FreeFlowApp/Resources/models/qwen3-0.6b-4bit-polish-adapter",
+        "revision": "1c43af0cc5476bbcd3436f0cf6e17b630f8d1229"
+      },
+      "requires": {
+        "model": "qwen3-0.6b-4bit",
+        "treeSha256": "804e0d54468b8768a3a1f4b0b57e85ac5d7f0fdf396e676218352dee41173e95"
+      },
+      "treeSha256": "f08b2b1f8f72a22e1ebac105bb6093c6500970df4f81208c1ff3789d94c38890",
+      "files": [
+        {
+          "path": "adapter_config.json",
+          "size": 953,
+          "sha256": "05cf8a8e0d01a0f3977fc475864f66dfd056ed087843d7ef210a989582551df3"
+        },
+        {
+          "path": "adapters.safetensors",
+          "size": 11558226,
+          "sha256": "b1ab9d4bd2be96587e6642e6c5a6c18d0c85cb231a262b3ec864681b55653f7f"
+        }
+      ]
     }
   }
 }

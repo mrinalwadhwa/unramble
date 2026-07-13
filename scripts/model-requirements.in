@@ -1,0 +1,2 @@
+# Network client used only by the explicit `make models` target.
+huggingface-hub==1.11.0

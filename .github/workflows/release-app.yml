@@ -28,9 +28,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
 
       - name: Install xcodegen
         run: brew install xcodegen
+
+      - name: Materialize and verify model pack
+        run: make models
 
       - name: Determine version and tag
         id: meta

@@ -351,7 +351,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
                     let dstFrame = Self.preEncodeCache + frame
                     let dstIdx = bin * dstStrides[1]
                         + dstFrame * dstStrides[2]
-                    dstPtr[dstIdx] = float16ToFloat32(srcPtr[srcIdx])
+                    dstPtr[dstIdx] = Self.float16ToFloat32(srcPtr[srcIdx])
                 }
             }
         } else {
@@ -512,7 +512,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             let dstStride = frame.strides[1].intValue
             let baseOffset = t * strides[timeAxis]
             for d in 0..<dim {
-                dstPtr[d * dstStride] = float16ToFloat32(
+                dstPtr[d * dstStride] = Self.float16ToFloat32(
                     srcPtr[baseOffset + d * strides[hiddenAxis]])
             }
         } else {
@@ -569,7 +569,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             let dstStride = result.strides[1].intValue
             let hiddenStride = strides[hiddenAxis]
             for d in 0..<hiddenSize {
-                dstPtr[d * dstStride] = float16ToFloat32(
+                dstPtr[d * dstStride] = Self.float16ToFloat32(
                     srcPtr[d * hiddenStride])
             }
         } else {
@@ -595,7 +595,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             let ptr = logits.dataPointer.assumingMemoryBound(
                 to: UInt16.self)
             for i in 0..<count {
-                let val = float16ToFloat32(ptr[i])
+                let val = Self.float16ToFloat32(ptr[i])
                 if val > bestVal {
                     bestVal = val
                     bestIdx = i
@@ -615,8 +615,31 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         return bestIdx
     }
 
-    private func float16ToFloat32(_ bits: UInt16) -> Float {
-        Float(Float16(bitPattern: bits))
+    static func float16ToFloat32(_ bits: UInt16) -> Float {
+        let sign = UInt32(bits & 0x8000) << 16
+        let exponent = Int((bits >> 10) & 0x1f)
+        var fraction = UInt32(bits & 0x03ff)
+        let floatBits: UInt32
+
+        switch exponent {
+        case 0 where fraction == 0:
+            floatBits = sign
+        case 0:
+            var shift = 0
+            while fraction & 0x0400 == 0 {
+                fraction <<= 1
+                shift += 1
+            }
+            fraction &= 0x03ff
+            let floatExponent = UInt32(127 - 15 + 1 - shift)
+            floatBits = sign | (floatExponent << 23) | (fraction << 13)
+        case 0x1f:
+            floatBits = sign | 0x7f80_0000 | (fraction << 13)
+        default:
+            let floatExponent = UInt32(exponent + (127 - 15))
+            floatBits = sign | (floatExponent << 23) | (fraction << 13)
+        }
+        return Float(bitPattern: floatBits)
     }
 
     private func zeroArray(
@@ -897,7 +920,7 @@ extension NemotronEngine {
                         + (srcStart + f) * srcStrides[2]
                     let dstIdx = bin * dstStrides[1]
                         + (dstStart + f) * dstStrides[2]
-                    dstPtr[dstIdx] = float16ToFloat32(srcPtr[srcIdx])
+                    dstPtr[dstIdx] = Self.float16ToFloat32(srcPtr[srcIdx])
                 }
             }
         } else {

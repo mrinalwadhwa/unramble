@@ -19,7 +19,7 @@ settings:
     Release:
       ENABLE_HARDENED_RUNTIME: true
       CODE_SIGN_IDENTITY: "Developer ID Application"
-      DEVELOPMENT_TEAM: "3A56YKKGA5"
+      DEVELOPMENT_TEAM: "U5Y82TZF5K"
       CODE_SIGN_STYLE: Manual
       OTHER_CODE_SIGN_FLAGS: "--timestamp"
 
@@ -43,6 +43,8 @@ targets:
       - path: FreeFlowApp/Resources/models
         buildPhase: resources
         type: folder
+      - path: FreeFlowApp/models.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: FreeFlow
