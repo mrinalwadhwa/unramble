@@ -120,9 +120,10 @@ struct LocalModelRuntimeTests {
         await shutdown.value
 
         let events = trace.snapshot()
-        #expect(
-            events.index(of: "stt.load.1.finished")
-                < events.index(of: "stt.unload.1"))
+        let loadFinished = try #require(
+            events.firstIndex(of: "stt.load.1.finished"))
+        let unload = try #require(events.firstIndex(of: "stt.unload.1"))
+        #expect(loadFinished < unload)
         #expect(!stt.isReady)
     }
 
@@ -161,15 +162,17 @@ struct LocalModelRuntimeTests {
         await replacement.value
 
         let events = trace.snapshot()
-        #expect(
-            events.index(of: "old.stt.load.1.finished")
-                < events.index(of: "old.stt.unload.1"))
-        #expect(
-            events.index(of: "old.stt.unload.1")
-                < events.index(of: "cleanup.finished"))
-        #expect(
-            events.index(of: "cleanup.finished")
-                < events.index(of: "replacement.started"))
+        let loadFinished = try #require(
+            events.firstIndex(of: "old.stt.load.1.finished"))
+        let unload = try #require(
+            events.firstIndex(of: "old.stt.unload.1"))
+        let cleanupFinished = try #require(
+            events.firstIndex(of: "cleanup.finished"))
+        let replacementStarted = try #require(
+            events.firstIndex(of: "replacement.started"))
+        #expect(loadFinished < unload)
+        #expect(unload < cleanupFinished)
+        #expect(cleanupFinished < replacementStarted)
     }
 
     @Test("A newer request skips the stale replacement")
@@ -414,10 +417,4 @@ private final class EventTrace: @unchecked Sendable {
     }
 
     func snapshot() -> [String] { lock.withLock { events } }
-}
-
-private extension Array where Element == String {
-    func index(of event: String) -> Int {
-        firstIndex(of: event) ?? Int.max
-    }
 }
