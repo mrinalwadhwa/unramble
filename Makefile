@@ -1,6 +1,5 @@
-.PHONY: build run test test-all test-model-pack clean xcode generate models \
-	model-venv model-venv-hf verify-models verify-app-models release archive \
-	sign notarize appcast version
+.PHONY: build run test test-all clean xcode generate models \
+	verify-models verify-app-models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
 XCODEGEN := $(shell command -v xcodegen 2>/dev/null)
@@ -8,11 +7,8 @@ PROJECT  := FreeFlow.xcodeproj
 SCHEME   := FreeFlowApp
 CONFIG   := Debug
 XCODE_FLAGS := -skipPackagePluginValidation
-MODEL_MANIFEST := FreeFlowApp/models.json
-MODEL_VENV     := FreeFlowApp/.model-work/venv
-MODEL_PYTHON   := $(MODEL_VENV)/bin/python3
-HF_VERSION     := 1.11.0
-MODEL_REQUIREMENTS := scripts/model-requirements.txt
+PYTHON ?= python3
+MODEL_TOOL := scripts/models.sh
 
 # Release settings
 TEAM_ID          := U5Y82TZF5K
@@ -44,44 +40,26 @@ ifndef XCODEGEN
 endif
 	xcodegen generate
 
-# Create or repair the isolated, repository-local model-tools environment.
-# These are phony so a stale marker cannot hide a missing Python or package.
-model-venv: scripts/bootstrap-model-venv.py
-	@echo "Ensuring model-tools venv at $(MODEL_VENV)"
-	@python3 scripts/bootstrap-model-venv.py --venv $(MODEL_VENV)
-
-# Install the pinned network client only for explicit model materialization.
-model-venv-hf: model-venv $(MODEL_REQUIREMENTS)
-	@python3 scripts/bootstrap-model-venv.py \
-		--venv $(MODEL_VENV) \
-		--requirements $(MODEL_REQUIREMENTS) \
-		--huggingface-version $(HF_VERSION)
-
-# Download models listed in FreeFlowApp/models.json.
-models: model-venv-hf
-	@PATH="$(abspath $(MODEL_VENV)/bin):$$PATH" \
-		$(MODEL_PYTHON) scripts/download-models.py
+# `make models` is the only model-related target that uses the network.
+models: $(MODEL_TOOL)
+	@PYTHON="$(PYTHON)" "$(MODEL_TOOL)" download
 
 # Verify the complete model pack without network access.
-verify-models: model-venv
-	@$(MODEL_PYTHON) scripts/download-models.py --verify
+verify-models: $(MODEL_TOOL)
+	@"$(MODEL_TOOL)" verify
 
 # Verify the model pack copied into an extracted app archive.
-verify-app-models: model-venv
-	@cmp $(MODEL_MANIFEST) "$(APP_PATH)/Contents/Resources/models.json"
-	@$(MODEL_PYTHON) scripts/verify-model-pack.py \
-		--manifest "$(APP_PATH)/Contents/Resources/models.json" \
-		--models-dir "$(APP_PATH)/Contents/Resources/models"
+verify-app-models: $(MODEL_TOOL)
+	@"$(MODEL_TOOL)" verify "$(APP_PATH)/Contents/Resources/models"
 
 # Generate training data from YAML, then train a LoRA adapter
 train:
 	@cd training && python3 generate_training_data.py --no-casual --split
 	@cd training && python3 -u -m mlx_lm.lora --config lora-config.yaml
 
-# Build the app (generates project first if missing)
-build: model-venv $(PROJECT)
-	$(MODEL_PYTHON) scripts/download-models.py --run \
-		xcodebuild $(XCODE_FLAGS) -project $(PROJECT) -scheme $(SCHEME) \
+# Build the app after an offline model-pack verification.
+build: verify-models $(PROJECT)
+	xcodebuild $(XCODE_FLAGS) -project $(PROJECT) -scheme $(SCHEME) \
 		-configuration $(CONFIG) build
 
 # Build and launch
@@ -97,10 +75,7 @@ run: build
 # Only the summary line is printed. Inspect the log for details on failures.
 TEST_LOG := /tmp/freeflow-test.log
 
-test-model-pack: model-venv
-	@$(MODEL_PYTHON) -m unittest discover -s scripts/tests -p 'test_*.py'
-
-test: test-model-pack
+test:
 	@echo "Running fast tests… output → $(TEST_LOG)"
 	@cd FreeFlowKit && swift test > $(TEST_LOG) 2>&1; \
 	exit_code=$$?; \
@@ -126,7 +101,7 @@ test: test-model-pack
 	exit $$exit_code
 
 # Run all tests including Keychain-dependent suites (requires macOS login Keychain access).
-test-all: test-model-pack
+test-all:
 	@echo "Running all tests (including Keychain + slow)… output → $(TEST_LOG)"
 	@cd FreeFlowKit && FREEFLOW_TEST_KEYCHAIN=1 FREEFLOW_TEST_SLOW=1 swift test > $(TEST_LOG) 2>&1; \
 	exit_code=$$?; \
@@ -183,11 +158,10 @@ release:
 	@echo "  Appcast: $(RELEASE_DIR)/appcast.xml"
 	@echo "══════════════════════════════════════════════════"
 
-# Archive a Release build and export the app
-archive: model-venv $(PROJECT)
+# Archive a Release build and export the app after offline verification.
+archive: verify-models $(PROJECT)
 	@echo "── Archiving Release build ──"
-	$(MODEL_PYTHON) scripts/download-models.py --run \
-		xcodebuild $(XCODE_FLAGS) -project $(PROJECT) -scheme $(SCHEME) \
+	xcodebuild $(XCODE_FLAGS) -project $(PROJECT) -scheme $(SCHEME) \
 		-configuration Release -archivePath $(ARCHIVE_PATH) \
 		CODE_SIGNING_ALLOWED=NO archive
 	@echo "── Extracting app from archive ──"

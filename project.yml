@@ -43,8 +43,6 @@ targets:
       - path: FreeFlowApp/Resources/models
         buildPhase: resources
         type: folder
-      - path: FreeFlowApp/models.json
-        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: FreeFlow
