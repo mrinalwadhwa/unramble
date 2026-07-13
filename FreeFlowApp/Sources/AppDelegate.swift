@@ -277,9 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let onSessionExpired: (@Sendable () -> Void)?
 
         if Settings.shared.dictationMode == .local {
-            // Local mode: Parakeet STT + fine-tuned MLX LLM polish.
+            // Local mode: on-device STT + fine-tuned MLX LLM polish.
             #if arch(arm64)
-            Log.debug("[AppDelegate] Using local models (Parakeet + MLX)")
+            Log.debug("[AppDelegate] Using local models (STT + MLX)")
             let modelManager = LocalModelManager()
 
             // Resolve model paths: app bundle first, then Application Support.

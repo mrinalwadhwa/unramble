@@ -1159,45 +1159,6 @@ public enum PolishPipeline {
         return segments
     }
 
-    // MARK: - Local System Prompt
-
-    /// Build a dynamic system prompt for the fine-tuned Qwen model.
-    ///
-    /// Starts with the base `systemPromptQwen` and appends optional
-    /// context lines. The model was trained with these lines present
-    /// or absent, so it adapts its behavior accordingly.
-    ///
-    /// - Parameters:
-    ///   - context: App context for tone detection and preceding text.
-    /// - Returns: The system prompt string.
-    public static func buildQwenSystemPrompt(
-        context: AppContext
-    ) -> String {
-        var prompt = systemPromptQwen
-
-        if let tone = toneLabel(for: context.bundleID) {
-            prompt += "\nStyle: \(tone)"
-        }
-
-        if let content = context.focusedFieldContent,
-           !content.isEmpty
-        {
-            // Take the last ~80 characters as preceding text context.
-            let suffix: String
-            if content.count > 80 {
-                suffix = String(content.suffix(80))
-            } else {
-                suffix = content
-            }
-            let sanitized = sanitizeContextField(suffix)
-            if !sanitized.isEmpty {
-                prompt += "\nPreceding text: \(sanitized)"
-            }
-        }
-
-        return prompt
-    }
-
     // MARK: - Tone Mapping
 
     /// Known casual app bundle IDs — chat and messaging apps where

@@ -65,21 +65,24 @@ met, the LLM polish step is skipped entirely and the transcript goes
 straight to injection. In real-world usage, **83% of dictations** take
 this fast path.
 
-## On-device mode (macOS 26+)
+## On-device mode
 
-On macOS 26, FreeFlow can use Apple's SpeechAnalyzer framework to
-transcribe entirely on-device. No network calls, no API key needed for
-transcription. Audio never leaves the Mac.
+Local mode transcribes with a Core ML speech model and polishes with a
+fine-tuned Qwen model running through MLX. It prefers Nemotron when that
+model is installed and otherwise uses Parakeet. No network calls or API
+key are required, and audio never leaves the Mac.
 
 ### How it works
 
-1. Create a `SpeechTranscriber` and `SpeechAnalyzer` configured for the
-   user's locale.
-2. Feed 16 kHz 16-bit mono PCM buffers to the analyzer via an
-   `AsyncStream`.
-3. Accumulate transcription results as they arrive.
-4. On session end, finalize the analyzer and run the collected text
-   through the same local polish pipeline.
+1. Prefer Nemotron when its model is installed; otherwise load the
+   packaged Parakeet model.
+2. For Nemotron, create one streaming state and feed only newly recorded
+   16 kHz mono PCM during each cycle. Parakeet instead retranscribes the
+   accumulated audio on each cycle.
+3. Polish and inject sentences after they stabilize across consecutive
+   recognition cycles, leaving the changing tail uncommitted.
+4. On key release, finish recognition, polish the remaining tail with
+   Qwen, and inject it after the previously committed text.
 
 ### Tradeoffs
 
@@ -88,10 +91,10 @@ transcription. Audio never leaves the Mac.
 | Requires API key | Yes | No |
 | Network required | Yes | No |
 | Audio leaves Mac | Yes (to OpenAI) | No |
-| macOS requirement | 14+ | 26+ |
-| Accuracy | Higher (large cloud model) | Good (local model) |
+| macOS requirement | 14+ | 14+ on Apple Silicon |
+| Accuracy | Large cloud model | Nemotron or Parakeet 0.6B |
 | Latency | ~0.55 s p50 | Depends on hardware |
-| Long dictation | Chunked at 300 s | Continuous |
+| Long dictation | Chunked at 300 s | Incremental rolling injection |
 | Cost | OpenAI API usage | Free |
 
 ## Running the benchmarks

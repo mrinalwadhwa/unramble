@@ -26,8 +26,6 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>FreeFlow needs access to your microphone to capture speech for transcription.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>FreeFlow uses on-device speech recognition to transcribe your dictation locally.</string>
 	<key>SUFeedURL</key>
 	<string>https://updates.apps.mrinal.com/freeflow/appcast.xml</string>
 	<key>SUPublicEDKey</key>

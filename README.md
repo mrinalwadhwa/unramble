@@ -48,10 +48,10 @@ See [BENCHMARK.md](BENCHMARK.md) for detailed timing breakdowns.
 
 ## Private
 
-Everything runs on your Mac. Your audio and transcripts flow directly to OpenAI
-with your own API key; there is no FreeFlow server in the middle. On macOS 26,
-FreeFlow can also transcribe entirely on-device using Apple's SpeechAnalyzer
-framework — no network, no API key needed, audio never leaves the Mac.
+Local mode transcribes and polishes with on-device models. Audio and transcripts
+stay on this Mac, and local mode needs no API key or network connection. In
+cloud mode, audio and transcripts flow directly to OpenAI with your own API key;
+there is no FreeFlow server in the middle.
 
 ## Open
 

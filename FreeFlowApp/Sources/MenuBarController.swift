@@ -175,7 +175,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
-        // --- Private mode toggle (macOS 26+ only) ---
+        // --- Private mode toggle (Apple Silicon only) ---
 
         if DictationMode.isLocalAvailable {
             let privateMode = NSMenuItem(

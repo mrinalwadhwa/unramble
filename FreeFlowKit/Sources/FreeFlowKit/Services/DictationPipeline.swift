@@ -148,9 +148,8 @@ public actor DictationPipeline: PipelineProviding {
     /// locale. When nil, the server defaults to auto-detection.
     private(set) var language: String?
 
-    /// When true, skip the streaming-vs-batch race and use streaming
-    /// result directly. Local on-device providers cannot run concurrent
-    /// SpeechAnalyzer instances safely.
+    /// When true, finish the on-device streaming provider directly
+    /// instead of attempting the cloud batch fallback.
     private let localMode: Bool
 
     /// Update the language hint from outside the actor.

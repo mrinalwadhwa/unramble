@@ -3,7 +3,7 @@ import Foundation
 /// Whether dictation uses cloud APIs or on-device processing.
 ///
 /// Cloud mode sends audio to OpenAI for transcription and polishing.
-/// Local mode keeps all data on-device using Parakeet STT and a
+/// Local mode keeps all data on-device using a Core ML STT engine and a
 /// fine-tuned Qwen3 0.6B model for polish on Apple Silicon.
 /// Currently English-only; non-English languages require cloud mode.
 ///
