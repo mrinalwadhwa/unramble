@@ -22,7 +22,8 @@ Build, test, customize, and understand the FreeFlow codebase.
 `make models` is the only model command that uses the network. It creates its
 own disposable Python environment, downloads immutable Hugging Face revisions,
 and verifies the resulting pack. Build and archive commands only perform
-offline verification.
+offline verification. The built app never downloads or installs model assets
+at runtime.
 
 `FREEFLOW_TEST_KEYCHAIN=1` enables Keychain tests (require macOS login
 Keychain access, trigger password prompts). `FREEFLOW_TEST_OPENAI=1`

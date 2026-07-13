@@ -64,17 +64,18 @@ sessions see zero connection setup time.
 
 Local mode transcribes with the required Nemotron 0.6B Core ML model and
 polishes with a fine-tuned Qwen model running through MLX. Both models are
-loaded from packaged or previously installed local assets. Builds and archives
-verify the packaged model pack against its pinned manifest without network
-access; runtime loading fails explicitly when the resolved assets are missing
-or invalid. No API key is required, and audio never leaves the Mac.
+loaded from packaged assets, with a manually provisioned Application Support
+fallback. Builds and archives verify the packaged model pack against its pinned
+manifest without network access; runtime loading fails explicitly when the
+resolved assets are missing or invalid. No API key is required, and audio never
+leaves the Mac.
 
 ### How it works
 
-1. Resolve packaged Nemotron and Qwen assets, or previously installed assets
-   when a packaged directory is unavailable. Build and archive verify the
-   packaged model pack; runtime preload fails explicitly for unresolved or
-   invalid assets.
+1. Resolve packaged Nemotron and Qwen assets, or a manually provisioned
+   Application Support fallback when a packaged directory is unavailable.
+   Build and archive verify the packaged model pack; runtime preload fails
+   explicitly for unresolved or invalid assets.
 2. Create one Nemotron recognition session and feed only newly recorded
    16 kHz mono PCM during each cycle.
 3. Polish and inject sentences after they stabilize across consecutive
