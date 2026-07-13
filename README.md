@@ -10,6 +10,23 @@ It is open source, so you have the [freedom to customize](DEVELOP.md#customize) 
 want. It runs entirely on your Mac and talks directly to OpenAI with your own API key,
 so your audio and transcripts never pass through anyone else's servers.
 
+## Experimental Linux build
+
+FreeFlow now has a separate experimental Linux application beside the native
+macOS source. It combines a Rust dictation daemon with an Electron tray, settings
+window, and recording HUD. X11 supports global push-to-talk and clipboard paste;
+Wayland provides explicit window and tray controls with a safe manual-paste
+fallback when the compositor blocks automation.
+
+```bash
+./scripts/bootstrap-linux.sh
+make linux-dev
+```
+
+See [docs/LINUX.md](docs/LINUX.md) for distribution packages, build commands,
+credential-store requirements, Wayland restrictions, and troubleshooting. The
+Linux build is not yet a production release and does not replace the macOS app.
+
 ## Demo (sound on 🔊)
 
 In this demo, you'll hear rambling speech with filler words and corrections. Watch what appears at the cursor.

@@ -1,0 +1,57 @@
+name: Linux application
+
+on:
+  push:
+    paths:
+      - "rust/**"
+      - "desktop/**"
+      - "scripts/*linux.sh"
+      - ".github/workflows/cross-platform.yml"
+  pull_request:
+    paths:
+      - "rust/**"
+      - "desktop/**"
+      - "scripts/*linux.sh"
+      - ".github/workflows/cross-platform.yml"
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpulse-dev libx11-dev libxtst-dev libsecret-1-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+      - name: Lint Rust workspace
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+      - name: Test Rust workspace
+        run: cargo test --manifest-path rust/Cargo.toml --workspace
+      - name: Verify generated RPC contract
+        run: |
+          ./scripts/generate-rpc-types.sh
+          git diff --exit-code -- desktop/src/shared/rpc.generated.ts
+      - name: Test desktop shell
+        working-directory: desktop
+        run: |
+          npm run typecheck
+          npm test
+          npx electron-vite build

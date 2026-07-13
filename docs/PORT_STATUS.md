@@ -49,18 +49,18 @@ The native implementation establishes these concrete rules:
 | Accessibility and paste injection | Desktop clipboard and XTest paste | Implemented with manual-paste fallback |
 | NSWorkspace application context | X11 active-window metadata | Implemented for X11 targets |
 | Keychain credential storage | Secret Service | Implemented with session-only fallback |
-| SwiftUI menu bar and overlay | Electron tray, settings, and HUD | Not implemented |
+| SwiftUI menu bar and overlay | Electron tray, settings, and non-focusable HUD | Implemented |
 
 ## Implementation Status
 
 | Subsystem | Status | Notes |
 | --- | --- | --- |
 | Rust workspace | Complete | Six bounded application crates and a deterministic mock-service crate build together. |
-| Core state machine | Complete | Explicit transitions, cancellation, duplicate-start protection, timeout behavior, and transcript recovery have unit coverage. |
+| Core state machine | Complete | Explicit transitions, duplicate-start protection, startup-safe cancellation, timeout behavior, and transcript recovery have unit coverage. |
 | OpenAI realtime | Complete | The client streams 24 kHz PCM over the current transcription session protocol and collects partial and final events; the deterministic service verifies the wire flow. Live-service validation remains opt-in. |
 | Batch fallback | Complete | Multipart WAV transcription is cancellable, bounded by a deadline, and covered against the local service. |
 | Audio capture | Complete | CPAL enumerates PulseAudio and ALSA inputs, downmixes and resamples callbacks, bounds recordings, publishes levels, and falls back when a selected device disappears. A live PipeWire-backed preview completed on the development host. |
-| X11 shortcut | Partial | XGrabKey registers ordinary combinations, handles lock modifiers, distinguishes press/release, filters auto-repeat, and unregisters cleanly. Modifier-only XInput2 support and Xvfb verification remain. |
+| X11 shortcut | Partial | XGrabKey registers ordinary combinations, handles lock modifiers, distinguishes press/release, filters auto-repeat, and unregisters cleanly. A real X11/XWayland grab drove microphone preparation and cancellation successfully. Modifier-only XInput2 support and Xvfb CI remain. |
 | Wayland shortcut | Partial | The daemon detects Wayland, refuses misleading XWayland-only registration, and exposes window/tray controls with an actionable limitation. Portal registration remains. |
 | X11 injection | Partial | Clipboard plus XTest selects Ctrl+V or terminal-safe Ctrl+Shift+V and retains the transcript on fallback. X11 target-matrix verification remains. |
 | AT-SPI injection | Deferred | Clipboard delivery has priority. |
@@ -68,13 +68,14 @@ The native implementation establishes these concrete rules:
 | Credential storage | Complete | Secret Service holds persistent keys; environment and explicit session-only keys remain in memory. Ordinary JSON settings contain no credential fields and use mode 0600. |
 | Local RPC | Complete | JSON-RPC WebSockets bind to an ephemeral loopback port, authenticate a random launch token, admit one shell, carry notifications, and pass auth/request/error tests. |
 | Rust daemon | Complete | The daemon supervises the pipeline, hotkey, previews, settings, diagnostics, signals, and authenticated RPC; its ready record is machine-readable. |
-| Electron tray | Not started | Business logic will stay in the daemon. |
-| HUD | Not started | It must never take focus. |
-| Settings and onboarding | Not started | API key, microphone, shortcut, and polish settings are required. |
-| Diagnostics | Not started | Exports must redact secrets and transcript content. |
+| Electron tray | Complete | The tray exposes recording, cancellation, transcript recovery, microphone status, settings, diagnostics, and quit actions. It supervises the daemon with bounded restarts. |
+| HUD | Complete | The transparent always-on-top HUD ignores focus and pointer input and displays state and audio level. |
+| Settings and onboarding | Complete | The renderer configures credentials, microphone preview, language, models, shortcut, polish, context sharing, and start-on-login through typed RPC. |
+| Diagnostics | Complete | The UI displays environment and backend status; private JSON exports contain only a fixed sanitized diagnostics model. |
 | Transcript polish | Complete | The deterministic cleanup, clean-input bypass, restrained prompt, safe-output check, and API failure fallback have coverage. |
-| Mock service and smoke test | Partial | The service scripts realtime, batch, polish, authentication, rate-limit, delay, malformed-response, and disconnect behaviors. Provider integration tests pass; the desktop smoke path remains. |
-| Linux packaging | Not started | A reproducible development build comes first. |
+| Mock service and smoke test | Partial | The service scripts realtime, batch, polish, authentication, rate-limit, delay, malformed-response, and disconnect behaviors. Provider integration tests and packaged daemon startup pass; deterministic audio-to-GUI injection remains. |
+| Linux packaging | Complete | The release build produces an AppImage and Debian package containing the daemon at the resource-relative path used by Electron. |
+| Linux CI | Complete | A separate Ubuntu workflow checks formatting, Clippy, all Rust tests, generated RPC drift, TypeScript, desktop tests, and the production Electron bundle. |
 
 ## Intentionally Deferred
 
@@ -82,7 +83,7 @@ The native implementation establishes these concrete rules:
 - Full Windows support.
 - Direct AT-SPI editing unless the clipboard path is complete and reliable.
 - Broad Wayland compositor support beyond honest detection and safe fallback.
-- Release signing and automatic updates.
+- Release signing and automatic updates beyond package metadata scaffolding.
 
 ## Algorithms Suitable for Direct Porting
 
