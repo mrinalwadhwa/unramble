@@ -1,4 +1,4 @@
-.PHONY: build run test test-all clean xcode generate models \
+.PHONY: build run test test-ci test-all test-runner-tests clean xcode generate models \
 	verify-models verify-app-models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
@@ -66,65 +66,21 @@ build: verify-models $(PROJECT)
 run: build
 	@open "$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) -showBuildSettings 2>/dev/null | grep -m1 ' BUILT_PRODUCTS_DIR' | awk '{print $$3}')/FreeFlow.app"
 
-# Run all FreeFlowKit tests via Swift Package Manager (no Xcode project needed).
-# swift test runs both XCTest-based and Swift Testing suites in one invocation,
-# but the final summary line only counts Swift Testing tests. This target parses
-# the full output to report a combined total from both frameworks.
-#
-# Output is written to /tmp/freeflow-test.log to avoid flooding the terminal.
-# Only the summary line is printed. Inspect the log for details on failures.
-TEST_LOG := /tmp/freeflow-test.log
-
+# Run the default package selection with collision-free durable artifacts.
 test:
-	@echo "Running fast tests… output → $(TEST_LOG)"
-	@cd FreeFlowKit && swift test > $(TEST_LOG) 2>&1; \
-	exit_code=$$?; \
-	xc_pass=`grep -c '^Test Case.*passed' $(TEST_LOG) || true`; \
-	xc_fail=`grep -c '^Test Case.*failed' $(TEST_LOG) || true`; \
-	st_fail=`grep -c '^✘ Test .* failed' $(TEST_LOG) || true`; \
-	st_line=`grep 'Test run with' $(TEST_LOG) || true`; \
-	st_total=`echo "$$st_line" | sed -n 's/.*with \([0-9]*\) tests.*/\1/p'`; \
-	st_total=$${st_total:-0}; \
-	xc_pass=$${xc_pass:-0}; \
-	xc_fail=$${xc_fail:-0}; \
-	st_fail=$${st_fail:-0}; \
-	total=`expr $$xc_pass + $$xc_fail + $$st_total`; \
-	fail=`expr $$xc_fail + $$st_fail`; \
-	echo ""; \
-	if [ $$exit_code -ne 0 ] || [ $$fail -ne 0 ]; then \
-		echo "── FAILURES ──"; \
-		grep -E '✘ Test |✘ Suite |^Test Case.*failed' $(TEST_LOG) | head -20; \
-		echo ""; \
-	fi; \
-	echo "── Combined: $$total tests (`expr $$xc_pass + $$xc_fail` XCTest + $$st_total Swift Testing), $$fail failures ──"; \
-	echo "Full log: $(TEST_LOG)"; \
-	exit $$exit_code
+	@"scripts/run-tests.sh" default
 
-# Run all tests including Keychain-dependent suites (requires macOS login Keychain access).
+# Run the bounded, clean-checkout CI selection without secrets or external test services.
+test-ci:
+	@"scripts/run-tests.sh" ci
+
+# Enable Keychain and slow timeout suites. Live, model, and evaluation gates are unchanged.
 test-all:
-	@echo "Running all tests (including Keychain + slow)… output → $(TEST_LOG)"
-	@cd FreeFlowKit && FREEFLOW_TEST_KEYCHAIN=1 FREEFLOW_TEST_SLOW=1 swift test > $(TEST_LOG) 2>&1; \
-	exit_code=$$?; \
-	xc_pass=`grep -c '^Test Case.*passed' $(TEST_LOG) || true`; \
-	xc_fail=`grep -c '^Test Case.*failed' $(TEST_LOG) || true`; \
-	st_fail=`grep -c '^✘ Test .* failed' $(TEST_LOG) || true`; \
-	st_line=`grep 'Test run with' $(TEST_LOG) || true`; \
-	st_total=`echo "$$st_line" | sed -n 's/.*with \([0-9]*\) tests.*/\1/p'`; \
-	st_total=$${st_total:-0}; \
-	xc_pass=$${xc_pass:-0}; \
-	xc_fail=$${xc_fail:-0}; \
-	st_fail=$${st_fail:-0}; \
-	total=`expr $$xc_pass + $$xc_fail + $$st_total`; \
-	fail=`expr $$xc_fail + $$st_fail`; \
-	echo ""; \
-	if [ $$exit_code -ne 0 ] || [ $$fail -ne 0 ]; then \
-		echo "── FAILURES ──"; \
-		grep -E '✘ Test |✘ Suite |^Test Case.*failed' $(TEST_LOG) | head -20; \
-		echo ""; \
-	fi; \
-	echo "── Combined: $$total tests (`expr $$xc_pass + $$xc_fail` XCTest + $$st_total Swift Testing), $$fail failures ──"; \
-	echo "Full log: $(TEST_LOG)"; \
-	exit $$exit_code
+	@"scripts/run-tests.sh" keychain-slow
+
+# Exercise the result parser and runner without building the Swift package.
+test-runner-tests:
+	@"scripts/test-runner-tests.sh"
 
 # Clean build artifacts
 clean:

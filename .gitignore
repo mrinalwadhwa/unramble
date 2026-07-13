@@ -25,6 +25,7 @@ xcuserdata/
 .build/
 Packages/
 Package.resolved
+!FreeFlowKit/Package.resolved
 
 # CocoaPods
 Pods/

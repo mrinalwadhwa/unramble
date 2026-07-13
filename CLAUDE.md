@@ -18,27 +18,24 @@ In source code, README, CLAUDE.md, and commit messages:
 
 ## Testing
 
-The project uses two test frameworks side by side:
-
-- **XCTest** — used by capture-track tests (RecordingCoordinatorTests, WAVEncoderTests,
-  DictationPipelineTests).
-- **Swift Testing** — used by context-track tests (ContextAssemblyTests, MockTests, etc.).
-
-`swift test` runs both in a single invocation, but its final summary line only counts Swift
-Testing tests. Always use `make test`, which parses the full output and prints a combined total
-from both frameworks. Verify the "Combined" line at the end to confirm all tests passed.
+The package contains XCTest and Swift Testing tests. Their native terminal summaries use different counting semantics, so use the Make targets below; the runner reports each framework separately and fails if either report is missing or inconsistent.
 
 ```bash
-make test
-# ── Combined: 451 tests (150 XCTest + 301 Swift Testing), 0 failures ──
+make test               # Default package selection; inherits explicit test gates.
+make test-ci            # Bounded clean-CI selection; excludes host/live/model/corpus suites.
+make test-all           # Default selection plus Keychain and slow timeout suites.
+make test-runner-tests  # Runner/parser fixture checks; does not build the Swift package.
 ```
 
-**`make test` runs the fast suite (~5s).** Slow and Keychain-dependent tests are skipped by
-default. Use `make test-all` to run everything (~90s, requires Keychain access):
+`make test-all` is not a literal all-tests lane. It enables only `FREEFLOW_TEST_KEYCHAIN=1` and `FREEFLOW_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
+
+The default selection includes corpus-backed polish scenario tests and expects the ignored `training/polish-tests.json` file. Generate it from the committed YAML before the default or Keychain/slow lane when starting from a clean checkout. The isolated environment below installs only the generator's PyYAML dependency, not the MLX training stack:
 
 ```bash
-make test-all
-# ── Combined: 475 tests (174 XCTest + 301 Swift Testing), 0 failures ──
+cd training
+python3 -m venv ../.scratch/polish-data-venv
+../.scratch/polish-data-venv/bin/pip install 'pyyaml>=6.0'
+../.scratch/polish-data-venv/bin/python generate_training_data.py --no-casual --split
 ```
 
 **Environment variable gates:**
@@ -53,24 +50,22 @@ make test-all
 
 The first two are set automatically by `make test-all`.
 
-Test output is written to `/tmp/freeflow-test.log` (not to the terminal). Only the summary line
-is printed. On failure, the first 20 matching error lines are shown. Inspect the full log for
-details:
+By default, each invocation creates a unique directory under `.scratch/test-runs/` containing `swift-test.log`, `results-swift-testing.xml`, and `summary.txt`. The command prints those paths. Set `TEST_LOG` only when a caller needs an exact text-log path:
 
 ```bash
-cat /tmp/freeflow-test.log                          # full output
-grep -E '✘|FAIL|failed|error:' /tmp/freeflow-test.log  # just failures
+TEST_LOG=/tmp/freeflow-focused.log make test
 ```
 
-**Run new tests first.** When adding or modifying tests, run only the affected tests before
-running the full suite. This catches failures fast without waiting ~1.5 minutes:
+Run affected tests before the full suite, and keep their complete output:
 
 ```bash
 cd FreeFlowKit
-swift test --filter "testNameA|testNameB" 2>&1 | tail -20
+mkdir -p ../.scratch/test-runs
+set -o pipefail
+swift test --filter "testNameA|testNameB" 2>&1 | tee ../.scratch/test-runs/focused.log
 ```
 
-Move to `make test` for the full suite only after the new tests pass.
+Run `make test` after the focused tests pass.
 
 ## Interactive Commands
 
@@ -95,7 +90,7 @@ git --no-pager diff
 
 ## Git Workflow
 
-- Commit working code as you go. Run `make test` before each commit to confirm all tests pass.
+- Commit working code as you go. Run the relevant focused tests and the appropriate package selection before each commit.
 - `.scratch/` is gitignored.
 - Use the `.scratch` directory for notes, temporary tests, or experimental code that should not
   be committed.
@@ -171,7 +166,7 @@ use the active form.
 ```bash
 make generate   # Regenerate Xcode project (needed after adding/removing files)
 make build      # Build via xcodebuild
-make test       # Run all tests (see Testing section)
+make test       # Run the default package selection (see Testing section)
 make clean      # Clean build artifacts + DerivedData
 ```
 

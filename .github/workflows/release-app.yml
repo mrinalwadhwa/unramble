@@ -8,26 +8,60 @@ on:
 
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: macos-26
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
+      TEST_LOG_DIR: ${{ runner.temp }}/freeflow-test-runs
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
-      - name: Install xcodegen
-        run: brew install xcodegen
+      - name: Report Swift toolchain
+        run: swift --version
 
       - name: Run tests
-        run: make test
+        run: make test-ci
+
+      - name: Print full test logs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d "$TEST_LOG_DIR" ]]; then
+            printf 'No test log directory was created.\n'
+            exit 0
+          fi
+
+          found=0
+          while IFS= read -r log; do
+            found=1
+            printf '::group::%s\n' "$log"
+            cat "$log"
+            printf '::endgroup::\n'
+          done < <(find "$TEST_LOG_DIR" -type f -name swift-test.log -print | sort)
+
+          if (( found == 0 )); then
+            printf 'No Swift test logs were created.\n'
+          fi
 
   build-and-release:
     needs: test
-    runs-on: macos-15
+    runs-on: macos-26
     environment: release
     permissions:
       contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Install xcodegen
         run: brew install xcodegen
