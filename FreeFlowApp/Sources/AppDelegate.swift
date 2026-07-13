@@ -372,10 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
                 polishChatClient: polishClient)
             streamingProvider = OpenAIStreamingProvider(
-                apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
-                realtimeModel: "gpt-realtime-2.1",
-                polishChatClient: polishClient,
-                cloudPolishMode: .realtimeResponse)
+                apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
             onSessionExpired = { [weak self] in
                 Task { @MainActor in self?.resetAPIKey() }
             }

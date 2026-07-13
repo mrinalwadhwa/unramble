@@ -37,12 +37,20 @@ private func silentPCM(seconds: Double = 0.5, sampleRate: Int = 16000) -> Data {
 @Suite("OpenAIStreamingProvider – message construction")
 struct OpenAIRealtimeMessageTests {
 
-    @Test("session.update has required transcription fields")
+    private var context: AppContext {
+        AppContext(
+            bundleID: "com.apple.mail",
+            appName: "Mail",
+            windowTitle: "Reply",
+            focusedFieldContent: "Thanks for sending the draft.")
+    }
+
+    @Test("session.update configures transcription and response polish")
     func sessionUpdate() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
             sttModel: "gpt-4o-mini-transcribe",
             language: "en",
-            micProximity: .nearField)
+            context: context)
         let data = json.data(using: .utf8)!
         let obj = try #require(
             try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -63,6 +71,13 @@ struct OpenAIRealtimeMessageTests {
 
         // turn_detection must be NSNull so the server does not auto-commit.
         #expect(input["turn_detection"] is NSNull)
+
+        #expect(
+            session["instructions"] as? String
+                == PolishPipeline.buildCloudSystemPrompt(
+                    context: context, language: "en"))
+        let reasoning = try #require(session["reasoning"] as? [String: Any])
+        #expect(reasoning["effort"] as? String == "minimal")
     }
 
     @Test("session.update omits language when nil")
@@ -70,7 +85,7 @@ struct OpenAIRealtimeMessageTests {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
             sttModel: "gpt-4o-mini-transcribe",
             language: nil,
-            micProximity: .farField)
+            context: .empty)
         let obj = try JSONSerialization.jsonObject(
             with: json.data(using: .utf8)!) as! [String: Any]
         let session = obj["session"] as! [String: Any]
@@ -80,14 +95,45 @@ struct OpenAIRealtimeMessageTests {
         #expect(transcription["language"] == nil)
     }
 
-    @Test("session.update sets realtime type for far-field mic")
-    func sessionUpdateFarField() throws {
+    @Test("session.update carries preceding text into instructions")
+    func sessionUpdateContext() throws {
         let json = OpenAIStreamingProvider.buildSessionUpdate(
-            sttModel: "m", language: nil, micProximity: .farField)
+            sttModel: "m", language: "en", context: context)
         let obj = try JSONSerialization.jsonObject(
             with: json.data(using: .utf8)!) as! [String: Any]
         let session = obj["session"] as! [String: Any]
-        #expect(session["type"] as? String == "realtime")
+        let instructions = try #require(session["instructions"] as? String)
+        #expect(instructions.contains("Preceding text: Thanks for sending the draft."))
+    }
+
+    @Test("polish request preserves the transcript exactly")
+    func polishRequest() throws {
+        let transcript = "hello, quote \"this\"\nthen continue"
+        let json = OpenAIStreamingProvider.buildPolishRequest(
+            transcript: transcript)
+        let obj = try #require(
+            try JSONSerialization.jsonObject(
+                with: json.data(using: .utf8)!) as? [String: Any])
+        #expect(obj["type"] as? String == "conversation.item.create")
+
+        let item = try #require(obj["item"] as? [String: Any])
+        #expect(item["type"] as? String == "message")
+        #expect(item["role"] as? String == "user")
+        let content = try #require(item["content"] as? [[String: Any]])
+        #expect(content.count == 1)
+        #expect(content[0]["type"] as? String == "input_text")
+        #expect(content[0]["text"] as? String == transcript)
+    }
+
+    @Test("response.create requests text output")
+    func responseCreate() throws {
+        let json = OpenAIStreamingProvider.buildResponseCreate()
+        let obj = try #require(
+            try JSONSerialization.jsonObject(
+                with: json.data(using: .utf8)!) as? [String: Any])
+        #expect(obj["type"] as? String == "response.create")
+        let response = try #require(obj["response"] as? [String: Any])
+        #expect(response["output_modalities"] as? [String] == ["text"])
     }
 
     @Test("audio append message contains base64 audio")
@@ -113,8 +159,11 @@ struct OpenAIRealtimeMessageTests {
 
     @Test("websocket URL has model parameter")
     func websocketURL() {
-        let url = OpenAIStreamingProvider.buildWebSocketURL(model: "gpt-realtime")
-        #expect(url.absoluteString == "wss://api.openai.com/v1/realtime?model=gpt-realtime")
+        let url = OpenAIStreamingProvider.buildWebSocketURL(
+            model: OpenAIStreamingProvider.defaultRealtimeModel)
+        #expect(
+            url.absoluteString
+                == "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1")
     }
 
     @Test("websocket URL scheme is wss")
@@ -177,27 +226,25 @@ struct OpenAIRealtimeSessionSummaryTests {
         #expect(line.contains("chunks=12"))
     }
 
-    @Test("commit-relative first_delta and transcript timings")
+    @Test("commit-relative transcript and response timings")
     func commitRelativeTimings() {
         var t = makeTiming()
         t.commitSentAt = Date(timeIntervalSince1970: 1001.000)
-        t.firstDeltaAt = Date(timeIntervalSince1970: 1001.080)
         t.transcriptCompletedAt = Date(timeIntervalSince1970: 1001.350)
+        t.firstDeltaAt = Date(timeIntervalSince1970: 1001.500)
         t.endedAt = Date(timeIntervalSince1970: 1001.700)
         let line = OpenAIStreamingProvider.formatSessionSummary(t)
-        #expect(line.contains("first_delta=0.080"))
+        #expect(line.contains("first_delta=0.500"))
         #expect(line.contains("transcript=0.350"))
     }
 
-    @Test("polish field shows kind and duration")
+    @Test("polish field shows realtime outcome")
     func polishField() {
         var t = makeTiming()
-        t.polishStartedAt = Date(timeIntervalSince1970: 1001.000)
-        t.polishKind = .llmOK
-        t.polishFinishedAt = Date(timeIntervalSince1970: 1001.320)
+        t.polishKind = .realtimeOK
         t.endedAt = Date(timeIntervalSince1970: 1001.500)
         let line = OpenAIStreamingProvider.formatSessionSummary(t)
-        #expect(line.contains("polish=llm-ok(0.320)"))
+        #expect(line.contains("polish=realtime-ok"))
     }
 
     @Test("polish=skip shown without duration when no LLM ran")
@@ -207,8 +254,6 @@ struct OpenAIRealtimeSessionSummaryTests {
         t.endedAt = Date(timeIntervalSince1970: 1000.5)
         let line = OpenAIStreamingProvider.formatSessionSummary(t)
         #expect(line.contains("polish=skip"))
-        // Skip path does not record polishStartedAt/FinishedAt.
-        #expect(!line.contains("polish=skip("))
     }
 
     @Test("error field escapes embedded quotes")
@@ -294,6 +339,79 @@ struct OpenAIRealtimeEventTests {
         }
     }
 
+    @Test("parses GA response text delta event")
+    func responseOutputTextDelta() {
+        let event = #"{"type":"response.output_text.delta","delta":"Pol"}"#
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .responseTextDelta("Pol"))
+    }
+
+    @Test("parses GA response text done event")
+    func responseOutputTextDone() {
+        let event = #"{"type":"response.output_text.done","text":"Polished."}"#
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .responseTextDone("Polished."))
+    }
+
+    @Test("parses legacy response text event aliases")
+    func responseTextAliases() {
+        #expect(
+            OpenAIStreamingProvider.parseEvent(
+                #"{"type":"response.text.delta","delta":"Pol"}"#)
+                == .responseTextDelta("Pol"))
+        #expect(
+            OpenAIStreamingProvider.parseEvent(
+                #"{"type":"response.text.done","text":"Polished."}"#)
+                == .responseTextDone("Polished."))
+    }
+
+    @Test("parses completed response.done event")
+    func responseDone() {
+        let event = #"{"type":"response.done","response":{"status":"completed"}}"#
+        #expect(OpenAIStreamingProvider.parseEvent(event) == .responseDone)
+    }
+
+    @Test("failed response.done becomes an error")
+    func failedResponseDone() {
+        let event = """
+            {"type":"response.done","response":{
+              "status":"failed",
+              "status_details":{"error":{"message":"model failed"}}
+            }}
+            """
+        let parsed = OpenAIStreamingProvider.parseEvent(event)
+        if case .error(let message) = parsed {
+            #expect(message.contains("model failed"))
+        } else {
+            Issue.record("expected error, got \(parsed)")
+        }
+    }
+
+    @Test("response.done requires an explicit completed status")
+    func responseDoneRequiresStatus() {
+        #expect(
+            OpenAIStreamingProvider.parseEvent(
+                #"{"type":"response.done","response":{}}"#)
+                == .error("response.done missing status"))
+        #expect(
+            OpenAIStreamingProvider.parseEvent(
+                #"{"type":"response.done"}"#)
+                == .error("response.done missing response"))
+    }
+
+    @Test("transcription failure becomes an error")
+    func transcriptionFailed() {
+        let event = """
+            {"type":"conversation.item.input_audio_transcription.failed",
+             "error":{"message":"audio rejected"}}
+            """
+        #expect(
+            OpenAIStreamingProvider.parseEvent(event)
+                == .error("audio rejected"))
+    }
+
     @Test("parses error event")
     func errorEvent() {
         let event = """
@@ -343,6 +461,128 @@ struct OpenAIRealtimeEventTests {
     }
 }
 
+// MARK: - Production response flow
+
+private actor ScriptedRealtimeExchange {
+    enum ScriptError: Error {
+        case exhausted
+    }
+
+    private var events: [String]
+    private var sentMessages: [String] = []
+
+    init(events: [String]) {
+        self.events = events
+    }
+
+    func receive() throws -> String {
+        guard !events.isEmpty else { throw ScriptError.exhausted }
+        return events.removeFirst()
+    }
+
+    func send(_ message: String) {
+        sentMessages.append(message)
+    }
+
+    func sent() -> [String] {
+        sentMessages
+    }
+}
+
+@Suite("OpenAIStreamingProvider – production response flow")
+struct OpenAIRealtimeResponseFlowTests {
+
+    @Test("transcript is polished on the same connection")
+    func completeFlow() async throws {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.delta","delta":"raw"}"#,
+            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw words"}"#,
+            #"{"type":"response.output_text.delta","delta":"Polished "}"#,
+            #"{"type":"response.output_text.delta","delta":"words."}"#,
+            #"{"type":"response.done","response":{"status":"completed"}}"#,
+        ])
+
+        let result = try await OpenAIStreamingProvider.runRealtimeResponse(
+            receive: { try await exchange.receive() },
+            send: { await exchange.send($0) })
+
+        #expect(result == "Polished words.")
+        let sent = await exchange.sent()
+        #expect(sent.count == 2)
+
+        let item = try JSONSerialization.jsonObject(
+            with: sent[0].data(using: .utf8)!) as! [String: Any]
+        #expect(item["type"] as? String == "conversation.item.create")
+        let message = item["item"] as! [String: Any]
+        let content = message["content"] as! [[String: Any]]
+        #expect(content[0]["text"] as? String == "raw words")
+
+        let create = try JSONSerialization.jsonObject(
+            with: sent[1].data(using: .utf8)!) as! [String: Any]
+        #expect(create["type"] as? String == "response.create")
+    }
+
+    @Test("empty transcript sends no response request")
+    func emptyTranscript() async throws {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":""}"#
+        ])
+
+        let result = try await OpenAIStreamingProvider.runRealtimeResponse(
+            receive: { try await exchange.receive() },
+            send: { await exchange.send($0) })
+
+        #expect(result.isEmpty)
+        #expect(await exchange.sent().isEmpty)
+    }
+
+    @Test("text-done result is authoritative over preceding deltas")
+    func textDoneResult() async throws {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw"}"#,
+            #"{"type":"response.output_text.delta","delta":"Partial"}"#,
+            #"{"type":"response.output_text.done","text":"Final text."}"#,
+            #"{"type":"response.done","response":{"status":"completed"}}"#,
+        ])
+
+        let result = try await OpenAIStreamingProvider.runRealtimeResponse(
+            receive: { try await exchange.receive() },
+            send: { await exchange.send($0) })
+
+        #expect(result == "Final text.")
+    }
+
+    @Test("terminal failure overrides a preceding text-done event")
+    func failureAfterTextDone() async {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw"}"#,
+            #"{"type":"response.output_text.delta","delta":"Partial"}"#,
+            #"{"type":"response.output_text.done","text":"Final text."}"#,
+            #"{"type":"response.done","response":{"status":"failed"}}"#,
+        ])
+
+        await #expect(throws: DictationError.self) {
+            try await OpenAIStreamingProvider.runRealtimeResponse(
+                receive: { try await exchange.receive() },
+                send: { await exchange.send($0) })
+        }
+    }
+
+    @Test("response errors are surfaced")
+    func responseError() async {
+        let exchange = ScriptedRealtimeExchange(events: [
+            #"{"type":"conversation.item.input_audio_transcription.completed","transcript":"raw"}"#,
+            #"{"type":"error","error":{"message":"response rejected"}}"#,
+        ])
+
+        await #expect(throws: DictationError.self) {
+            try await OpenAIStreamingProvider.runRealtimeResponse(
+                receive: { try await exchange.receive() },
+                send: { await exchange.send($0) })
+        }
+    }
+}
+
 // MARK: - Live Integration (gated)
 
 @Suite(
@@ -360,8 +600,7 @@ struct OpenAIRealtimeLiveTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIStreamingProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: apiKey)
         try await provider.startStreaming(
             context: AppContext.empty,
             language: "en",
@@ -380,8 +619,7 @@ struct OpenAIRealtimeLiveTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIStreamingProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: apiKey)
         try await provider.startStreaming(
             context: AppContext.empty,
             language: "en",
@@ -400,8 +638,7 @@ struct ConcurrentCancelSafetyTests {
 
     @Test("concurrent cancelStreaming calls do not crash")
     func concurrentCancel() async {
-        let provider = OpenAIStreamingProvider(
-            apiKey: "sk-test", polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: "sk-test")
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<10 {
                 group.addTask { await provider.cancelStreaming() }
@@ -412,8 +649,7 @@ struct ConcurrentCancelSafetyTests {
 
     @Test("concurrent disconnect calls do not crash")
     func concurrentDisconnect() async {
-        let provider = OpenAIStreamingProvider(
-            apiKey: "sk-test", polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: "sk-test")
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<10 {
                 group.addTask { await provider.disconnect() }

@@ -40,9 +40,7 @@ final class AudioPipelineTests: XCTestCase {
 
         // Build providers.
         let polishClient = OpenAIChatClient(apiKey: apiKey)
-        let streamingProvider = OpenAIStreamingProvider(
-            apiKey: apiKey,
-            polishChatClient: polishClient)
+        let streamingProvider = OpenAIStreamingProvider(apiKey: apiKey)
         let batchProvider = OpenAIBatchProvider(
             apiKey: apiKey,
             polishChatClient: polishClient)

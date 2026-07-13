@@ -96,10 +96,10 @@ defaults:
 
 | Constant | File | Default | What it does |
 |----------|------|---------|-------------|
-| `realtimeModel` | `AppDelegate.swift` | `gpt-realtime-2.1` | Production Realtime connection and response polish |
+| `realtimeModel` | `OpenAIStreamingProvider.swift` | `gpt-realtime-2.1` | Production Realtime connection and response polish |
 | `sttModel` | `OpenAIStreamingProvider.swift` | `gpt-4o-mini-transcribe` | Realtime transcription |
 | `model` | `OpenAIBatchProvider.swift` | `gpt-4o-mini-transcribe` | Batch fallback transcription |
-| `polishModel` | `PolishPipeline.swift` | `gpt-5.4-nano` | Batch/chat fallback cleanup |
+| `polishModel` | `PolishPipeline.swift` | `gpt-5.4-nano` | HTTP batch fallback polish |
 
 The local Nemotron and Qwen repository revisions, selected files, and hashes
 are pinned in `scripts/models.sh`. The fine-tuned adapter source is tracked at

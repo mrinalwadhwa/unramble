@@ -32,6 +32,19 @@ private func toneWAV(seconds: Double = 1.0, sampleRate: Int = 16000) -> Data {
         pcmData: pcm, sampleRate: sampleRate, channels: 1, bitsPerSample: 16)
 }
 
+private actor BatchPolishSpy: PolishChatClient {
+    private(set) var models: [String] = []
+
+    func complete(
+        model: String,
+        systemPrompt: String,
+        userPrompt: String
+    ) async throws -> String {
+        models.append(model)
+        return "polished fallback."
+    }
+}
+
 // MARK: - Stubbed tests
 
 @Suite("OpenAIBatchProvider – stubbed")
@@ -273,6 +286,29 @@ struct OpenAIBatchProviderStubbedTests {
         let result = try await provider.dictate(
             audio: silentWAV(), context: AppContext.empty)
         #expect(result == "The deployment went smoothly.")
+    }
+
+    @Test("batch fallback retains chat polish")
+    func batchFallbackPolish() async throws {
+        let session = stubbedSession { request in
+            let body = #"{"text":"Um this needs cleanup"}"#
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, body.data(using: .utf8)!)
+        }
+        let polish = BatchPolishSpy()
+        let provider = OpenAIBatchProvider(
+            apiKey: "k",
+            polishChatClient: polish,
+            polishModel: "batch-polish-model",
+            session: session)
+
+        let result = try await provider.dictate(
+            audio: silentWAV(), context: .empty)
+
+        #expect(result == "polished fallback.")
+        #expect(await polish.models == ["batch-polish-model"])
     }
 
     @Test("dictated punctuation substituted when polish client is nil")

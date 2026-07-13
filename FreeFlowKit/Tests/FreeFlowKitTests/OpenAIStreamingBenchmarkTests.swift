@@ -9,7 +9,7 @@ import Testing
 // Measures:
 //   * startStreaming duration (connection open + session.update)
 //   * sendAudio latency per chunk
-//   * finishStreaming duration (commit → transcript)
+//   * finishStreaming duration (commit → polished response)
 //   * Total session time
 //
 // Gated by FREEFLOW_TEST_OPENAI_BENCH=1 since they hit the real API and
@@ -55,8 +55,7 @@ struct OpenAIStreamingBenchmarkTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIStreamingProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: apiKey)
 
         let pcm = silentPCM(seconds: 1.0)
         let chunks = chunked(pcm, chunkSizeMs: 100)
@@ -96,8 +95,7 @@ struct OpenAIStreamingBenchmarkTests {
             return
         }
 
-        let provider = OpenAIStreamingProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: apiKey)
 
         let pcm = silentPCM(seconds: 1.0)
         let chunks = chunked(pcm, chunkSizeMs: 100)
@@ -162,8 +160,7 @@ struct OpenAIStreamingBenchmarkTests {
             return
         }
 
-        let provider = OpenAIStreamingProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIStreamingProvider(apiKey: apiKey)
 
         let pcm = silentPCM(seconds: 1.0)
         let chunks = chunked(pcm, chunkSizeMs: 100)
