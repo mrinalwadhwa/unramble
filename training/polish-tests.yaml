@@ -1147,7 +1147,7 @@
   input: we're switching from redis to memcached for session storage
   accepted:
   - We're switching from Redis to Memcached for session storage.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: The deployment is scheduled for Thursday. No wait Friday at 3 p.m. Please
     make sure all the tests pass before then.
   accepted:
@@ -1155,7 +1155,7 @@
     pass before then.
   - The deployment is scheduled for Friday at 3 p.m. Please make sure all the tests
     pass before then.
-- category: parakeet-preserve
+- category: asr-preserve
   input: The CI pipeline runs in three stages. First, it compiles the code, then it
     runs the test suite, and finally it deploys to staging. Each stage has a five
     minute timeout.
@@ -1167,14 +1167,14 @@
     timeout.
   - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the
     test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
-- category: parakeet-false-start
+- category: asr-false-start
   input: We should probably actually know let me think rethink this. The best approach
     would be to add a retry mechanism with exponential back off. That way we It won't
     overwhelm the server during peak hours.
   accepted:
   - The best approach would be to add a retry mechanism with exponential backoff.
     That way it won't overwhelm the server during peak hours.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: The timeout should be set to 30 uh no 60 seconds and we should add a health
     check-in point that runs every five minutes.
   accepted:
@@ -1184,14 +1184,14 @@
     that runs every 5 minutes.
   - The timeout should be set to 60 seconds and we should add a health check-in point
     that runs every 5 minutes.
-- category: parakeet-correction
+- category: asr-correction
   input: The sour response time is about 500 milliseconds. Um I mean five seconds.
     That's way too slow for a real-time application. We need to get it under two hundred
     milliseconds.
   accepted:
   - The sour response time is about 5 seconds. That's way too slow for a real-time
     application. We need to get it under 200 milliseconds.
-- category: parakeet-preserve
+- category: asr-preserve
   input: The monitoring dashboard shows three critical alerts. The primary database
     is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%.
     Two of the application servers are returning 500 errors on the checkout endpoint.
@@ -1209,14 +1209,14 @@
     at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application
     servers are returning 500 errors on the checkout endpoint. I've already paged
     the on-call engineer, and they're looking into it.
-- category: parakeet-correction
+- category: asr-correction
   input: We had about twelve hundred active users last month. Uh sorry, I mean twelve
     thousand. Revenue was up fifteen percent compared to Q three. The churn rate stayed.
     Flat at around three point five percent.
   accepted:
   - We had about 12,000 active users last month. Revenue was up 15% compared to Q3.
     The churn rate stayed flat at around 3.5%.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: Honestly, this is the best architecture decision we've made all year. The
     microservices approach was killing us with latency. Going back to a monolith for
     the core services was absolutely the wrong. Right call.
@@ -1227,13 +1227,13 @@
   - Honestly, this is the best architecture decision we've made all year. The microservices
     approach was killing us with latency. Going back to a monolith for the core services
     was absolutely the right call.
-- category: parakeet-punctuation
+- category: asr-punctuation
   input: Please send the update to the team dash and make sure to CC the project manager.
     The deadline is Friday, comma. So don't wait until the last minute.
   accepted:
   - Please send the update to the team — and make sure to CC the project manager.
     The deadline is Friday, so don't wait until the last minute.
-- category: parakeet-preserve
+- category: asr-preserve
   input: Okay, so here's the plan for tomorrow. First we'll deploy the database changes
     during the maintenance window. Then once that's stable, we'll push the new API
     version. And finally we'll update the client SDK and send out the migration guide.
@@ -1253,7 +1253,7 @@
   - Here's the plan for tomorrow. First we'll deploy the database changes during the
     maintenance window. Once that's stable, we'll push the new API version. And finally
     we'll update the client SDK and send out the migration guide.
-- category: parakeet-preserve
+- category: asr-preserve
   input: The monitoring dashboard shows three critical alerts. The primary database
     is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%.
     Two of the application servers are returning 500 errors on the checkout endpoint.
@@ -1271,13 +1271,13 @@
     at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application
     servers are returning 500 errors on the checkout endpoint. I already paged the
     on-call engineer, and they're looking into it.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: We should deploy to staging. Actually no, deploy to production. The hotfix
     needs to go out immediately.
   accepted:
   - We should deploy to production. The hotfix needs to go out immediately.
   - Deploy to production. The hotfix needs to go out immediately.
-- category: parakeet-preserve
+- category: asr-preserve
   input: The database cluster has five nodes across three availability zones. Two
     are configured as primaries and three as read replicas. The replication lag is
     consistently under 50 milliseconds. We can handle an automated failover in under
@@ -1286,39 +1286,39 @@
   - The database cluster has 5 nodes across 3 availability zones. Two are configured
     as primaries and 3 as read replicas. The replication lag is consistently under
     50 milliseconds. We can handle an automated failover in under 10 seconds.
-- category: parakeet-ampm
+- category: asr-ampm
   input: The meeting is at 3 p.m. sharp in the main conference room.
   accepted:
   - The meeting is at 3 PM sharp in the main conference room.
-- category: parakeet-ampm
+- category: asr-ampm
   input: The maintenance window starts at 2 a.m. tomorrow and ends at 6 a.m. We should
     have the migration done by then.
   accepted:
   - The maintenance window starts at 2 AM tomorrow and ends at 6 AM. We should have
     the migration done by then.
-- category: parakeet-ampm
+- category: asr-ampm
   input: The deploy went out at 4 p.m. yesterday. We started seeing errors around
     5 p.m. The rollback was complete by 6 p.m.
   accepted:
   - The deploy went out at 4 PM yesterday. We started seeing errors around 5 PM. The
     rollback was complete by 6 PM.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: The bug is in the auth service. Wait, no, it's in the gateway. We need to
     check the request routing logic.
   accepted:
   - The bug is in the gateway. We need to check the request routing logic.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: Let's use MySQL. Scratch that, PostgreSQL is a better fit. It has better
     support for JSON columns.
   accepted:
   - Let's use PostgreSQL. It has better support for JSON columns.
   - PostgreSQL is a better fit. It has better support for JSON columns.
-- category: parakeet-backtrack
+- category: asr-backtrack
   input: The cache TTL should be five minutes. Actually, make it ten minutes. We don't
     want to hit the database too often.
   accepted:
   - The cache TTL should be 10 minutes. We don't want to hit the database too often.
-- category: parakeet-preserve
+- category: asr-preserve
   input: The incident response plan has four stages. Detection happens through automated
     monitoring alerts. Triage determines the severity and assigns the on-call engineer.
     Mitigation focuses on reducing customer impact as quickly as possible.
@@ -1326,7 +1326,7 @@
   - The incident response plan has 4 stages. Detection happens through automated monitoring
     alerts. Triage determines the severity and assigns the on-call engineer. Mitigation
     focuses on reducing customer impact as quickly as possible.
-- category: parakeet-preserve
+- category: asr-preserve
   input: The new API gateway handles authentication, rate limiting, and request routing.
     It supports both REST and GraphQL endpoints. Average latency added by the gateway
     is under five milliseconds. We've been running it in shadow mode for two weeks
@@ -1336,7 +1336,7 @@
     It supports both REST and GraphQL endpoints. Average latency added by the gateway
     is under 5 milliseconds. We've been running it in shadow mode for 2 weeks with
     no issues.
-- category: parakeet-preserve
+- category: asr-preserve
   input: We migrated from AWS to GCP last quarter. The main drivers were cost savings
     and better Kubernetes support. Total migration took about six weeks. The only
     issue was reconfiguring the CDN which added an extra three days.
@@ -1344,51 +1344,51 @@
   - We migrated from AWS to GCP last quarter. The main drivers were cost savings and
     better Kubernetes support. Total migration took about 6 weeks. The only issue
     was reconfiguring the CDN, which added an extra 3 days.
-- category: parakeet-ampm
+- category: asr-ampm
   input: The on-call rotation starts at 9 a.m. Monday and ends at 9 a.m. the following
     Monday.
   accepted:
   - The on-call rotation starts at 9 AM Monday and ends at 9 AM the following Monday.
-- category: parakeet-ampm
+- category: asr-ampm
   input: We noticed the CPU spike at 11 p.m. last night. By 1 a.m. the service had
     fully recovered.
   accepted:
   - We noticed the CPU spike at 11 PM last night. By 1 AM the service had fully recovered.
   - We noticed the CPU spike at 11 PM last night. By 1 AM, the service had fully recovered.
-- category: parakeet-ampm
+- category: asr-ampm
   input: The batch job runs at 4 a.m. daily and processes about fifty thousand records.
   accepted:
   - The batch job runs at 4 AM daily and processes about 50,000 records.
-- category: parakeet-correction
+- category: asr-correction
   input: The timeout is set to thirty seconds. I mean thirty minutes. That's way too
     long for a health check.
   accepted:
   - The timeout is set to 30 minutes. That's way too long for a health check.
-- category: parakeet-correction
+- category: asr-correction
   input: We deployed to the staging region. Sorry I mean the production region. The
     latency requirements are different for live traffic.
   accepted:
   - We deployed to the production region. The latency requirements are different for
     live traffic.
-- category: parakeet-discourse
+- category: asr-discourse
   input: Like, the main issue is that the database queries are not optimized. We need
     to add proper indexing.
   accepted:
   - The main issue is that the database queries are not optimized. We need to add
     proper indexing.
-- category: parakeet-discourse
+- category: asr-discourse
   input: So basically, the authentication flow is broken because the token refresh
     endpoint returns a 500 error.
   accepted:
   - The authentication flow is broken because the token refresh endpoint returns a
     500 error.
-- category: parakeet-discourse
+- category: asr-discourse
   input: You know, the real problem is that we don't have enough monitoring in place.
     We need better observability.
   accepted:
   - The real problem is that we don't have enough monitoring in place. We need better
     observability.
-- category: parakeet-correction-long
+- category: asr-correction-long
   input: The cluster has eight nodes. I mean sixteen nodes. We doubled the capacity
     after the holiday traffic spike. The auto scaling policy triggers at 70% memory
     utilization.
@@ -1397,7 +1397,7 @@
     The auto scaling policy triggers at 70% memory utilization.
   - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike.
     The auto-scaling policy triggers at 70% memory utilization.
-- category: parakeet-correction-long
+- category: asr-correction-long
   input: The database has about two hundred tables. Sorry I mean two thousand tables.
     Most of them are legacy and haven't been accessed in months. We need to audit
     and clean up the unused ones.

@@ -937,3 +937,33 @@ extension NemotronEngine {
         }
     }
 }
+
+extension NemotronEngine: LocalStreamingRecognizer {
+
+    public func makeRecognitionSession() throws -> any LocalRecognitionSession {
+        NemotronRecognitionSession(
+            engine: self, state: try makeStreamingState())
+    }
+}
+
+private final class NemotronRecognitionSession: LocalRecognitionSession {
+    private let engine: NemotronEngine
+    private let state: NemotronStreamingState
+
+    init(engine: NemotronEngine, state: NemotronStreamingState) {
+        self.engine = engine
+        self.state = state
+    }
+
+    func feed(_ samples: [Float]) throws {
+        try engine.feed(samples, into: state)
+    }
+
+    func transcript() -> String {
+        engine.transcript(state)
+    }
+
+    func finish() throws -> String {
+        try engine.finishStreaming(state)
+    }
+}

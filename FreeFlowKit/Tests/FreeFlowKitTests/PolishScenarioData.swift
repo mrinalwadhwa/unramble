@@ -71,7 +71,7 @@ let allScenarios: [PolishScenario] = loadScenarios(from: "polish-tests.json")
 let allTrainingScenarios: [PolishScenario] = loadScenarios(from: "polish-training-eval.json")
 
 /// P1 eval scenarios — curated set of cases that must be 100% correct.
-/// Covers: don't lose content, pass through clean input, handle Parakeet artifacts.
+/// Covers: don't lose content, pass through clean input, handle ASR artifacts.
 let allP1Scenarios: [PolishScenario] = loadScenarios(from: "p1-eval-set.json")
 
 /// Load scenarios from a JSON file, applying environment-based filters.

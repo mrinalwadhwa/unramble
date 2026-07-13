@@ -29,8 +29,8 @@ struct LocalModelManagerTests {
         let (manager, tmp) = try makeManager()
         defer { cleanup(tmp) }
 
-        let path = manager.modelPath(for: "parakeet-tdt-0.6b")
-        #expect(path.lastPathComponent == "parakeet-tdt-0.6b")
+        let path = manager.modelPath(for: "test-model")
+        #expect(path.lastPathComponent == "test-model")
         #expect(path.deletingLastPathComponent().path == tmp.path)
     }
 

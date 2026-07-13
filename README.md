@@ -31,27 +31,27 @@ After that, grant accessibility and microphone permissions and you are ready to 
 ## Fast
 
 Audio streams to OpenAI's Realtime API over a persistent WebSocket while you
-speak. The model transcribes incrementally, so by the time you release the key
-the transcript is already done. Median latency from key release to polished text
-at cursor is **0.55 seconds**.
+speak. The model transcribes incrementally, so much of the work is complete by
+the time you release the key. The current Realtime-response polish path still
+needs a fresh published latency and warm-connection run; the historical
+baseline is recorded in [BENCHMARK.md](BENCHMARK.md).
 
-A warm backup connection is kept pre-opened in the background. After your first
-dictation, subsequent ones skip the WebSocket handshake entirely — 91% of
-sessions see zero connection setup time.
+A warm backup connection is kept pre-opened in the background so later
+dictations can skip the WebSocket handshake.
 
-83% of dictations skip the LLM polish step entirely thanks to a local heuristic
-that detects clean transcripts. When polish is needed, `gpt-4.1-nano` handles it
-in 320–780 ms. If the streaming path fails, a batch fallback runs in parallel
-and catches it automatically.
+The same Realtime connection transcribes the audio and returns the polished
+response. If that streaming path fails, FreeFlow can recover through batch
+transcription and chat polish for the full recording or its uncommitted tail.
 
 See [BENCHMARK.md](BENCHMARK.md) for detailed timing breakdowns.
 
 ## Private
 
-Local mode transcribes and polishes with on-device models. Audio and transcripts
-stay on this Mac, and local mode needs no API key or network connection. In
-cloud mode, audio and transcripts flow directly to OpenAI with your own API key;
-there is no FreeFlow server in the middle.
+Local mode uses Nemotron speech recognition and a fine-tuned Qwen polisher on
+Apple Silicon. Audio and transcripts stay on this Mac, and local mode needs no
+API key or network connection. In cloud mode, audio and transcripts flow
+directly to OpenAI with your own API key; there is no FreeFlow server in the
+middle.
 
 ## Open
 

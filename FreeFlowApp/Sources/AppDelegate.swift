@@ -324,24 +324,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         + "qwen3-0.6b-4bit-polish-adapter")
             }
 
-            let sttEngine: any LocalSTTEngine
-            if let nemotronPath = Self.resolveModelPath(
+            guard let nemotronPath = Self.resolveModelPath(
                 "nemotron-speech-streaming-en-0.6b-coreml",
                 file: "nemotron_coreml_560ms/tokenizer.json",
                 modelManager: modelManager
-            ) {
-                Log.debug("[AppDelegate] Nemotron model found, using NemotronEngine")
-                sttEngine = NemotronEngine(
-                    modelManager: modelManager,
-                    modelPath: nemotronPath)
-            } else {
-                let parakeetPath = Self.resolveModelPath(
-                    "parakeet-tdt-0.6b-v3-coreml", file: "tokens.txt",
-                    modelManager: modelManager)
-                sttEngine = ParakeetEngine(
-                    modelManager: modelManager,
-                    modelPath: parakeetPath)
+            ) else {
+                fatalError(
+                    "Required local model is missing: "
+                        + "nemotron-speech-streaming-en-0.6b-coreml")
             }
+            let sttEngine = NemotronEngine(
+                modelManager: modelManager, modelPath: nemotronPath)
             let llmEngine = MLXLLMEngine(
                 name: "Qwen3 0.6B Polish",
                 modelDirectory: URL(

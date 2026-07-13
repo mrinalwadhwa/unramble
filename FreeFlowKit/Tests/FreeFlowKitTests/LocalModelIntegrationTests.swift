@@ -7,7 +7,6 @@ import Testing
 ///
 /// Gated behind `FREEFLOW_TEST_LOCAL_MODELS=1`. The MLX LLM test
 /// requires `FREEFLOW_QWEN_MODEL_PATH` to point to a local model.
-/// The Parakeet test requires model files in the app's models directory.
 @Suite("Local model integration", .enabled(if: ProcessInfo.processInfo.environment["FREEFLOW_TEST_LOCAL_MODELS"] != nil))
 struct LocalModelIntegrationTests {
 
@@ -54,31 +53,5 @@ struct LocalModelIntegrationTests {
         #expect(!result.isEmpty)
 
         await engine.unload()
-    }
-
-    // MARK: - Parakeet STT Engine
-
-    @Test("ParakeetEngine loads and transcribes audio",
-          .enabled(if: LocalModelManager().isDownloaded("parakeet-tdt-0.6b-v3")))
-    func parakeetEngineTranscription() async throws {
-        let manager = LocalModelManager()
-        let engine = ParakeetEngine(modelManager: manager)
-
-        #expect(!engine.isReady)
-        try await engine.load()
-        #expect(engine.isReady)
-
-        // Generate a short silent WAV (1 second of silence).
-        let silentPCM = Data(repeating: 0, count: 32000)  // 1s at 16kHz 16-bit mono
-        let wav = WAVEncoder.encode(
-            pcmData: silentPCM, sampleRate: 16000,
-            channels: 1, bitsPerSample: 16)
-
-        let result = try await engine.transcribe(audio: wav)
-        print("[ParakeetEngine] Result for silence: '\(result)'")
-        // Silence should produce empty or near-empty transcription.
-
-        await engine.unload()
-        #expect(!engine.isReady)
     }
 }

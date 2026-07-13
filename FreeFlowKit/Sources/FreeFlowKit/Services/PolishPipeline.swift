@@ -1437,7 +1437,7 @@ public enum PolishPipeline {
 
     /// Strip trailing standalone discourse fillers from the final
     /// polished output. Words like "Yeah.", "Right.", "Mm." as the
-    /// last sentence are Parakeet hallucinations or meaningless
+    /// last sentence are streaming ASR hallucinations or meaningless
     /// discourse closers. Only applied to the final assembled result,
     /// not during incremental polish, to avoid cache mismatches.
     public static func stripTrailingFiller(_ text: String) -> String {

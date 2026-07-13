@@ -105,15 +105,15 @@ struct NemotronStreamingTests {
             let i16 = raw.bindMemory(to: Int16.self)
             for i in 0..<sampleCount { samples[i] = Float(i16[i]) / 32768.0 }
         }
-        let state = try engine.makeStreamingState()
+        let session = try engine.makeRecognitionSession()
         let step = max(1, sampleCount / pieces)
         var offset = 0
         while offset < sampleCount {
             let end = min(offset + step, sampleCount)
-            try engine.feed(Array(samples[offset..<end]), into: state)
+            try session.feed(Array(samples[offset..<end]))
             offset = end
         }
-        return try engine.finishStreaming(state)
+        return try session.finish()
     }
 
     private func findWAVs() -> [URL] {

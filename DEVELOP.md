@@ -6,15 +6,23 @@ Build, test, customize, and understand the FreeFlow codebase.
 
 - macOS 14+
 - Xcode 16+
+- Python 3.10+ for explicit model downloads
 - [xcodegen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 
 ## Build
 
-    make build       # debug build (generates Xcode project if missing)
-    make test        # fast tests (~5s)
-    make test-all    # full suite incl Keychain + slow tests (~90s)
-    make clean       # clean everything
-    make xcode       # open in Xcode
+    make models          # download the pinned local model pack
+    make verify-models   # verify local assets without network access
+    make build           # debug build (generates the project if missing)
+    make test            # fast tests (~5s)
+    make test-all        # Keychain + slow tests (~90s)
+    make clean           # clean build output
+    make xcode           # open in Xcode
+
+`make models` is the only model command that uses the network. It creates its
+own disposable Python environment, downloads immutable Hugging Face revisions,
+and verifies the resulting pack. Build and archive commands only perform
+offline verification.
 
 `FREEFLOW_TEST_KEYCHAIN=1` enables Keychain tests (require macOS login
 Keychain access, trigger password prompts). `FREEFLOW_TEST_OPENAI=1`
@@ -35,6 +43,17 @@ dictation pipeline, streaming and batch OpenAI providers, the polish
 pipeline, audio capture, device switching, text injection, Keychain
 storage, and the recording state machine. Protocols for every provider
 enable dependency injection in tests.
+
+The supported local pipeline is incremental and has one production speech
+recognizer:
+
+```mermaid
+flowchart LR
+    A[16 kHz microphone PCM] --> N[Nemotron Core ML session]
+    N --> R[Running raw transcript]
+    R --> Q[Fine-tuned Qwen polish via MLX]
+    Q --> I[Rolling chunks and final tail injection]
+```
 
 ## Customize
 
@@ -68,17 +87,20 @@ instructions about language preservation and output format.
 
 ### Change a model
 
-Four constants control the entire AI pipeline. They are the default
-argument values on the provider initializers:
+Cloud model identifiers are configured at the composition root or as provider
+defaults:
 
 | Constant | File | Default | What it does |
 |----------|------|---------|-------------|
-| `realtimeModel` | `OpenAIRealtimeProvider.swift` | `gpt-4o-realtime-preview` | Streaming speech-to-text via the Realtime API |
-| `sttModel` | `OpenAIRealtimeProvider.swift` | `gpt-4o-mini-transcribe` | Transcription model within the Realtime session |
-| `model` | `OpenAIDictationProvider.swift` | `gpt-4o-mini-transcribe` | Batch transcription model (used as fallback) |
-| `polishModel` | both providers | `gpt-4.1-nano` | Text cleanup after transcription |
+| `realtimeModel` | `AppDelegate.swift` | `gpt-realtime-2.1` | Production Realtime connection and response polish |
+| `sttModel` | `OpenAIStreamingProvider.swift` | `gpt-4o-mini-transcribe` | Realtime transcription |
+| `model` | `OpenAIBatchProvider.swift` | `gpt-4o-mini-transcribe` | Batch fallback transcription |
+| `polishModel` | `PolishPipeline.swift` | `gpt-5.4-nano` | Batch/chat fallback cleanup |
 
-Change the string, rebuild, done.
+The local Nemotron and Qwen repository revisions, selected files, and hashes
+are pinned in `scripts/models.sh`. The fine-tuned adapter source is tracked at
+`FreeFlowApp/ModelSources/qwen3-0.6b-4bit-polish-adapter`; rerun `make models`
+after changing it so the generated pack receives the current adapter bytes.
 
 ### Rebuild
 

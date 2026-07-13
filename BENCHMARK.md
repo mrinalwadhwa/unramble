@@ -7,40 +7,44 @@ profiles.
 
 Audio streams directly from your Mac to OpenAI's Realtime API over a
 persistent WebSocket. The model transcribes incrementally while you
-speak, so by the time you release the key the transcript is already
-done.
+speak, so much of the audio processing is already underway when you
+release the key.
 
 ### How it works
 
 1. Open a WebSocket to `wss://api.openai.com/v1/realtime` and configure
-   it for transcription only. The first session pays a ~300 ms
-   handshake; later sessions adopt a warm backup connection pre-opened
+   its transcription model and polish instructions. The first session pays a
+   ~300 ms handshake; later sessions adopt a warm backup connection pre-opened
    in the background and skip the handshake entirely.
 2. Stream 16 kHz PCM chunks resampled to 24 kHz while the user holds
    the dictation key.
 3. On key release, commit the audio buffer and wait for the transcript.
-4. Run the raw transcript through the local polish pipeline:
-   deterministic regex substitution → `isClean` skip heuristic →
-   (optional) a single `gpt-4.1-nano` chat completion for cleanup.
+4. Send the transcript back over the same Realtime connection and ask the
+   Realtime model for the polished response.
 5. Inject the polished text into the target app via the accessibility
    API.
 
-A batch fallback (`POST /v1/audio/transcriptions` with the full WAV)
-runs in parallel and catches the case where the WebSocket errors out
-mid-session. Whichever path finishes first wins.
+If the Realtime path fails, the pipeline can then use
+`POST /v1/audio/transcriptions` and polish that transcript through the
+chat-completion path. Before any rolling injection, recovery sends the full
+WAV; afterward it sends only the uncommitted tail. This is serial recovery, not
+a request racing the live WebSocket.
 
-### Real-world numbers
+### Historical baseline
 
-Measured across 42 successful real-speech dictations on an M4 MacBook
-Pro. Pipeline total is key release → polished text visible at cursor.
+The following 42-session real-speech baseline was measured on an M4 MacBook
+Pro using the previous skip-or-chat polish path. It has not been rerun against
+the production Realtime-response polish path, so it is retained for comparison
+rather than presented as current performance. Pipeline total is key release →
+polished text visible at cursor.
 
 | Phase | Typical | Notes |
 |-------|---------|-------|
 | WebSocket handshake | ~300 ms | Cold start only; warm backup makes this 0 ms |
 | First transcript delta | 250–550 ms | After audio commit |
 | Transcript complete | 280 ms–1.27 s | Scales sub-linearly with audio length |
-| Polish (skip path) | < 3 ms | 83% of dictations skip LLM polish entirely |
-| Polish (LLM path) | 320 ms–780 ms | `gpt-4.1-nano`, 17% of dictations |
+| Polish (skip path) | < 3 ms | Previous deterministic skip path |
+| Polish (chat path) | 320 ms–780 ms | Previous separate chat request |
 | Text injection | ~70 ms | Via accessibility API |
 
 **End-to-end totals:**
@@ -56,29 +60,23 @@ Warm backup adoption rate: 91% of non-cold sessions (39/43). The
 background pre-open task keeps up with normal dictation pace, so most
 sessions see zero connection setup time.
 
-### Polish skip rate
-
-The `isClean` heuristic checks whether the transcript already starts
-with a capital letter, ends with sentence punctuation, contains no
-filler words, and has no repeated phrases. When these conditions are
-met, the LLM polish step is skipped entirely and the transcript goes
-straight to injection. In real-world usage, **83% of dictations** take
-this fast path.
-
 ## On-device mode
 
-Local mode transcribes with a Core ML speech model and polishes with a
-fine-tuned Qwen model running through MLX. It prefers Nemotron when that
-model is installed and otherwise uses Parakeet. No network calls or API
-key are required, and audio never leaves the Mac.
+Local mode transcribes with the required Nemotron 0.6B Core ML model and
+polishes with a fine-tuned Qwen model running through MLX. Both models are
+loaded from packaged or previously installed local assets. Builds and archives
+verify the packaged model pack against its pinned manifest without network
+access; runtime loading fails explicitly when the resolved assets are missing
+or invalid. No API key is required, and audio never leaves the Mac.
 
 ### How it works
 
-1. Prefer Nemotron when its model is installed; otherwise load the
-   packaged Parakeet model.
-2. For Nemotron, create one streaming state and feed only newly recorded
-   16 kHz mono PCM during each cycle. Parakeet instead retranscribes the
-   accumulated audio on each cycle.
+1. Resolve packaged Nemotron and Qwen assets, or previously installed assets
+   when a packaged directory is unavailable. Build and archive verify the
+   packaged model pack; runtime preload fails explicitly for unresolved or
+   invalid assets.
+2. Create one Nemotron recognition session and feed only newly recorded
+   16 kHz mono PCM during each cycle.
 3. Polish and inject sentences after they stabilize across consecutive
    recognition cycles, leaving the changing tail uncommitted.
 4. On key release, finish recognition, polish the remaining tail with
@@ -92,15 +90,15 @@ key are required, and audio never leaves the Mac.
 | Network required | Yes | No |
 | Audio leaves Mac | Yes (to OpenAI) | No |
 | macOS requirement | 14+ | 14+ on Apple Silicon |
-| Accuracy | Large cloud model | Nemotron or Parakeet 0.6B |
-| Latency | ~0.55 s p50 | Depends on hardware |
+| Accuracy | Large cloud model | Nemotron 0.6B |
+| Latency | Pending rebenchmark (historical p50: 0.55 s) | Depends on hardware |
 | Long dictation | Chunked at 300 s | Incremental rolling injection |
 | Cost | OpenAI API usage | Free |
 
 ## Running the benchmarks
 
 Gated benchmark suites live in
-`FreeFlowKit/Tests/FreeFlowKitTests/OpenAIRealtimeBenchmarkTests.swift`:
+`FreeFlowKit/Tests/FreeFlowKitTests/OpenAIStreamingBenchmarkTests.swift`:
 
 - `bench: single session breakdown` — one full session, prints
   startStreaming / sendAudio / finishStreaming / total.
@@ -113,7 +111,7 @@ Gated benchmark suites live in
 OPENAI_API_KEY=sk-... \
 FREEFLOW_TEST_OPENAI=1 \
 FREEFLOW_TEST_OPENAI_BENCH=1 \
-swift test --filter OpenAIRealtimeBenchmark 2>&1 | tail -20
+swift test --filter OpenAIStreamingBenchmark 2>&1 | tail -20
 ```
 
 These benchmarks use silent PCM, which is a worst case for
