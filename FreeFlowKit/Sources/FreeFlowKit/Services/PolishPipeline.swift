@@ -592,7 +592,7 @@ public enum PolishPipeline {
     /// Expand `[PAR]` and `[NL]` placeholders to real line breaks.
     /// Clean up whitespace around revealed symbols.
     public static func stripKeepTags(
-        _ text: String, casual: Bool = false
+        _ text: String, casual: Bool = false, expandBreaks: Bool = true
     ) -> String {
         var result = text
 
@@ -602,20 +602,25 @@ public enum PolishPipeline {
             range: NSRange(result.startIndex..., in: result),
             withTemplate: "$1")
 
-        // Expand break placeholders to real newlines.
-        result = result.replacingOccurrences(
-            of: " *\\[PAR\\] *", with: "\n\n", options: .regularExpression)
-        result = result.replacingOccurrences(
-            of: " *\\[NL\\] *", with: "\n", options: .regularExpression)
-        // Legacy placeholders (pilcrow / return arrow).
-        result = result.replacingOccurrences(
-            of: " *\u{00b6} *", with: "\n\n", options: .regularExpression)
-        result = result.replacingOccurrences(
-            of: " *\u{21b5} *", with: "\n", options: .regularExpression)
-        // Drop a stray period a line break inherited from "new paragraph"
-        // that followed a sentence period in the input.
-        result = result.replacingOccurrences(
-            of: "\n( *\\.)+ *", with: "\n", options: .regularExpression)
+        // Expand break placeholders to real newlines. Skipped when the
+        // caller wants breaks carried as literal `[PAR]`/`[NL]` tokens
+        // through the model — so model-invented newlines can be stripped
+        // afterward and only commanded breaks expand back to real ones.
+        if expandBreaks {
+            result = result.replacingOccurrences(
+                of: " *\\[PAR\\] *", with: "\n\n", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: " *\\[NL\\] *", with: "\n", options: .regularExpression)
+            // Legacy placeholders (pilcrow / return arrow).
+            result = result.replacingOccurrences(
+                of: " *\u{00b6} *", with: "\n\n", options: .regularExpression)
+            result = result.replacingOccurrences(
+                of: " *\u{21b5} *", with: "\n", options: .regularExpression)
+            // Drop a stray period a line break inherited from "new paragraph"
+            // that followed a sentence period in the input.
+            result = result.replacingOccurrences(
+                of: "\n( *\\.)+ *", with: "\n", options: .regularExpression)
+        }
 
         // Clean up whitespace around symbols that were inside tags.
         // Punctuation that attaches to preceding word.
@@ -652,6 +657,14 @@ public enum PolishPipeline {
         }
 
         return result
+    }
+
+    /// Collapse every run of model-emitted newlines to a single space.
+    /// Literal `[PAR]`/`[NL]` tokens are left untouched so commanded
+    /// breaks survive to be expanded by `normalizeFormatting`.
+    static func stripModelNewlines(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: "[ \\t]*\\n+[ \\t]*", with: " ", options: .regularExpression)
     }
 
     // MARK: - Normalize Formatting
@@ -972,6 +985,20 @@ public enum PolishPipeline {
 
     // MARK: - Full Polish Pipeline
 
+    /// How dictated paragraph/line breaks are handled through the model.
+    public enum BreakMode: Sendable {
+        /// Expand `[PAR]`/`[NL]` to real newlines before the model, and
+        /// keep whatever breaks the model returns. Suits whole-transcript
+        /// polish, where the model has full context to paragraph well.
+        case expandBeforeModel
+        /// Split at each `[PAR]`/`[NL]`, polish the text segments with all
+        /// model-emitted newlines stripped, then rejoin with the commanded
+        /// break inserted deterministically. Suits per-chunk streaming
+        /// polish, where the model otherwise over-breaks a single
+        /// committed sentence. Breaks never depend on the model.
+        case commandsOnly
+    }
+
     /// postprocess. This is the single source of truth for how raw
     /// dictated text becomes polished output. Used by both the
     /// streaming provider and the eval test suite.
@@ -980,12 +1007,86 @@ public enum PolishPipeline {
         chatClient: (any PolishChatClient)?,
         model: String = polishModel,
         tone: String? = nil,
-        precedingText: String? = nil
+        precedingText: String? = nil,
+        breakMode: BreakMode = .expandBeforeModel
     ) async -> String {
         let casual = tone == "casual"
         let substituted = substituteDictatedPunctuation(
             raw, casual: casual, precedingText: precedingText)
-        let stripped = stripKeepTags(substituted, casual: casual)
+
+        // Whole-transcript polish: expand commanded breaks before the
+        // model and keep the model's own paragraphing.
+        if breakMode == .expandBeforeModel {
+            return await polishUnit(
+                substituted: substituted, chatClient: chatClient,
+                model: model, tone: tone, precedingText: precedingText,
+                casual: casual, stripModelBreaks: false)
+        }
+
+        // Per-chunk streaming polish: keep only commanded breaks. Split at
+        // each `[PAR]`/`[NL]`, polish the token-free text segments (whose
+        // model-emitted newlines are all stripped), then rejoin with the
+        // commanded break inserted deterministically. Breaks no longer
+        // depend on the model preserving a break token.
+        //
+        // The break separates sentences on its own, so drop a stray
+        // terminator the recognizer left right after the spoken command
+        // (e.g. "new paragraph." → the trailing period would otherwise
+        // become a "." fragment at the start of the next segment).
+        let forSplit = substituted.replacingOccurrences(
+            of: #"(<keep>\[(?:PAR|NL)\]</keep>)\s*[.,;:]+"#,
+            with: "$1", options: .regularExpression)
+        let segments = splitOnCommands(forSplit)
+        if segments.count == 1 {
+            return await polishUnit(
+                substituted: segments[0].text, chatClient: chatClient,
+                model: model, tone: tone, precedingText: precedingText,
+                casual: casual, stripModelBreaks: true)
+        }
+
+        var result = ""
+        // Only the first segment inherits the caller's preceding text.
+        // Every later segment begins a fresh line or paragraph, so it
+        // polishes without preceding context — which also capitalizes its
+        // first character as a paragraph start.
+        var preceding = precedingText
+        for segment in segments {
+            // Trim the segment so its first character is the real word:
+            // a leading space left by the split would otherwise defeat the
+            // paragraph-start capitalization.
+            let text = segment.text.trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                let block = await polishUnit(
+                    substituted: text, chatClient: chatClient,
+                    model: model, tone: tone, precedingText: preceding,
+                    casual: casual, stripModelBreaks: true)
+                result += block.trimmingCharacters(in: .whitespaces)
+            }
+            result += segment.breakAfter
+            preceding = nil
+        }
+        return result
+    }
+
+    /// Polish one already-substituted text unit through the model: run it,
+    /// apply the echo/hallucination/truncation guards, and normalize.
+    ///
+    /// When `stripModelBreaks` is true, every newline the model emits is
+    /// collapsed — the caller reinserts commanded breaks around this unit.
+    /// Otherwise commanded breaks were already expanded to newlines before
+    /// the model and are kept.
+    private static func polishUnit(
+        substituted: String,
+        chatClient: (any PolishChatClient)?,
+        model: String,
+        tone: String?,
+        precedingText: String?,
+        casual: Bool,
+        stripModelBreaks: Bool
+    ) async -> String {
+        let stripped = stripKeepTags(
+            substituted, casual: casual, expandBreaks: !stripModelBreaks)
 
         guard let chatClient else {
             return normalizeFormatting(stripped, casual: casual)
@@ -1002,6 +1103,9 @@ public enum PolishPipeline {
             }
             var cleaned = guardAgainstEcho(
                 polished: polished, precedingText: precedingText)
+            if stripModelBreaks {
+                cleaned = stripModelNewlines(cleaned)
+            }
             if stripped.contains("\u{2026}") {
                 cleaned = cleaned.replacingOccurrences(
                     of: "...", with: "\u{2026}")
@@ -1028,6 +1132,31 @@ public enum PolishPipeline {
             Log.debug("[PolishPipeline] Polish failed: \(error)")
             return normalizeFormatting(stripped, casual: casual)
         }
+    }
+
+    /// Split substituted text at each `[PAR]`/`[NL]` command token into
+    /// segments, each carrying the break that follows it (`"\n\n"` for a
+    /// paragraph, `"\n"` for a line, or `""` for the final segment).
+    private static let commandTokenPattern = try! NSRegularExpression(
+        pattern: #"<keep>\[(PAR|NL)\]</keep>"#)
+
+    private static func splitOnCommands(
+        _ text: String
+    ) -> [(text: String, breakAfter: String)] {
+        let ns = text as NSString
+        var segments: [(String, String)] = []
+        var lastEnd = 0
+        let matches = commandTokenPattern.matches(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        for match in matches {
+            let seg = ns.substring(with: NSRange(
+                location: lastEnd, length: match.range.location - lastEnd))
+            let kind = ns.substring(with: match.range(at: 1))
+            segments.append((seg, kind == "PAR" ? "\n\n" : "\n"))
+            lastEnd = match.range.location + match.range.length
+        }
+        segments.append((ns.substring(from: lastEnd), ""))
+        return segments
     }
 
     // MARK: - Local System Prompt

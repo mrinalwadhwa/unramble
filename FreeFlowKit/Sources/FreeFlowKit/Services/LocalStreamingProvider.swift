@@ -221,6 +221,50 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         backgroundTask = nil
     }
 
+    // MARK: - Offline Replay
+
+    /// Drive the real commit + polish pipeline deterministically, without
+    /// the wall-clock background timer, to reproduce offline exactly what a
+    /// live dictation would inject. Feed `audio` in `stepBytes` increments,
+    /// running one cycle per step (each cycle feeds only the new audio,
+    /// commits stabilized sentences, polishes them, and emits them through
+    /// the chunk handler), then finish and return the tail. Set a chunk
+    /// handler with `setChunkHandler` first to collect the injected chunks.
+    ///
+    /// `stepBytes` mimics how much audio arrives per cycle in production
+    /// (default 96 000 = ~3 s at 16 kHz mono 16-bit, matching the 3 s
+    /// cycle interval). Intended for replay tests only.
+    func replay(
+        audio: Data, stepBytes: Int = 96_000, context: AppContext = .empty
+    ) async throws -> String {
+        if !sttEngine.isReady { try await sttEngine.load() }
+        let newState = try incremental?.makeStreamingState()
+        lock.withLock {
+            accumulatedAudio = Data()
+            currentContext = context
+            commitTracker = CommitTracker()
+            committedPolished = ""
+            lastRawTranscript = ""
+            lastPolishedTranscript = ""
+            didEmitChunks = false
+            finishing = false
+            streamingState = newState
+            fedBytes = 0
+        }
+
+        var offset = 0
+        let step = max(1, stepBytes)
+        while offset < audio.count {
+            let end = min(offset + step, audio.count)
+            let slice = audio.subdata(in: offset..<end)
+            lock.withLock { accumulatedAudio.append(slice) }
+            offset = end
+            await runOneCycle()
+        }
+
+        return try await finishStreaming()
+    }
+
     // MARK: - Background Cycles
 
     private func runBackgroundCycles() async {
@@ -336,6 +380,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             chatClient: polishChatClient,
             model: polishModel,
             tone: PolishPipeline.toneLabel(for: context.bundleID),
-            precedingText: precedingText)
+            precedingText: precedingText,
+            breakMode: .commandsOnly)
     }
 }
