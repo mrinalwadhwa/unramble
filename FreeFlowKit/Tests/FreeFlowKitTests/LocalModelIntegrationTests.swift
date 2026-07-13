@@ -46,7 +46,7 @@ struct LocalModelIntegrationTests {
         let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
         let result = try await client.complete(
             model: "ignored",
-            systemPrompt: PolishPipeline.systemPromptLocal,
+            systemPrompt: PolishPipeline.systemPromptQwen,
             userPrompt: "um so i was thinking we should uh meet on thursday")
 
         print("[MLXPolishClient] Result: \(result)")

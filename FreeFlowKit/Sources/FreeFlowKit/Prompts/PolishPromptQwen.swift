@@ -2,8 +2,7 @@
 ///
 /// Qwen3 0.6B is a 0.6-billion parameter model running 4-bit quantized
 /// on Apple Silicon GPUs via mlx-swift. It uses `/no_think` to suppress
-/// chain-of-thought reasoning. This prompt is tuned separately from the
-/// Apple Foundation Models prompt. Edit it to tune Qwen3 polish behavior.
+/// chain-of-thought reasoning. Edit this prompt to tune Qwen3 polish behavior.
 extension PolishPipeline {
     public static let systemPromptQwen = """
 Clean up this dictated text.

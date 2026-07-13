@@ -1,7 +1,7 @@
 import Foundation
 
 /// Dictation provider that calls OpenAI's audio transcription endpoint
-/// and optionally runs the local polish pipeline on the result.
+/// and optionally runs the shared polish pipeline on the result.
 ///
 /// Send a complete WAV file to the `/v1/audio/transcriptions` endpoint,
 /// receive the raw transcript, then run it through `PolishPipeline` for

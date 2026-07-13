@@ -8,10 +8,9 @@ import Testing
 // Each test case represents a realistic messy input that the polish
 // pipeline should clean up.
 //
-// Three test levels:
+// Two test levels:
 //   1. Deterministic -- Stage 1 regex substitution (always runs)
 //   2. Cloud LLM -- full pipeline with OpenAI (FREEFLOW_TEST_OPENAI=1)
-//   3. Local LLM -- Apple Foundation Models (FREEFLOW_TEST_LOCAL_LLM=1)
 //
 // Test data lives in PolishScenarioData.swift (allScenarios).
 // Validators are property-based per category (not exact match).
@@ -431,95 +430,6 @@ struct PolishScenarioCloudTests {
         }
     }
 }
-
-// MARK: - Local LLM Tests (Apple Foundation Models, gated)
-
-#if canImport(FoundationModels)
-@Suite(
-    "Polish Scenarios -- Local LLM",
-    .disabled(
-        if: ProcessInfo.processInfo.environment["FREEFLOW_TEST_LOCAL_LLM"] != "1"))
-struct PolishScenarioLocalTests {
-
-    @available(macOS 26, *)
-    private func polishWithLocal(_ input: String) async throws -> String {
-        let client = FoundationModelChatClient()
-        let substituted = PolishPipeline.substituteDictatedPunctuation(input)
-        let stripped = PolishPipeline.stripKeepTags(substituted)
-        let result = try await client.complete(
-            model: "",
-            systemPrompt: PolishPipeline.systemPromptLocal,
-            userPrompt: substituted)
-        if result.isEmpty { return PolishPipeline.normalizeFormatting(stripped) }
-        return PolishPipeline.normalizeFormatting(
-            PolishPipeline.stripKeepTags(result))
-    }
-
-    @Test("filler removal")
-    func fillers() async throws {
-        guard #available(macOS 26, *) else { return }
-        for s in allScenarios where s.category == "filler" {
-            let result = try await polishWithLocal(s.input)
-            #expect(
-                !result.lowercased().contains(" um "),
-                "Should remove 'um' from: \(s.input), got: \(result)")
-            #expect(
-                !result.starts(with: "Um"),
-                "Should not start with 'Um': \(s.input), got: \(result)")
-            #expect(
-                !result.starts(with: "Uh"),
-                "Should not start with 'Uh': \(s.input), got: \(result)")
-        }
-    }
-
-    @Test("repetitions cleaned up")
-    func repetitions() async throws {
-        guard #available(macOS 26, *) else { return }
-        for s in allScenarios where s.category == "repetition" {
-            let result = try await polishWithLocal(s.input)
-            #expect(
-                !result.isEmpty,
-                "Repetition cleanup should produce output: \(s.input)")
-        }
-    }
-
-    @Test("numbers formatted as digits")
-    func numbers() async throws {
-        guard #available(macOS 26, *) else { return }
-        for s in allScenarios where s.category == "number" {
-            let result = try await polishWithLocal(s.input)
-            #expect(
-                result.contains(where: { $0.isNumber }),
-                "Numbers should be formatted: \(s.input), got: \(result)")
-        }
-    }
-
-    @Test("clean text passes through")
-    func clean() async throws {
-        guard #available(macOS 26, *) else { return }
-        for s in allScenarios where s.category == "clean" {
-            let result = try await polishWithLocal(s.input)
-            #expect(
-                result == s.accepted[0],
-                "Clean text should not change: \(s.input), got: \(result)")
-        }
-    }
-
-    @Test("wording preserved")
-    func wording() async throws {
-        guard #available(macOS 26, *) else { return }
-        for s in allScenarios where s.category == "preserve" {
-            let result = try await polishWithLocal(s.input)
-            let keywords = ["grab", "mentioned", "kinda", "reckon"]
-            for kw in keywords where s.input.contains(kw) {
-                #expect(
-                    result.contains(kw),
-                    "Should preserve '\(kw)' in: \(s.input), got: \(result)")
-            }
-        }
-    }
-}
-#endif
 
 // MARK: - Helpers
 

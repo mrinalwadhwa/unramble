@@ -62,16 +62,19 @@ rebuild, and use the rebuilt binary.
 
 ### Change a prompt
 
-The polish prompts are inlined as string literals in
-`FreeFlowKit/Sources/FreeFlowKit/Services/PolishPipeline.swift`:
+The polish prompts live in `FreeFlowKit/Sources/FreeFlowKit/Prompts/`.
+`PolishPipeline.swift` selects and augments them for each backend:
 
-| Constant | What it controls |
-|----------|-----------------|
-| `systemPromptEnglish` | English: filler removal, list formatting, dictated punctuation, corrections, number formatting, wording preservation |
-| `systemPromptMinimal` | All other languages: light cleanup that preserves original phrasing |
+| Constant | File | What it controls |
+|----------|------|------------------|
+| `systemPromptQwen` | `PolishPromptQwen.swift` | Supported local Qwen polish |
+| `systemPromptEnglish` | `PolishPromptEnglish.swift` | Cloud English polish |
+| `systemPromptCasual` | `PolishPromptCasual.swift` | Cloud casual-style English polish |
+| `systemPromptHindi`, `systemPromptKannada`, `systemPromptTamil` | Matching language prompt files | Cloud polish for explicitly supported languages |
+| `systemPromptMinimal` | `PolishPromptMinimal.swift` | Conservative cloud fallback for other languages |
 
-Open `PolishPipeline.swift` and add a rule. For example, to make the
-polish step produce British English:
+Edit the prompt for the backend and language you want to change. For example,
+to make the English cloud polish step produce British English:
 
     11. British English: use British spelling conventions. "organize" becomes
         "organise", "color" becomes "colour", "center" becomes "centre", etc.
@@ -82,8 +85,8 @@ Or to format code identifiers in backticks:
         class name, or file path, wrap it in backticks. "the render function"
         becomes "the `render` function".
 
-Add your rule at the end of the numbered list, before the final
-instructions about language preservation and output format.
+Add the rule to `PolishPromptEnglish.swift` before its final instructions about
+language preservation and output format.
 
 ### Change a model
 
