@@ -1,4 +1,4 @@
-.PHONY: build run test clean xcode generate release archive sign notarize appcast version linux-dev linux-test linux-build linux-package
+.PHONY: build run test clean xcode generate release archive sign notarize appcast version linux-dev linux-test linux-build linux-package linux-install
 
 # XcodeGen must be installed: brew install xcodegen
 XCODEGEN := $(shell command -v xcodegen 2>/dev/null)
@@ -17,6 +17,9 @@ linux-build:
 
 linux-package:
 	./scripts/package-linux.sh
+
+linux-install:
+	./scripts/install-linux.sh
 
 # Release settings
 TEAM_ID          := 3A56YKKGA5

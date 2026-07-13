@@ -20,8 +20,14 @@ fallback when the compositor blocks automation.
 
 ```bash
 ./scripts/bootstrap-linux.sh
-make linux-dev
+make linux-package
+make linux-install
+freeflow
 ```
+
+The user-local install appears as FreeFlow in application launchers and as the
+`freeflow` command in dmenu-style command launchers. It starts in the tray when
+you sign in and uses `Ctrl+Win` as the default hold-to-talk shortcut under X11.
 
 See [docs/LINUX.md](docs/LINUX.md) for distribution packages, build commands,
 credential-store requirements, Wayland restrictions, and troubleshooting. The

@@ -45,6 +45,7 @@ make linux-dev       # build the daemon and launch Electron
 make linux-test      # Rust format, Clippy, Rust tests, TypeScript, UI tests
 make linux-build     # release daemon and production desktop bundle
 make linux-package   # AppImage and Debian package
+make linux-install   # install the AppImage for the current user
 ```
 
 Release artifacts appear under `desktop/dist/`:
@@ -53,6 +54,28 @@ Release artifacts appear under `desktop/dist/`:
 ./desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage
 sudo apt install ./desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb
 ```
+
+For an AppImage installation that desktop launchers and command launchers can
+discover, run:
+
+```bash
+make linux-package
+make linux-install
+freeflow
+```
+
+The installer copies the AppImage to
+`${XDG_DATA_HOME:-~/.local/share}/freeflow/FreeFlow.AppImage`, installs a
+`FreeFlow` application entry and icon, and links `freeflow` into
+`${XDG_BIN_HOME:-~/.local/bin}`. Rofi `drun` and desktop application menus read
+the application entry; `dmenu_run` finds the command when that bin directory is
+on `PATH`. The installer never uses root privileges or replaces an unrelated
+file or symlink at that command path.
+
+FreeFlow starts in the tray on login by default. The installer creates the XDG
+autostart entry immediately, and the packaged application keeps it synchronized
+with the Start FreeFlow on login toggle. Login startup passes `--hidden`, so it
+does not steal focus by opening the settings window.
 
 The AppImage supports `--appimage-extract-and-run` on systems where FUSE is not
 available. Package builds embed the release daemon under Electron resources and
@@ -72,13 +95,13 @@ credential that disappears on quit.
 
 ## X11
 
-Modifier-plus-key push-to-talk shortcuts use a passive X11 key grab. The default
-is `Ctrl+Alt+Space`. Focus a field, hold the shortcut, speak, and release it.
+Push-to-talk shortcuts use passive X11 key grabs. The default is the
+modifier-only chord `Ctrl+Win` (`Ctrl+Super` in X11 terminology). Either key can
+be pressed first. Focus a field, hold both keys, speak, and release either key.
 FreeFlow retains the successful transcript before it attempts clipboard paste.
 
 If another application owns the combination, choose another key in Delivery.
-Modifier-only shortcuts are visible in the data model but currently require an
-XInput2 listener that is not included in this experimental build.
+The shortcut editor also supports modifier-plus-key combinations.
 
 ## Wayland
 
@@ -110,6 +133,8 @@ Shortcut:
   `x11`.
 - Choose a different combination if registration says another application owns
   it.
+- Window managers often reserve Win-key combinations. FreeFlow reports the
+  conflict instead of swallowing another binding.
 
 Text delivery:
 

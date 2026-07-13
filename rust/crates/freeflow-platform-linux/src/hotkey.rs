@@ -8,13 +8,15 @@ use std::{
 };
 
 use async_trait::async_trait;
-use freeflow_core::{FreeFlowError, HotkeyEvent, HotkeyProvider, Result, Shortcut};
+use freeflow_core::{
+    FreeFlowError, HotkeyEvent, HotkeyProvider, Result, Shortcut, ShortcutModifier,
+};
 use tokio::sync::broadcast;
 use x11rb::{
     connection::Connection,
     protocol::{
         Event,
-        xproto::{ConnectionExt, GrabMode, ModMask},
+        xproto::{ConnectionExt, GrabMode, Keycode, ModMask},
     },
 };
 
@@ -22,6 +24,12 @@ use crate::x11;
 
 enum Command {
     Stop,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct GrabBinding {
+    key: Keycode,
+    modifiers: ModMask,
 }
 
 #[derive(Clone)]
@@ -53,12 +61,6 @@ impl X11HotkeyProvider {
 impl HotkeyProvider for X11HotkeyProvider {
     async fn register(&self, shortcut: Shortcut) -> Result<()> {
         shortcut.validate()?;
-        if shortcut.is_modifier_only() {
-            return Err(FreeFlowError::Hotkey(
-                "modifier-only shortcuts require XInput2 and are not available in this build; choose a modifier-plus-key shortcut"
-                    .into(),
-            ));
-        }
         if self.registered.swap(true, Ordering::SeqCst) {
             return Err(FreeFlowError::Hotkey(
                 "a global shortcut is already registered".into(),
@@ -135,37 +137,32 @@ fn run_hotkey_loop(
     let (connection, screen) = x11::connect()
         .map_err(|error| FreeFlowError::Hotkey(format!("X11 is unavailable: {error}")))?;
     let root = connection.setup().roots[screen].root;
-    let key = x11::keycode_for_name(
-        &connection,
-        shortcut
-            .key
-            .as_deref()
-            .expect("validated ordinary shortcut"),
-    )?;
-    let modifiers = x11::modifier_mask(&shortcut.modifiers);
+    let bindings = shortcut_bindings(&connection, &shortcut)?;
     let lock_variants = [
         ModMask::default(),
         ModMask::LOCK,
         ModMask::M2,
         ModMask::LOCK | ModMask::M2,
     ];
-    for locks in lock_variants {
-        connection
-            .grab_key(
-                false,
-                root,
-                modifiers | locks,
-                key,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )
-            .map_err(hotkey_error)?
-            .check()
-            .map_err(|error| {
-                FreeFlowError::Hotkey(format!(
-                    "the shortcut is unavailable or owned by another application: {error}"
-                ))
-            })?;
+    for binding in &bindings {
+        for locks in lock_variants {
+            connection
+                .grab_key(
+                    false,
+                    root,
+                    binding.modifiers | locks,
+                    binding.key,
+                    GrabMode::ASYNC,
+                    GrabMode::ASYNC,
+                )
+                .map_err(hotkey_error)?
+                .check()
+                .map_err(|error| {
+                    FreeFlowError::Hotkey(format!(
+                        "the shortcut is unavailable or owned by another application: {error}"
+                    ))
+                })?;
+        }
     }
     connection.flush().map_err(hotkey_error)?;
     let _ = ready.send(Ok(()));
@@ -185,7 +182,9 @@ fn run_hotkey_loop(
             }
         }
         match connection.poll_for_event().map_err(hotkey_error)? {
-            Some(Event::KeyPress(event)) if event.detail == key => {
+            Some(Event::KeyPress(event))
+                if bindings.iter().any(|binding| binding.key == event.detail) =>
+            {
                 if pending_release
                     .take()
                     .is_some_and(|time| time.elapsed() < Duration::from_millis(25))
@@ -197,19 +196,103 @@ fn run_hotkey_loop(
                     let _ = events.send(HotkeyEvent::Pressed);
                 }
             }
-            Some(Event::KeyRelease(event)) if event.detail == key => {
+            Some(Event::KeyRelease(event))
+                if bindings.iter().any(|binding| binding.key == event.detail) =>
+            {
                 pending_release = Some(Instant::now());
             }
             Some(_) | None => std::thread::sleep(Duration::from_millis(4)),
         }
     }
-    for locks in lock_variants {
-        let _ = connection.ungrab_key(key, root, modifiers | locks);
+    for binding in bindings {
+        for locks in lock_variants {
+            let _ = connection.ungrab_key(binding.key, root, binding.modifiers | locks);
+        }
     }
     let _ = connection.flush();
     Ok(())
 }
 
+fn shortcut_bindings(
+    connection: &x11rb::rust_connection::RustConnection,
+    shortcut: &Shortcut,
+) -> Result<Vec<GrabBinding>> {
+    if let Some(key) = shortcut.key.as_deref() {
+        return Ok(vec![GrabBinding {
+            key: x11::keycode_for_name(connection, key)?,
+            modifiers: x11::modifier_mask(&shortcut.modifiers),
+        }]);
+    }
+
+    let mut bindings = Vec::new();
+    for (keysym, modifiers) in modifier_binding_specs(&shortcut.modifiers) {
+        let Some(key) = x11::keycode_for_keysym(connection, keysym) else {
+            continue;
+        };
+        let binding = GrabBinding { key, modifiers };
+        if !bindings.contains(&binding) {
+            bindings.push(binding);
+        }
+    }
+    if bindings.is_empty() {
+        return Err(FreeFlowError::Hotkey(
+            "the current X11 keymap has no keys for the configured modifier chord".into(),
+        ));
+    }
+    Ok(bindings)
+}
+
+fn modifier_binding_specs(modifiers: &[ShortcutModifier]) -> Vec<(u32, ModMask)> {
+    let mut specs = Vec::new();
+    for (index, trigger) in modifiers.iter().enumerate() {
+        let required = modifiers
+            .iter()
+            .enumerate()
+            .filter_map(|(candidate, modifier)| (candidate != index).then_some(*modifier))
+            .collect::<Vec<_>>();
+        let required_mask = x11::modifier_mask(&required);
+        for keysym in modifier_keysyms(*trigger) {
+            let spec = (*keysym, required_mask);
+            if !specs.contains(&spec) {
+                specs.push(spec);
+            }
+        }
+    }
+    specs
+}
+
+fn modifier_keysyms(modifier: ShortcutModifier) -> &'static [u32] {
+    match modifier {
+        ShortcutModifier::Control => &[xkeysym::key::Control_L, xkeysym::key::Control_R],
+        ShortcutModifier::Alt => &[xkeysym::key::Alt_L, xkeysym::key::Alt_R],
+        ShortcutModifier::Shift => &[xkeysym::key::Shift_L, xkeysym::key::Shift_R],
+        ShortcutModifier::Super => &[xkeysym::key::Super_L, xkeysym::key::Super_R],
+        ShortcutModifier::LeftControl => &[xkeysym::key::Control_L],
+        ShortcutModifier::RightControl => &[xkeysym::key::Control_R],
+        ShortcutModifier::LeftAlt => &[xkeysym::key::Alt_L],
+        ShortcutModifier::RightAlt => &[xkeysym::key::Alt_R],
+        ShortcutModifier::LeftShift => &[xkeysym::key::Shift_L],
+        ShortcutModifier::RightShift => &[xkeysym::key::Shift_R],
+        ShortcutModifier::LeftSuper => &[xkeysym::key::Super_L],
+        ShortcutModifier::RightSuper => &[xkeysym::key::Super_R],
+    }
+}
+
 fn hotkey_error(error: impl std::fmt::Display) -> FreeFlowError {
     FreeFlowError::Hotkey(format!("X11 shortcut operation failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_super_chord_can_activate_in_either_key_order() {
+        let specs = modifier_binding_specs(&[ShortcutModifier::Control, ShortcutModifier::Super]);
+
+        assert!(specs.contains(&(xkeysym::key::Control_L, ModMask::M4)));
+        assert!(specs.contains(&(xkeysym::key::Control_R, ModMask::M4)));
+        assert!(specs.contains(&(xkeysym::key::Super_L, ModMask::CONTROL)));
+        assert!(specs.contains(&(xkeysym::key::Super_R, ModMask::CONTROL)));
+    }
 }

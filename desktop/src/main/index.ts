@@ -1,3 +1,4 @@
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -12,6 +13,7 @@ import {
 } from 'electron';
 
 import { DaemonSupervisor } from './daemon';
+import { AUTOSTART_DESKTOP_FILENAME, autostartDesktopEntry } from './autostart';
 import type { AppStatus, RecordingState } from '../shared/models';
 import {
   RPC_METHODS,
@@ -29,11 +31,14 @@ let currentStatus: AppStatus | null = null;
 let hudHideTimer: NodeJS.Timeout | null = null;
 
 const allowedMethods = new Set<string>(RPC_METHODS);
+const launchHidden = process.argv.includes('--hidden');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => showSettings());
+  app.on('second-instance', (_event, commandLine) => {
+    if (!commandLine.includes('--hidden')) showSettings();
+  });
   void app.whenReady().then(startApplication);
 }
 
@@ -75,10 +80,14 @@ async function startApplication(): Promise<void> {
     currentStatus = await supervisor.request<AppStatus>('app.getStatus');
     const settings = await supervisor.request<{ startOnLogin?: boolean }>('settings.get');
     if (typeof settings.startOnLogin === 'boolean') {
-      app.setLoginItemSettings({ openAtLogin: settings.startOnLogin });
+      try {
+        await applyStartOnLogin(settings.startOnLogin);
+      } catch (error) {
+        await reportStartOnLoginError(error);
+      }
     }
     rebuildTray();
-    showSettings();
+    if (!launchHidden) showSettings();
   } catch (error) {
     await dialog.showMessageBox({
       type: 'error',
@@ -228,7 +237,7 @@ function registerIpc(): void {
     if (method === 'settings.update' || method === 'settings.reset') {
       const settings = result as { startOnLogin?: boolean };
       if (typeof settings.startOnLogin === 'boolean') {
-        app.setLoginItemSettings({ openAtLogin: settings.startOnLogin });
+        await applyStartOnLogin(settings.startOnLogin);
       }
     }
     return result;
@@ -283,6 +292,47 @@ function showSettings(): void {
   if (!settingsWindow) return;
   settingsWindow.show();
   settingsWindow.focus();
+}
+
+async function applyStartOnLogin(enabled: boolean): Promise<void> {
+  if (process.platform !== 'linux') {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return;
+  }
+
+  const autostartDirectory = join(app.getPath('appData'), 'autostart');
+  const autostartPath = join(autostartDirectory, AUTOSTART_DESKTOP_FILENAME);
+  if (!enabled) {
+    await rm(autostartPath, { force: true });
+    return;
+  }
+
+  // Development mode depends on a transient Vite process and cannot be
+  // relaunched by a persistent desktop entry.
+  if (!app.isPackaged && !process.env.APPIMAGE) return;
+
+  const executable = process.env.APPIMAGE || app.getPath('exe');
+  const temporaryPath = `${autostartPath}.${process.pid}.tmp`;
+  await mkdir(autostartDirectory, { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(temporaryPath, autostartDesktopEntry(executable), { mode: 0o644 });
+    await rename(temporaryPath, autostartPath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+async function reportStartOnLoginError(error: unknown): Promise<void> {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`Could not configure FreeFlow startup: ${detail}`);
+  await dialog.showMessageBox({
+    type: 'warning',
+    title: 'FreeFlow could not start automatically',
+    message: 'FreeFlow is running, but it could not enable start-on-login.',
+    detail,
+    buttons: ['OK']
+  });
 }
 
 async function call(method: RpcMethod): Promise<void> {

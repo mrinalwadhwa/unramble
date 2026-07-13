@@ -22,6 +22,8 @@ linux:
     entry:
       Name: FreeFlow
       Comment: Push-to-talk dictation for Linux
+      Keywords: Dictation;Speech;Voice;
+      StartupNotify: false
       StartupWMClass: FreeFlow
 appImage:
   artifactName: FreeFlow-Linux-${version}-${arch}.AppImage

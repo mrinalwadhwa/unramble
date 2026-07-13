@@ -76,6 +76,10 @@ result when the optional model call fails or returns destructive output.
 
 ## Linux delivery
 
+On X11, passive grabs support both modifier-plus-key shortcuts and modifier
+chords. The default chord grabs either order of `Ctrl+Win`, publishes one press
+when the chord becomes active, and publishes release when either key is lifted.
+
 On X11, FreeFlow records the active window before showing any HUD. Delivery then
 places the transcript on the clipboard and sends `Ctrl+V`; known terminal targets
 use `Ctrl+Shift+V`. The clipboard keeps the transcript because restoring it before

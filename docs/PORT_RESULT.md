@@ -31,9 +31,10 @@ environment, so those remain the most important manual release checks.
   transcription. The local service verifies both paths without paid requests.
 - Deterministic cleanup and optional model polish preserve a safe fallback.
   Successful text enters the recovery buffer before injection.
-- X11 registers `Ctrl+Alt+Space`, distinguishes press and release, and drives
-  the recording lifecycle. XTest pastes the retained clipboard text with a
-  terminal-aware shortcut. Wayland keeps the result on the clipboard and tells
+- X11 registers the default `Ctrl+Win` modifier chord in either key order,
+  distinguishes press and release, and drives the recording lifecycle. XTest
+  pastes the retained clipboard text with a terminal-aware shortcut. Wayland
+  keeps the result on the clipboard and tells
   the user when manual paste is required.
 - Tray and window actions start, stop, cancel, copy, and retry-paste dictation.
   The HUD displays recording level and processing state without accepting focus.
@@ -51,7 +52,8 @@ Build and launch a portable package:
 
 ```bash
 make linux-package
-./desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage
+make linux-install
+freeflow
 ```
 
 Run live microphone dictation from the terminal:
@@ -68,12 +70,14 @@ OPENAI_API_KEY='…' cargo run --manifest-path rust/Cargo.toml \
 ./scripts/generate-rpc-types.sh
 ./scripts/test-linux.sh
 ./scripts/package-linux.sh
+./scripts/install-linux.sh
 cargo test --manifest-path rust/Cargo.toml -p freeflow-core \
   cancel_waits_for_microphone_startup_to_release_audio
 npm run typecheck --prefix desktop
 npm test --prefix desktop
 npm run build --prefix desktop
 npm run package --prefix desktop
+./scripts/test-install-linux.sh
 make test
 ```
 
@@ -83,13 +87,16 @@ source or macOS build command changed.
 
 ## Tests Passing
 
-- 45 Rust tests pass: 26 core, 3 OpenAI client, 6 OpenAI provider integration,
-  3 platform settings, 3 Linux platform, and 4 RPC tests.
+- 48 Rust tests pass: 28 core, 3 OpenAI client, 6 OpenAI provider integration,
+  3 platform settings, 4 Linux platform, and 4 RPC tests.
 - Rust formatting passes for the workspace.
 - Clippy passes for all workspace targets with warnings denied.
 - TypeScript checking passes for the Electron main, preload, shared contract,
   and renderer projects.
-- Two desktop renderer utility tests pass.
+- Four desktop main-process and renderer utility tests pass.
+- The user installer test verifies its AppImage copy, launcher command, icon,
+  application entry, argument quoting, and hidden autostart entry in isolated
+  XDG directories.
 - The production Electron bundle builds after regenerating its RPC contract
   from the canonical Rust declaration.
 - Deterministic service tests cover realtime partial/final delivery, realtime
@@ -109,9 +116,13 @@ source or macOS build command changed.
 - Launched the packaged AppImage directly and with extraction fallback. Its
   embedded daemon reported ready, and the controlled extraction run stopped it
   cleanly.
-- Forced an X11 session over XWayland, registered `Ctrl+Alt+Space`, sent a real
-  synthetic global press, observed `Preparing`, cancelled, released the keys,
-  and verified the state returned to `Idle`.
+- Installed the release AppImage into the current user's XDG directories,
+  validated its application and autostart entries, resolved the `freeflow`
+  command from `PATH`, and launched it with hidden login behavior. The packaged
+  daemon reported ready and stopped cleanly with the desktop process.
+- Forced an X11 session over XWayland, registered `Ctrl+Win`, pressed the keys
+  in sequence, observed live recording and audio-level events, released the
+  chord, and observed recording stop and a return to `Idle`.
 - Repeated X11 cancellation with slow microphone startup and verified capture
   stopped before cancellation and daemon shutdown completed.
 
@@ -121,17 +132,15 @@ matrix, or native Wayland portal shortcut was manually tested.
 ## Packaging Output
 
 - `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 131 MB,
-  SHA-256 `220b301772bf69dde7fd8d9b08ecd40830b6f2a7682b87bbb33f9ddb8099ec9e`
+  SHA-256 `c683c634119b9d796d7344a84d4af6776d087ad17a7495a102db09a53c7c5e7c`
 - `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 102 MB,
-  SHA-256 `875489799de852330923e8576b927b69fe66c6744aa94c88f770db271c360623`
+  SHA-256 `faeacd15bcec988bcde89829fba13678a714cf01d6038fc5f9f1d3bf8737198f`
 - `rust/target/release/freeflow-daemon` — bundled into both desktop artifacts
 
 Build outputs remain ignored and are not committed.
 
 ## Known Limitations
 
-- Modifier-only X11 shortcuts need an XInput2 listener; modifier-plus-key
-  combinations work.
 - Direct AT-SPI insertion and reliable clipboard restoration remain deferred.
   FreeFlow preserves the transcript instead of risking early clipboard restore.
 - The X11 paste implementation needs manual coverage across VS Code, Chromium,
@@ -141,8 +150,8 @@ Build outputs remain ignored and are not committed.
 - The automated smoke suite verifies the cloud protocols but does not yet drive
   prerecorded PCM through Electron into a virtual text field.
 - Packages are unsigned and automatic updates are not enabled.
-- Start-on-login depends on Electron and the desktop environment and needs
-  distribution-specific validation.
+- XDG autostart and launcher discovery still need validation across the default
+  desktops of each supported distribution.
 
 ## Wayland Status
 
@@ -179,7 +188,7 @@ those compositor restrictions.
 - `desktop/` contains Electron main/preload/renderer projects, the generated RPC
   contract, packaged icon, and AppImage/Debian definitions.
 - `scripts/` contains dependency checking and Linux development, test, build,
-  packaging, and RPC generation commands.
+  packaging, user installation, and RPC generation commands.
 - `.github/workflows/cross-platform.yml` adds an independent Linux CI job.
 - `docs/ARCHITECTURE.md`, `docs/LINUX.md`, and `docs/PORT_STATUS.md` describe the
   implementation, operating requirements, and honest subsystem status.
@@ -208,5 +217,5 @@ Makefile only adds independent `linux-*` targets.
    keep the existing tray fallback for unsupported compositors.
 4. Add AT-SPI insertion and clipboard-consumption detection before enabling
    clipboard restoration.
-5. Validate Secret Service, start-on-login, AppImage, and Debian behavior on
-   clean Ubuntu, Fedora, and Arch installations.
+5. Validate Secret Service, launcher discovery, XDG autostart, AppImage, and
+   Debian behavior on clean Ubuntu, Fedora, and Arch installations.

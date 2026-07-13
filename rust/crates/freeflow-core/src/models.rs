@@ -136,8 +136,8 @@ pub enum ShortcutModifier {
 #[serde(rename_all = "camelCase")]
 pub struct Shortcut {
     pub modifiers: Vec<ShortcutModifier>,
-    /// XKB-style key name, such as `space`, `d`, or `F9`. `None` means
-    /// the single sided modifier itself acts as push-to-talk.
+    /// XKB-style key name, such as `space`, `d`, or `F9`. `None` makes
+    /// the modifier or modifier chord itself act as push-to-talk.
     pub key: Option<String>,
 }
 
@@ -145,8 +145,8 @@ impl Shortcut {
     #[must_use]
     pub fn default_linux() -> Self {
         Self {
-            modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Alt],
-            key: Some("space".into()),
+            modifiers: vec![ShortcutModifier::Control, ShortcutModifier::Super],
+            key: None,
         }
     }
 
@@ -156,9 +156,9 @@ impl Shortcut {
     }
 
     pub fn validate(&self) -> crate::Result<()> {
-        if self.key.is_none() && self.modifiers.len() != 1 {
+        if self.key.is_none() && self.modifiers.is_empty() {
             return Err(crate::FreeFlowError::Configuration(
-                "modifier-only shortcuts require exactly one modifier".into(),
+                "modifier-only shortcuts require at least one modifier".into(),
             ));
         }
         if self.key.as_ref().is_some_and(|key| key.trim().is_empty()) {
@@ -178,15 +178,15 @@ impl Shortcut {
                 ShortcutModifier::Control => "Ctrl",
                 ShortcutModifier::Alt => "Alt",
                 ShortcutModifier::Shift => "Shift",
-                ShortcutModifier::Super => "Super",
+                ShortcutModifier::Super => "Win",
                 ShortcutModifier::LeftControl => "Left Ctrl",
                 ShortcutModifier::RightControl => "Right Ctrl",
                 ShortcutModifier::LeftAlt => "Left Alt",
                 ShortcutModifier::RightAlt => "Right Alt",
                 ShortcutModifier::LeftShift => "Left Shift",
                 ShortcutModifier::RightShift => "Right Shift",
-                ShortcutModifier::LeftSuper => "Left Super",
-                ShortcutModifier::RightSuper => "Right Super",
+                ShortcutModifier::LeftSuper => "Left Win",
+                ShortcutModifier::RightSuper => "Right Win",
             })
             .collect();
         if let Some(key) = &self.key {
@@ -275,7 +275,7 @@ impl Default for AppSettings {
             share_context: false,
             selected_audio_device: None,
             shortcut: Shortcut::default(),
-            start_on_login: false,
+            start_on_login: true,
             realtime_enabled: true,
             request_timeout_seconds: 60,
         }
@@ -399,4 +399,33 @@ pub struct Diagnostics {
     pub log_path: String,
     pub credential_store_available: bool,
     pub details: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_defaults_enable_startup_and_control_super_push_to_talk() {
+        let settings = AppSettings::default();
+
+        assert!(settings.start_on_login);
+        assert_eq!(
+            settings.shortcut.modifiers,
+            vec![ShortcutModifier::Control, ShortcutModifier::Super]
+        );
+        assert_eq!(settings.shortcut.key, None);
+        assert_eq!(settings.shortcut.display_name(), "Ctrl+Win");
+        settings.validate().unwrap();
+    }
+
+    #[test]
+    fn modifier_chords_require_at_least_one_modifier() {
+        let empty = Shortcut {
+            modifiers: Vec::new(),
+            key: None,
+        };
+
+        assert!(empty.validate().is_err());
+    }
 }

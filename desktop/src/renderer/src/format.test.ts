@@ -8,6 +8,7 @@ describe('desktop status formatting', () => {
       'Ctrl + Alt + Space'
     );
     expect(shortcutLabel({ modifiers: ['rightControl'], key: null })).toBe('RightControl');
+    expect(shortcutLabel({ modifiers: ['control', 'super'], key: null })).toBe('Ctrl + Win');
   });
 
   it('keeps recovery states actionable', () => {

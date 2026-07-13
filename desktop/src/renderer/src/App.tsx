@@ -350,20 +350,21 @@ function DeliveryView(props: {
   onShortcut(shortcut: Shortcut): void;
   onSettings(updates: Partial<AppSettings>): void;
 }): React.JSX.Element {
-  const [key, setKey] = useState(props.settings.shortcut.key ?? 'space');
+  const [key, setKey] = useState(props.settings.shortcut.key ?? '');
   const modifiers = props.settings.shortcut.modifiers;
+  useEffect(() => setKey(props.settings.shortcut.key ?? ''), [props.settings.shortcut.key]);
   const toggleModifier = (modifier: string): void => {
     const next = modifiers.includes(modifier) ? modifiers.filter((value) => value !== modifier) : [...modifiers, modifier];
-    props.onShortcut({ modifiers: next, key });
+    props.onShortcut({ modifiers: next, key: key || null });
   };
   return (
     <div className="settings-stack reveal">
       <section className="panel form-panel">
         <div className="section-heading"><span className="panel-index">PUSH TO TALK / 01</span><h2>Global shortcut</h2></div>
         <div className="shortcut-builder">
-          {['control', 'alt', 'shift', 'super'].map((modifier) => <button key={modifier} className={modifiers.includes(modifier) ? 'chip chip--active' : 'chip'} onClick={() => toggleModifier(modifier)}>{modifier === 'control' ? 'CTRL' : modifier.toUpperCase()}</button>)}
+          {['control', 'alt', 'shift', 'super'].map((modifier) => <button key={modifier} className={modifiers.includes(modifier) ? 'chip chip--active' : 'chip'} onClick={() => toggleModifier(modifier)}>{modifier === 'control' ? 'CTRL' : modifier === 'super' ? 'WIN' : modifier.toUpperCase()}</button>)}
           <span>+</span>
-          <input value={key} aria-label="Shortcut key" onChange={(event) => setKey(event.target.value)} onBlur={() => props.onShortcut({ modifiers, key: key || null })} />
+          <input value={key} placeholder="modifier only" aria-label="Shortcut key" onChange={(event) => setKey(event.target.value)} onBlur={() => props.onShortcut({ modifiers, key: key || null })} />
         </div>
         <p className="field-note">{props.status.sessionType === 'wayland' ? 'Your compositor blocks this global trigger. The tray and Flow button remain available.' : props.status.hotkeyRegistered ? 'Registered globally. Key auto-repeat is ignored.' : 'Not registered. Choose a combination that another application does not own.'}</p>
       </section>

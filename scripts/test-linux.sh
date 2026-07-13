@@ -11,3 +11,4 @@ if [[ ! -d node_modules ]]; then
 fi
 npm run typecheck
 npm test
+"$ROOT/scripts/test-install-linux.sh"
