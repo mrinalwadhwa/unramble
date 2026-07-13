@@ -16,6 +16,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let audioDeviceProvider = CoreAudioDeviceProvider()
     private let soundFeedbackProvider = SoundFeedbackProvider()
     private var pipeline: DictationPipeline?
+    private var localModelRuntime: LocalModelRuntime?
+    private var localModelPreloadTask: Task<Void, Never>?
+    private let pipelineRebuildQueue = AsyncLatestOperationQueue()
+    private var pipelineRebuildTask: Task<Void, Never>?
+
+    private struct DetachedPipelineGeneration: Sendable {
+        let pipeline: DictationPipeline?
+        let runtime: LocalModelRuntime?
+        let preloadTask: Task<Void, Never>?
+
+        func drain() async {
+            // Fence the pipeline before Qwen cancellation can suspend. The
+            // cancellation drain then progresses alongside model teardown.
+            await pipeline?.beginRetirement()
+            await runtime?.beginShutdown()
+            await pipeline?.retire()
+            await runtime?.shutdown()
+            await preloadTask?.value
+        }
+    }
 
     private let keychain = KeychainService()
     private var updaterService: UpdaterService?
@@ -84,6 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        pipelineRebuildQueue.invalidate()
+        pipelineRebuildTask?.cancel()
+        localModelPreloadTask?.cancel()
         hotkeyProvider.unregister()
         hudController?.stop()
         menuBarController?.stop()
@@ -141,7 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Rebuild the pipeline so it picks up the API key or
             // dictation mode the user just configured in onboarding.
             self?.rebuildPipeline()
-            self?.registerHotkey()
             self?.startOnboardingDictationObserver()
         }
 
@@ -327,6 +349,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     fileURLWithPath: adapterPath, isDirectory: true))
             let polisher: any PolishChatClient = MLXPolishClient(
                 engine: llmEngine)
+            let runtime = LocalModelRuntime(
+                sttEngine: sttEngine, llmEngine: llmEngine)
+            localModelRuntime = runtime
             batchProvider = nil
             // Allow overriding the streaming cycle interval for tuning.
             let cycleInterval: TimeInterval = {
@@ -337,22 +362,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }()
             streamingProvider = LocalStreamingProvider(
                 sttEngine: sttEngine, polishChatClient: polisher,
-                cycleInterval: cycleInterval)
+                cycleInterval: cycleInterval,
+                loadSTT: { try await runtime.loadSTT() })
             onSessionExpired = nil
 
-            // Preload models in the background so the first dictation is fast.
-            Task.detached(priority: .utility) {
-                do {
-                    async let stt: () = sttEngine.load()
-                    async let llm: () = llmEngine.load()
-                    try await stt
-                    try await llm
-                    Log.debug("[AppDelegate] Models preloaded")
-                } catch {
-                    fatalError(
-                        "Required local models failed to preload: \(error)")
-                }
-            }
+            startModelPreload(runtime)
             #else
             fatalError("Local mode requires Apple Silicon")
             #endif
@@ -392,6 +406,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Apply the persisted language setting.
         Task {
             await newPipeline.setLanguage(language)
+        }
+    }
+
+    private func startModelPreload(_ runtime: LocalModelRuntime) {
+        localModelPreloadTask?.cancel()
+        localModelPreloadTask = Task { [weak self, runtime] in
+            do {
+                try await runtime.preload()
+                guard !Task.isCancelled, let self,
+                    self.localModelRuntime === runtime
+                else { return }
+                Log.debug("[AppDelegate] Models preloaded")
+            } catch {
+                guard !Task.isCancelled, let self,
+                    self.localModelRuntime === runtime
+                else {
+                    Log.debug("[AppDelegate] Model preload cancelled")
+                    return
+                }
+                fatalError(
+                    "Required local models failed to preload: \(error)")
+            }
         }
     }
 
@@ -529,12 +565,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingController?.dismissWindow()
         onboardingController = nil
 
-        hotkeyProvider.unregister()
-        menuBarController?.setHotkeyRegistered(false)
-        hudController?.stop()
-        hudController = nil
-
-        Task { await coordinator.reset() }
+        let oldGeneration = detachPipelineGeneration()
+        let coordinator = self.coordinator
+        pipelineRebuildTask = pipelineRebuildQueue.submit(
+            cleanup: {
+                await oldGeneration.drain()
+                await coordinator.reset()
+            },
+            replacement: {}
+        )
 
         keychain.deleteOpenAIAPIKey()
         showOnboarding()
@@ -575,22 +614,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildPipeline() {
         Log.debug("[AppDelegate] Rebuilding pipeline for mode: \(Settings.shared.dictationMode.rawValue)")
 
-        // Tear down the old pipeline and streaming provider before
-        // creating new ones to avoid stale references.
-        let oldPipeline = pipeline
+        let oldGeneration = detachPipelineGeneration()
+        pipelineRebuildTask = pipelineRebuildQueue.submit(
+            cleanup: { await oldGeneration.drain() },
+            replacement: { [weak self] in
+                self?.finishPipelineRebuild()
+            }
+        )
+    }
+
+    private func detachPipelineGeneration() -> DetachedPipelineGeneration {
+        // Fence input synchronously. Cleanup and replacement are serialized
+        // because model teardown must finish before a new generation loads.
+        hotkeyProvider.unregister()
+        menuBarController?.setHotkeyRegistered(false)
         hudController?.stop()
         hudController = nil
-        Task {
-            await oldPipeline?.cancel()
-        }
 
+        let oldPipeline = pipeline
+        pipeline = nil
+        settingsController?.pipeline = nil
+        menuBarController?.setPipeline(nil)
+
+        let oldRuntime = localModelRuntime
+        localModelRuntime = nil
+        let oldPreloadTask = localModelPreloadTask
+        localModelPreloadTask = nil
+        oldPreloadTask?.cancel()
+
+        return DetachedPipelineGeneration(
+            pipeline: oldPipeline,
+            runtime: oldRuntime,
+            preloadTask: oldPreloadTask
+        )
+    }
+
+    private func finishPipelineRebuild() {
         setupPipeline()
         setupHUD()
         settingsController?.pipeline = pipeline
+        menuBarController?.setPipeline(pipeline)
+        menuBarController?.setPrivateMode(
+            Settings.shared.dictationMode == .local)
 
-        // Re-register the hotkey so its closure captures the new pipeline.
-        // Without this, the hotkey continues to drive the old pipeline.
-        hotkeyProvider.unregister()
+        // Register only after the latest replacement has been published.
         registerHotkey()
     }
 

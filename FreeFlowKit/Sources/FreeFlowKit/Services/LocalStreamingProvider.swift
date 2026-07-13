@@ -23,6 +23,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     // MARK: - Configuration
 
     private let sttEngine: any LocalSTTEngine
+    private let loadSTT: @Sendable () async throws -> Void
     private let polishChatClient: (any PolishChatClient)?
     private let polishModel: String
     private let cycleInterval: TimeInterval
@@ -79,9 +80,11 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         sttEngine: any LocalSTTEngine,
         polishChatClient: (any PolishChatClient)?,
         polishModel: String = PolishPipeline.polishModel,
-        cycleInterval: TimeInterval = 3
+        cycleInterval: TimeInterval = 3,
+        loadSTT: (@Sendable () async throws -> Void)? = nil
     ) {
         self.sttEngine = sttEngine
+        self.loadSTT = loadSTT ?? { try await sttEngine.load() }
         self.polishChatClient = polishChatClient
         self.polishModel = polishModel
         self.cycleInterval = cycleInterval
@@ -106,7 +109,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     ) async throws {
         if !sttEngine.isReady {
             Log.debug("[LocalStreaming] Loading STT engine \(sttEngine.name)")
-            try await sttEngine.load()
+            try await loadSTT()
             Log.debug("[LocalStreaming] STT engine loaded")
         }
         let newState = try incremental?.makeStreamingState()

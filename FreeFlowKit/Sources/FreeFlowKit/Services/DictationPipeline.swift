@@ -98,6 +98,14 @@ public actor DictationPipeline: PipelineProviding {
     /// complete() awaits this to ensure audio is ready before stopping.
     private var audioSetupTask: Task<Void, Never>?
 
+    private struct CancellationDrain {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+
+    /// Shared barrier for overlapping cancel and retirement requests.
+    private var cancellationDrain: CancellationDrain?
+
     /// Whether the current recording session is using streaming mode.
     private var isStreamingSession: Bool = false
 
@@ -151,6 +159,14 @@ public actor DictationPipeline: PipelineProviding {
     /// When true, finish the on-device streaming provider directly
     /// instead of attempting the cloud batch fallback.
     private let localMode: Bool
+
+    /// A retired pipeline cannot accept work after composition replacement.
+    private var isRetired = false
+
+    /// Public operations that entered before retirement. Retirement waits for
+    /// them, then performs a final task-slot sweep before model shutdown.
+    private var activeOperationCount = 0
+    private var activeOperationWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// Update the language hint from outside the actor.
     public func setLanguage(_ code: String?) {
@@ -211,6 +227,27 @@ public actor DictationPipeline: PipelineProviding {
         return silenceThreshold
     }
 
+    private func beginOperation() -> Bool {
+        guard !isRetired else { return false }
+        activeOperationCount += 1
+        return true
+    }
+
+    private func endOperation() {
+        activeOperationCount -= 1
+        guard activeOperationCount == 0 else { return }
+        let waiters = activeOperationWaiters
+        activeOperationWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    private func waitForActiveOperations() async {
+        guard activeOperationCount > 0 else { return }
+        await withCheckedContinuation { continuation in
+            activeOperationWaiters.append(continuation)
+        }
+    }
+
     // MARK: - PipelineProviding
 
     public var state: RecordingState {
@@ -220,9 +257,14 @@ public actor DictationPipeline: PipelineProviding {
     }
 
     public func activate() async {
+        guard beginOperation() else {
+            Log.debug("[Pipeline] activate() ignored - pipeline is retired")
+            return
+        }
+        defer { endOperation() }
         let t0 = CFAbsoluteTimeGetCurrent()
         let currentState = await coordinator.state
-        guard currentState == .idle else {
+        guard !isRetired, currentState == .idle else {
             Log.debug("[Pipeline] activate() ignored — state is \(currentState)")
             return
         }
@@ -230,6 +272,10 @@ public actor DictationPipeline: PipelineProviding {
         let t1 = CFAbsoluteTimeGetCurrent()
         let started = await coordinator.startRecording()
         guard started else { return }
+        guard !isRetired else {
+            await coordinator.reset()
+            return
+        }
         let t2 = CFAbsoluteTimeGetCurrent()
         Log.debug(
             "[Pipeline] activate() state check: \(String(format: "%.3f", t1 - t0))s, startRecording: \(String(format: "%.3f", t2 - t1))s"
@@ -318,9 +364,7 @@ public actor DictationPipeline: PipelineProviding {
             // without the lock to unblock the hung call, then marks
             // for rebuild so the next session gets a fresh engine.
             audioProvider.forceReset()
-            Task { [audioProvider] in
-                _ = try? await audioProvider.stopRecording()
-            }
+            _ = try? await audioProvider.stopRecording()
             pendingContext?.cancel()
             pendingContext = nil
             audioSetupFailed = true
@@ -359,6 +403,13 @@ public actor DictationPipeline: PipelineProviding {
                 context = result ?? .empty
             } else {
                 context = .empty
+            }
+
+            guard !Task.isCancelled else {
+                isStreamingSession = false
+                chunkInjectedFlag = nil
+                _ = try? await audioProvider.stopRecording()
+                return
             }
 
             let t5 = CFAbsoluteTimeGetCurrent()
@@ -442,6 +493,17 @@ public actor DictationPipeline: PipelineProviding {
                 }
             }.value
 
+            guard !Task.isCancelled else {
+                streaming.setChunkHandler(nil)
+                await streaming.cancelStreaming()
+                isStreamingSession = false
+                chunkInjectedFlag = nil
+                if audioProvider.isRecording {
+                    _ = try? await audioProvider.stopRecording()
+                }
+                return
+            }
+
             // If streaming timed out, also cancel the session on the
             // provider so it tears down the broken connection cleanly
             // rather than leaving stale state for the next session.
@@ -477,10 +539,15 @@ public actor DictationPipeline: PipelineProviding {
     }
 
     public func complete() async {
+        guard beginOperation() else {
+            Log.debug("[Pipeline] complete() ignored - pipeline is retired")
+            return
+        }
+        defer { endOperation() }
         let completeEnteredAt = CFAbsoluteTimeGetCurrent()
         Log.debug("[Pipeline] complete() entering")
         let currentState = await coordinator.state
-        guard currentState == .recording else {
+        guard !isRetired, currentState == .recording else {
             Log.debug("[Pipeline] complete() ignored — state is \(currentState)")
             return
         }
@@ -488,6 +555,7 @@ public actor DictationPipeline: PipelineProviding {
         Log.debug("[Pipeline] complete() transitioning to processing")
         let stopped = await coordinator.stopRecording()
         guard stopped else { return }
+        guard !isRetired else { return }
 
         // If audio setup is still in progress, give it a short window
         // to finish (covers the normal 500-900ms AVAudioEngine start).
@@ -635,6 +703,7 @@ public actor DictationPipeline: PipelineProviding {
             return
         }
 
+        guard !isRetired else { return }
         let useStreaming = isStreamingSession
         let forwardingTask = audioForwardingTask
         audioForwardingTask = nil
@@ -872,21 +941,51 @@ public actor DictationPipeline: PipelineProviding {
     }
 
     public func cancel() async {
-        pipelineTask?.cancel()
+        await cancelAndDrain()
+    }
+
+    private func cancelAndDrain() async {
+        let cancellationDrain = startCancellationDrain()
+        await cancellationDrain.task.value
+        finishCancellationDrain(id: cancellationDrain.id)
+    }
+
+    private func startCancellationDrain() -> CancellationDrain {
+        if let cancellationDrain { return cancellationDrain }
+        let id = UUID()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performCancellationDrain()
+        }
+        let drain = CancellationDrain(id: id, task: task)
+        cancellationDrain = drain
+        return drain
+    }
+
+    private func finishCancellationDrain(id: UUID) {
+        guard cancellationDrain?.id == id else { return }
+        cancellationDrain = nil
+    }
+
+    private func performCancellationDrain() async {
+        let runningPipelineTask = pipelineTask
         pipelineTask = nil
-        pendingContext?.cancel()
+        let runningContextTask = pendingContext
         pendingContext = nil
+        let runningSetupTask = audioSetupTask
+        audioSetupTask = nil
+        let runningForwardingTask = audioForwardingTask
+        audioForwardingTask = nil
+
+        runningPipelineTask?.cancel()
+        runningContextTask?.cancel()
+        runningSetupTask?.cancel()
+        runningForwardingTask?.cancel()
+
         recordingStartedAt = nil
         chunkInjectedFlag = nil
         recoveryAudio = nil
         recoveryContext = nil
-
-        audioSetupTask?.cancel()
-        audioSetupTask = nil
-
-        // Cancel audio forwarding if streaming.
-        audioForwardingTask?.cancel()
-        audioForwardingTask = nil
 
         // Cancel the streaming session. Always attempt cancellation even
         // if complete() already cleared isStreamingSession — the pipeline
@@ -903,7 +1002,53 @@ public actor DictationPipeline: PipelineProviding {
             _ = try? await audioProvider.stopRecording()
         }
 
+        // Drain every task that can still use the provider or local models.
+        // Core ML loading does not stop cooperatively, so dropping these task
+        // handles would allow a retired generation to publish model state
+        // after its replacement starts.
+        await runningSetupTask?.value
+        await runningForwardingTask?.value
+        await runningPipelineTask?.value
+        _ = await runningContextTask?.value
+
+        // Setup can publish a forwarding task after cancellation if it was
+        // inside a non-cancellable engine load. Capture and drain that task,
+        // then cancel the provider once more to remove any late session state.
+        let lateForwardingTask = audioForwardingTask
+        audioForwardingTask = nil
+        if let lateForwardingTask {
+            lateForwardingTask.cancel()
+            await lateForwardingTask.value
+            if let streaming = streamingProvider {
+                streaming.setChunkHandler(nil)
+                await streaming.cancelStreaming()
+            }
+        }
+
+        // Setup may have resumed after the first sweep. Clear every session
+        // field it can publish before allowing a subsequent activation.
+        isStreamingSession = false
+        audioSetupFailed = false
+        chunkInjectedFlag = nil
+
         await coordinator.reset()
+    }
+
+    /// Mark this pipeline terminal and start cancellation without waiting.
+    ///
+    /// Composition uses this fence before beginning model shutdown so an
+    /// invisible old recording cannot continue while Qwen cancellation drains.
+    public func beginRetirement() {
+        isRetired = true
+        _ = startCancellationDrain()
+    }
+
+    /// Permanently stop this pipeline before its providers are released.
+    public func retire() async {
+        beginRetirement()
+        await cancelAndDrain()
+        await waitForActiveOperations()
+        await cancelAndDrain()
     }
 
     // MARK: - Local Dictation
@@ -1303,6 +1448,8 @@ public actor DictationPipeline: PipelineProviding {
     /// and return to idle. On failure, stay in `.dictationFailed` so
     /// the user can try again or dismiss.
     public func retryDictation() async {
+        guard beginOperation() else { return }
+        defer { endOperation() }
         guard let audio = recoveryAudio,
             let context = recoveryContext,
             let batchProvider
@@ -1313,10 +1460,12 @@ public actor DictationPipeline: PipelineProviding {
 
         let started = await coordinator.retryDictation()
         guard started else { return }
+        guard !isRetired else { return }
 
         do {
             let text = try await batchProvider.dictate(
                 audio: audio, context: context)
+            guard !isRetired else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 recoveryAudio = nil
@@ -1326,6 +1475,7 @@ public actor DictationPipeline: PipelineProviding {
             }
 
             await transcriptBuffer?.store(trimmed)
+            guard !isRetired else { return }
             let injecting = await coordinator.startInjecting()
             guard injecting else {
                 await coordinator.reset()
@@ -1333,6 +1483,7 @@ public actor DictationPipeline: PipelineProviding {
             }
 
             let freshContext = await contextProvider.readContext()
+            guard !isRetired else { return }
             do {
                 try await textInjector.inject(text: trimmed, into: freshContext)
                 recoveryAudio = nil
@@ -1352,6 +1503,8 @@ public actor DictationPipeline: PipelineProviding {
     ///
     /// Called from the HUD "Dismiss" button or Escape key.
     public func dismissDictationFailure() async {
+        guard beginOperation() else { return }
+        defer { endOperation() }
         recoveryAudio = nil
         recoveryContext = nil
         await coordinator.reset()

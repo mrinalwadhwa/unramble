@@ -120,6 +120,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         hotkeyRegistered = registered
     }
 
+    /// Replace the pipeline dependency after a mode rebuild.
+    func setPipeline(_ pipeline: DictationPipeline?) {
+        self.pipeline = pipeline
+    }
+
     /// Switch to onboarding mode: show a minimal menu with a setup hint.
     func setOnboardingMode(_ enabled: Bool) {
         onboardingMode = enabled
