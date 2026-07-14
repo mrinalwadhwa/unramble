@@ -54,9 +54,9 @@ async fn providers(scenario: Scenario) -> (MockServer, OpenAIProviders) {
     let server = MockServer::start(scenario).await.unwrap();
     let settings = AppSettings {
         api_base_url: server.api_base_url.clone(),
-        realtime_model: "mock-realtime-model".into(),
+        realtime_model: "gpt-realtime-whisper".into(),
         transcription_model: "mock-transcription-model".into(),
-        polish_model: "mock-polish-model".into(),
+        polish_model: "gpt-5.4-nano".into(),
         request_timeout_seconds: 5,
         ..AppSettings::default()
     };
@@ -106,7 +106,10 @@ async fn polishes_without_exposing_context_unless_it_is_supplied() {
         .unwrap();
 
     assert_eq!(transcript, TEST_POLISHED_TRANSCRIPT);
-    assert_eq!(server.metrics().await.polish_requests, 1);
+    let metrics = server.metrics().await;
+    assert_eq!(metrics.polish_requests, 1);
+    assert_eq!(metrics.polish_reasoning_effort.as_deref(), Some("none"));
+    assert_eq!(metrics.polish_verbosity.as_deref(), Some("low"));
 }
 
 #[tokio::test]
@@ -133,8 +136,9 @@ async fn streams_resampled_audio_and_delivers_partial_and_final_text() {
     assert_eq!(metrics.realtime_connections, 1);
     assert_eq!(
         metrics.realtime_model.as_deref(),
-        Some("mock-realtime-model")
+        Some("gpt-realtime-whisper")
     );
+    assert_eq!(metrics.realtime_delay.as_deref(), Some("low"));
     assert_eq!(metrics.realtime_audio_bytes, 24_000 * 2);
 }
 
@@ -245,11 +249,13 @@ async fn live_realtime_transcribes_opt_in_pcm() {
         .collect::<Vec<_>>();
     let credentials = MemoryCredentials::with_api_key(&key).await;
     let providers = OpenAIProviders::new(AppSettings::default(), credentials);
+    let connect_started = std::time::Instant::now();
     let session = providers
         .realtime
         .begin("en", MicProximity::NearField, CancellationToken::new())
         .await
         .expect("live realtime session should connect");
+    let connect_elapsed = connect_started.elapsed();
     for chunk in samples.chunks((CAPTURE_SAMPLE_RATE / 10) as usize) {
         session
             .send_audio(AudioChunk {
@@ -259,10 +265,17 @@ async fn live_realtime_transcribes_opt_in_pcm() {
             .await
             .expect("live realtime audio should stream");
     }
+    let finish_started = std::time::Instant::now();
     let transcript = session
         .finish()
         .await
         .expect("live realtime session should finalize");
+    let finish_elapsed = finish_started.elapsed();
 
     assert!(!transcript.trim().is_empty());
+    eprintln!(
+        "live realtime timing: connect_ms={} finish_ms={}",
+        connect_elapsed.as_millis(),
+        finish_elapsed.as_millis()
+    );
 }

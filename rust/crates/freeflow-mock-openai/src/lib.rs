@@ -68,6 +68,9 @@ pub struct RequestMetrics {
     pub realtime_connections: usize,
     pub realtime_audio_bytes: usize,
     pub realtime_model: Option<String>,
+    pub realtime_delay: Option<String>,
+    pub polish_reasoning_effort: Option<String>,
+    pub polish_verbosity: Option<String>,
 }
 
 #[derive(Clone)]
@@ -163,12 +166,22 @@ async fn transcribe(
 async fn polish(
     State(state): State<MockState>,
     headers: HeaderMap,
-    Json(_body): Json<Value>,
+    Json(body): Json<Value>,
 ) -> Response {
     if let Some(response) = gate_request(&state, &headers).await {
         return response;
     }
-    state.metrics.lock().await.polish_requests += 1;
+    let mut metrics = state.metrics.lock().await;
+    metrics.polish_requests += 1;
+    metrics.polish_reasoning_effort = body
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    metrics.polish_verbosity = body
+        .get("verbosity")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    drop(metrics);
     if state.scenario == Scenario::PolishFailure {
         return api_error(StatusCode::INTERNAL_SERVER_ERROR, "scripted polish failure");
     }
@@ -217,7 +230,14 @@ async fn realtime_session(socket: WebSocket, state: MockState) {
                     .pointer("/session/audio/input/transcription/model")
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned);
-                state.metrics.lock().await.realtime_model = model;
+                let delay = event
+                    .pointer("/session/audio/input/transcription/delay")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                let mut metrics = state.metrics.lock().await;
+                metrics.realtime_model = model;
+                metrics.realtime_delay = delay;
+                drop(metrics);
                 if state.scenario == Scenario::RealtimeError {
                     let _ = sender
                         .send(Message::Text(

@@ -15,7 +15,8 @@ use x11rb::{
 
 use crate::{detect_session_type, x11};
 
-const PASTE_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+const PASTE_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
+const FOCUS_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
 const CLIPBOARD_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(800);
 
 #[derive(Clone)]
@@ -111,7 +112,7 @@ impl LinuxTextInjector {
                         "Hyprland could not restore the dictation target".into(),
                     ));
                 }
-                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                tokio::time::sleep(FOCUS_SETTLE_DELAY).await;
             }
             let modifiers = if use_terminal_shortcut {
                 "CTRL SHIFT"
@@ -196,9 +197,9 @@ impl TextInjector for LinuxTextInjector {
         if session == SessionType::Wayland {
             Self::wait_for_wayland_clipboard(text).await;
         }
-        // Give the push-to-talk keys time to reach their released state before
-        // synthesizing paste. Compositors otherwise combine Ctrl+V with a
-        // modifier that still belongs to the shortcut release event.
+        // Realtime finalization normally overlaps the physical key release.
+        // Retain one compositor frame of settling for unusually fast fallback
+        // responses without adding a long fixed delay after every request.
         tokio::time::sleep(PASTE_SETTLE_DELAY).await;
         let terminal = context.is_terminal;
         let paste = match session {

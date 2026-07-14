@@ -17,8 +17,15 @@ the textarea automatically and remained on the clipboard for recovery.
 
 The current user's persistent microphone is `Gaming Webcam [Kiyo] Analog
 Stereo`. It is stored by stable PulseAudio ID. FreeFlow pre-opens the stream at
-daemon startup, pauses it while idle, and measured about 200 ms from preview
-request to ready capture afterward.
+daemon startup, pauses it while idle, and resumes that exact cached device
+before attempting a fresh PipeWire enumeration. Preview measured about 200 ms
+from request to ready capture after warm-up.
+
+The configured cloud path is OpenAI throughout: `gpt-realtime-whisper` handles
+speech, `gpt-4o-mini-transcribe` provides batch fallback, and `gpt-5.4-nano`
+optionally cleans text. The current build requests low transcription delay,
+uses no reasoning and low verbosity for `gpt-5.4` cleanup, and reduces fixed
+post-processing paste waits from 230 ms to 50 ms.
 
 ## What Works End-to-End
 
@@ -45,9 +52,9 @@ request to ready capture afterward.
   restoration, and compositor-assisted clipboard paste. Other Wayland
   compositors retain tray controls and explicit failure recovery.
 - The waveform-only HUD fits in a transparent 104×46 window and shows microphone
-  level or processing motion without accepting pointer input. If the compositor
-  temporarily activates it, the daemon restores the window captured before the
-  HUD appeared.
+  level or processing motion without accepting pointer input. It appears at the
+  top center, accounts for compositor-reserved panels before it maps, and leaves
+  the active workspace and focused application unchanged.
 - The user-local installer creates an AppImage installation, desktop entry,
   icon, `freeflow` command, and enabled XDG autostart entry without root access.
 
@@ -100,8 +107,9 @@ The live API test used the opt-in `FREEFLOW_TEST_OPENAI` and
   crates. One hardware/desktop interaction test remains ignored by default.
 - Clippy passes across every Rust workspace target with warnings denied.
 - Rust formatting passes for the complete workspace.
-- Seven Electron main-process and utility tests pass, including daemon callback
-  isolation, destroyed-window lifecycle guards, and autostart command handling.
+- Ten Electron main-process and utility tests pass, including top-panel-aware
+  HUD placement, daemon callback isolation, destroyed-window lifecycle guards,
+  and autostart command handling.
 - TypeScript checking and the production Electron renderer/main/preload build
   pass.
 - The isolated user-installer test passes for AppImage copying, safe symlinking,
@@ -134,18 +142,27 @@ The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
 - Selected the Razer Kiyo by stable PulseAudio ID, persisted it to the private
   settings file, and captured real RMS data. After startup warm-up, preview
   became ready in roughly 200 ms and a 400 ms preview retained 440 ms of audio.
+  The final packaged build then resumed that same cached Kiyo on activation
+  without a new enumeration or fallback warning.
 - Validated the 100×42 waveform-only HUD visually during live capture.
+- Verified the packaged HUD at Hyprland coordinates `[908, 56]` on the
+  1920×1200 monitor. The active workspace stayed on workspace 2 and the focused
+  T3 window remained active while the HUD was visible.
 - Held and released Ctrl+Win without speaking and confirmed FreeFlow returned to
   idle without an error overlay.
+- Timed the configured `gpt-5.4-nano` cleanup request at roughly 0.63–0.71 s
+  with default reasoning and 0.43–0.46 s with no reasoning and low verbosity.
+  Small live Realtime samples completed around 0.91–1.05 s after commit; these
+  network measurements vary with service and connection conditions.
 - Validated the installed desktop and autostart entries and confirmed
   `~/.local/bin/freeflow` resolves to the installed AppImage.
 
 ## Packaging Output
 
-- `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 132 MB,
-  SHA-256 `d2a12c773b37d283c6f4e570b4110c85cb2e9a804855994453d4511d735e0d65`
-- `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 102 MB,
-  SHA-256 `b22785b281faf96e1a9cd28d308d14317946035f1782dda792186b73156d4f8b`
+- `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 137,642,788 bytes,
+  SHA-256 `37983c2080c086688392efd1221513a57e4d910635575ca80c57952bbc316ed3`
+- `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 106,615,028 bytes,
+  SHA-256 `384e18063f91e622c76fec23e7dd5efe508c16a5295839c1c76b9f687d10daf6`
 - `rust/target/release/freeflow-daemon`, bundled into both artifacts
 - `~/.local/share/freeflow/FreeFlow.AppImage`, installed for the current user
 - `~/.local/share/applications/com.freeflow.FreeFlow.Linux.desktop`
@@ -166,6 +183,9 @@ Build outputs remain ignored and are not committed.
   GTK, and Qt manual matrix was not repeated in this session.
 - The deterministic GUI smoke path is manual; standard CI does not create a
   portal session, `/dev/uinput` device, or paid OpenAI request.
+- Model-based polish is a serial network request after the final transcript and
+  therefore still adds service latency when cleanup is needed. Disabling polish
+  in Settings selects the fastest path without changing transcription.
 - Packages are unsigned and automatic update delivery is not enabled.
 
 ## Wayland Status
@@ -235,5 +255,5 @@ and CI are independent additions.
 3. Validate and adapt the portal session on current GNOME and KDE releases.
 4. Add AT-SPI direct insertion, then restore the prior clipboard only after
    confirmed consumption.
-5. Add crash-restart and package-install smoke jobs for the AppImage and Debian
-   artifacts on clean distribution images.
+5. Overlap safe polish work with partial transcripts, then add crash-restart and
+   package-install smoke jobs for the AppImage and Debian artifacts.

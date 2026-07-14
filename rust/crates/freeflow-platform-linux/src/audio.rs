@@ -284,6 +284,54 @@ impl LinuxAudioProvider {
             info,
         ))
     }
+
+    fn resume_session(
+        session: &mut CaptureSession,
+        proximity: MicProximity,
+    ) -> Result<(AudioCaptureInfo, Arc<Mutex<CaptureData>>, u32)> {
+        if let Ok(mut data) = session.data.lock() {
+            *data = fresh_capture_data(session.source_rate, proximity);
+        } else {
+            return Err(FreeFlowError::Audio(
+                "audio capture lock was poisoned".into(),
+            ));
+        }
+        session.stream.play().map_err(|error| {
+            FreeFlowError::Audio(format!(
+                "could not resume {} through {}: {error}",
+                session.device.name, session.device.backend
+            ))
+        })?;
+        Ok((
+            AudioCaptureInfo {
+                device: session.device.clone(),
+                sample_rate: CAPTURE_SAMPLE_RATE,
+                channels: 1,
+            },
+            session.data.clone(),
+            session.source_rate,
+        ))
+    }
+
+    async fn finish_resume(
+        &self,
+        info: AudioCaptureInfo,
+        data: Arc<Mutex<CaptureData>>,
+        source_rate: u32,
+    ) -> Result<AudioCaptureInfo> {
+        if wait_for_first_sample(&data, std::time::Duration::from_millis(1_500)).await {
+            let mut data = data
+                .lock()
+                .map_err(|_| FreeFlowError::Audio("audio capture lock was poisoned".into()))?;
+            *data = fresh_capture_data(source_rate, self.proximity());
+        }
+        debug!(
+            device = info.device.name,
+            backend = info.device.backend,
+            "resumed cached microphone"
+        );
+        Ok(info)
+    }
 }
 
 #[async_trait]
@@ -299,6 +347,27 @@ impl AudioProvider for LinuxAudioProvider {
             ));
         }
         let selected = self.selected_id.read().await.clone();
+        let mut cached = self.session.lock().await;
+        if let Some(session) = cached.as_mut()
+            && selected
+                .as_deref()
+                .is_none_or(|selected| selected == session.device.id)
+        {
+            match Self::resume_session(session, self.proximity()) {
+                Ok((info, data, source_rate)) => {
+                    drop(cached);
+                    return self.finish_resume(info, data, source_rate).await;
+                }
+                Err(error) => {
+                    debug!(
+                        category = error.category(),
+                        "cached microphone could not resume; resolving a fresh device"
+                    );
+                    *cached = None;
+                }
+            }
+        }
+        drop(cached);
         let resolved =
             tokio::task::spawn_blocking(move || Self::resolve_device(selected.as_deref()))
                 .await
@@ -321,36 +390,17 @@ impl AudioProvider for LinuxAudioProvider {
         if let Some(session) = cached.as_mut()
             && session.device.id == located.metadata.id
         {
-            if let Ok(mut data) = session.data.lock() {
-                *data = fresh_capture_data(session.source_rate, self.proximity());
-            } else {
-                self.recording.store(false, Ordering::SeqCst);
-                return Err(FreeFlowError::Audio(
-                    "audio capture lock was poisoned".into(),
-                ));
+            let resumed = Self::resume_session(session, self.proximity());
+            match resumed {
+                Ok((info, data, source_rate)) => {
+                    drop(cached);
+                    return self.finish_resume(info, data, source_rate).await;
+                }
+                Err(error) => {
+                    self.recording.store(false, Ordering::SeqCst);
+                    return Err(error);
+                }
             }
-            if let Err(error) = session.stream.play() {
-                self.recording.store(false, Ordering::SeqCst);
-                return Err(FreeFlowError::Audio(format!(
-                    "could not resume {} through {}: {error}",
-                    session.device.name, session.device.backend
-                )));
-            }
-            let info = AudioCaptureInfo {
-                device: session.device.clone(),
-                sample_rate: CAPTURE_SAMPLE_RATE,
-                channels: 1,
-            };
-            let data = session.data.clone();
-            let source_rate = session.source_rate;
-            drop(cached);
-            if wait_for_first_sample(&data, std::time::Duration::from_millis(1_500)).await {
-                let mut data = data
-                    .lock()
-                    .map_err(|_| FreeFlowError::Audio("audio capture lock was poisoned".into()))?;
-                *data = fresh_capture_data(source_rate, self.proximity());
-            }
-            return Ok(info);
         }
         *cached = None;
         let result = Self::build_session(

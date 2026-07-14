@@ -37,13 +37,17 @@ impl PolishProvider for OpenAIPolishProvider {
         let settings = self.client.settings().await;
         let key = self.client.api_key().await?;
         let endpoint = OpenAIClient::endpoint(&settings, "chat/completions")?;
-        let body = json!({
+        let mut body = json!({
             "model": settings.polish_model,
             "messages": [
                 {"role": "system", "content": system_prompt(language, mode)},
                 {"role": "user", "content": build_user_prompt(transcript, context, language)}
             ]
         });
+        if settings.polish_model.starts_with("gpt-5.4") {
+            body["reasoning_effort"] = json!("none");
+            body["verbosity"] = json!("low");
+        }
 
         debug!(
             characters = transcript.chars().count(),

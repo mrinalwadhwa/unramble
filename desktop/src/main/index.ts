@@ -14,6 +14,12 @@ import {
 
 import { DaemonSupervisor } from './daemon';
 import { AUTOSTART_DESKTOP_FILENAME, autostartDesktopEntry } from './autostart';
+import {
+  HUD_TITLE,
+  moveHyprlandHud,
+  resolveHyprlandHudPosition,
+  topCenterHudPosition
+} from './hud-position';
 import { sendToWindow, useWindow } from './window-lifecycle';
 import type { AppStatus, RecordingState } from '../shared/models';
 import {
@@ -30,6 +36,7 @@ let quitting = false;
 let connected = false;
 let currentStatus: AppStatus | null = null;
 let hudHideTimer: NodeJS.Timeout | null = null;
+let hudUpdateSequence = 0;
 const HUD_WIDTH = 104;
 const HUD_HEIGHT = 46;
 
@@ -141,6 +148,7 @@ function createWindows(): void {
   void loadRenderer(settingsWindow, 'app');
 
   hudWindow = new BrowserWindow({
+    title: HUD_TITLE,
     width: HUD_WIDTH,
     height: HUD_HEIGHT,
     frame: false,
@@ -164,7 +172,10 @@ function createWindows(): void {
   hudWindow.on('closed', () => {
     hudWindow = null;
   });
-  void loadRenderer(hudWindow, 'hud');
+  hudWindow.on('page-title-updated', (event) => event.preventDefault());
+  void loadRenderer(hudWindow, 'hud').then(() =>
+    useWindow(hudWindow, (window) => window.setTitle(HUD_TITLE))
+  );
 }
 
 async function loadRenderer(window: BrowserWindow, route: string): Promise<void> {
@@ -296,20 +307,21 @@ async function refreshStatus(): Promise<void> {
 }
 
 function updateHud(state: RecordingState): void {
+  const sequence = ++hudUpdateSequence;
   if (state === 'idle') {
     if (hudHideTimer) clearTimeout(hudHideTimer);
     hudHideTimer = setTimeout(() => useWindow(hudWindow, (window) => window.hide()), 600);
     return;
   }
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const { x, y, width, height } = display.workArea;
-  useWindow(hudWindow, (window) => {
-    window.setPosition(
-      Math.round(x + (width - HUD_WIDTH) / 2),
-      y + height - HUD_HEIGHT - 18,
-      false
-    );
-    window.showInactive();
+  const fallback = topCenterHudPosition(display.workArea, HUD_WIDTH);
+  void resolveHyprlandHudPosition(fallback, HUD_WIDTH).then((position) => {
+    if (sequence !== hudUpdateSequence) return;
+    useWindow(hudWindow, (window) => {
+      window.setPosition(position.x, position.y, false);
+      window.showInactive();
+      void moveHyprlandHud(position, process.pid, [HUD_WIDTH, HUD_HEIGHT]);
+    });
   });
 }
 
