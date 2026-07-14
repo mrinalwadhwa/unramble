@@ -75,10 +75,12 @@ impl DictationProvider for OpenAIBatchProvider {
             .get("text")
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
-            .filter(|text| !text.is_empty())
             .ok_or_else(|| {
                 FreeFlowError::InvalidResponse("transcription response did not contain text".into())
             })?;
+        if text.is_empty() {
+            return Err(FreeFlowError::SilentAudio);
+        }
         debug!(
             characters = text.chars().count(),
             "batch transcription completed"

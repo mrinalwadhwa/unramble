@@ -558,6 +558,9 @@ impl DictationPipeline {
                 Ok(text) if !text.trim().is_empty() => return Ok(text),
                 Ok(_) => debug!("realtime returned an empty transcript; using batch fallback"),
                 Err(FreeFlowError::Cancelled) => return Err(FreeFlowError::Cancelled),
+                Err(error @ (FreeFlowError::EmptyAudio | FreeFlowError::SilentAudio)) => {
+                    return Err(error);
+                }
                 Err(error) => {
                     debug!(
                         category = error.category(),
@@ -1035,6 +1038,24 @@ mod tests {
         let outcome = pipeline.stop().await.unwrap().unwrap();
         assert_eq!(outcome.transcript, "Fallback transcript.");
         assert_eq!(batch.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn realtime_no_speech_returns_idle_without_batch_fallback() {
+        let (pipeline, batch, _) = pipeline(
+            Some(Err(FreeFlowError::SilentAudio)),
+            Ok("should not be used".into()),
+            None,
+            false,
+        );
+        pipeline.start().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let outcome = pipeline.stop().await.unwrap();
+
+        assert!(outcome.is_none());
+        assert_eq!(batch.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(pipeline.state.current().await, RecordingState::Idle);
     }
 
     #[tokio::test]

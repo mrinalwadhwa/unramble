@@ -30,8 +30,8 @@ let quitting = false;
 let connected = false;
 let currentStatus: AppStatus | null = null;
 let hudHideTimer: NodeJS.Timeout | null = null;
-const HUD_WIDTH = 260;
-const HUD_HEIGHT = 64;
+const HUD_WIDTH = 104;
+const HUD_HEIGHT = 46;
 
 const allowedMethods = new Set<string>(RPC_METHODS);
 const launchHidden = process.env.FREEFLOW_START_HIDDEN === '1';

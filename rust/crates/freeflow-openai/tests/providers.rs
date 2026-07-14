@@ -162,6 +162,33 @@ async fn reports_a_realtime_disconnect_for_batch_fallback() {
 }
 
 #[tokio::test]
+async fn maps_an_empty_realtime_transcript_to_silence() {
+    let (_server, providers) = providers(Scenario::NoSpeech).await;
+    let session = providers
+        .realtime
+        .begin("en", MicProximity::NearField, CancellationToken::new())
+        .await
+        .unwrap();
+
+    let error = session.finish().await.unwrap_err();
+
+    assert_eq!(error, FreeFlowError::SilentAudio);
+}
+
+#[tokio::test]
+async fn maps_an_empty_batch_transcript_to_silence() {
+    let (_server, providers) = providers(Scenario::NoSpeech).await;
+
+    let error = providers
+        .batch
+        .transcribe(&audio(), "en", CancellationToken::new())
+        .await
+        .unwrap_err();
+
+    assert_eq!(error, FreeFlowError::SilentAudio);
+}
+
+#[tokio::test]
 async fn preserves_the_server_error_after_the_realtime_socket_closes() {
     let (_server, providers) = providers(Scenario::RealtimeError).await;
     let session = providers

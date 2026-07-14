@@ -203,17 +203,14 @@ kbd { margin: 0 4px; padding: 5px 7px; border: 1px solid var(--line-strong); bor
 .boot p { color: var(--muted); font: 520 10px 'Azeret Mono Variable', monospace; }
 @keyframes boot-pulse { 50% { transform: translateY(-3px); box-shadow: 0 10px 35px rgba(216,255,114,.2); } }
 
-.hud { width: 260px; height: 58px; display: grid; grid-template-columns: 76px 1fr 10px; align-items: center; gap: 10px; padding: 0 13px; border: 1px solid rgba(230,234,223,.25); border-radius: 16px; background: rgba(13,17,14,.94); box-shadow: 0 12px 32px rgba(0,0,0,.42); backdrop-filter: blur(16px); overflow: hidden; }
-.hud::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(100deg, rgba(216,255,114,.05), transparent 50%); pointer-events: none; }
-.hud__signal { height: 38px; display: flex; align-items: center; justify-content: center; gap: 3px; }
-.hud__signal i { width: 3px; min-height: 4px; height: calc(4px + 27px * var(--bar)); border-radius: 4px; background: color-mix(in srgb, var(--acid) calc(var(--bar) * 100%), #536052); transition: height .08s linear; }
-.hud__copy { display: grid; gap: 3px; min-width: 0; }
-.hud__copy strong { font-size: 12px; letter-spacing: -.01em; }
-.hud__copy span { overflow: hidden; color: var(--muted); font: 520 8px 'Azeret Mono Variable', monospace; text-overflow: ellipsis; white-space: nowrap; }
-.hud__lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--acid); box-shadow: 0 0 12px rgba(216,255,114,.5); }
-.hud--failed .hud__lamp, .hud--injectionFailed .hud__lamp { background: var(--signal); box-shadow: 0 0 15px rgba(255,118,93,.5); }
-.hud--transcribing .hud__signal i, .hud--polishing .hud__signal i, .hud--injecting .hud__signal i { animation: hud-scan .8s ease-in-out infinite alternate; animation-delay: calc(var(--bar) * -.4s); }
-@keyframes hud-scan { to { height: 29px; background: var(--warning); } }
+body.hud-host { display: grid; place-items: center; background: transparent; }
+.hud { position: relative; width: 100px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(230,234,223,.25); border-radius: 15px; background: rgba(13,17,14,.94); box-shadow: 0 9px 25px rgba(0,0,0,.46), inset 0 0 0 1px rgba(216,255,114,.035); backdrop-filter: blur(16px); overflow: hidden; }
+.hud::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle at 36% 50%, rgba(216,255,114,.09), transparent 58%); pointer-events: none; }
+.hud__signal { height: 32px; display: flex; align-items: center; justify-content: center; gap: 2px; }
+.hud__signal i { width: 3px; min-height: 3px; height: calc(3px + 24px * var(--bar)); border-radius: 4px; background: color-mix(in srgb, var(--acid) calc(var(--bar) * 100%), #536052); box-shadow: 0 0 calc(5px * var(--bar)) rgba(216,255,114,.2); transition: height .08s linear, background .18s ease; }
+.hud--preparing .hud__signal i, .hud--finalizing .hud__signal i, .hud--transcribing .hud__signal i, .hud--polishing .hud__signal i, .hud--injecting .hud__signal i { animation: hud-scan .72s ease-in-out infinite alternate; animation-delay: calc(var(--bar) * -.35s); }
+.hud--failed .hud__signal i, .hud--injectionFailed .hud__signal i { background: var(--signal); box-shadow: 0 0 7px rgba(255,118,93,.34); }
+@keyframes hud-scan { to { height: 27px; background: var(--warning); } }
 
 @media (max-width: 940px) {
   .shell { grid-template-columns: 190px minmax(0, 1fr); }

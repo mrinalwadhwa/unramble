@@ -35,6 +35,7 @@ pub enum Scenario {
     AuthenticationFailure,
     RateLimit,
     Delayed,
+    NoSpeech,
     Malformed,
     PolishFailure,
 }
@@ -51,6 +52,7 @@ impl FromStr for Scenario {
             "authentication-failure" => Ok(Self::AuthenticationFailure),
             "rate-limit" => Ok(Self::RateLimit),
             "delayed" => Ok(Self::Delayed),
+            "no-speech" => Ok(Self::NoSpeech),
             "malformed" => Ok(Self::Malformed),
             "polish-failure" => Ok(Self::PolishFailure),
             _ => Err(format!("unknown mock scenario: {value}")),
@@ -152,6 +154,9 @@ async fn transcribe(
     if state.scenario == Scenario::Malformed {
         return (StatusCode::OK, "not-json").into_response();
     }
+    if state.scenario == Scenario::NoSpeech {
+        return Json(json!({"text": ""})).into_response();
+    }
     Json(json!({"text": TEST_TRANSCRIPT})).into_response()
 }
 
@@ -247,6 +252,19 @@ async fn realtime_session(socket: WebSocket, state: MockState) {
                 }
                 if state.scenario == Scenario::Malformed {
                     let _ = sender.send(Message::Text("not-json".into())).await;
+                    continue;
+                }
+                if state.scenario == Scenario::NoSpeech {
+                    let _ = sender
+                        .send(Message::Text(
+                            json!({
+                                "type": "conversation.item.input_audio_transcription.completed",
+                                "transcript": ""
+                            })
+                            .to_string()
+                            .into(),
+                        ))
+                        .await;
                     continue;
                 }
                 let _ = sender

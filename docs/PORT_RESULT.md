@@ -44,9 +44,10 @@ request to ready capture afterward.
   Global Shortcuts portal, modifier-only Ctrl+Win in either key order, target
   restoration, and compositor-assisted clipboard paste. Other Wayland
   compositors retain tray controls and explicit failure recovery.
-- The 260×64 HUD shows microphone and processing state without accepting pointer
-  input. If the compositor temporarily activates it, the daemon restores the
-  window captured before the HUD appeared.
+- The waveform-only HUD fits in a transparent 104×46 window and shows microphone
+  level or processing motion without accepting pointer input. If the compositor
+  temporarily activates it, the daemon restores the window captured before the
+  HUD appeared.
 - The user-local installer creates an AppImage installation, desktop entry,
   icon, `freeflow` command, and enabled XDG autostart entry without root access.
 
@@ -83,9 +84,9 @@ cargo test --workspace
 npm test --prefix desktop -- --run
 npm run typecheck --prefix desktop
 npm run build --prefix desktop
-./scripts/test-install-linux.sh
+make linux-test
 make linux-package
-./scripts/install-linux.sh desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage
+make linux-install
 desktop-file-validate ~/.local/share/applications/com.freeflow.FreeFlow.Linux.desktop
 desktop-file-validate ~/.config/autostart/com.freeflow.FreeFlow.Linux.desktop
 ```
@@ -95,7 +96,7 @@ The live API test used the opt-in `FREEFLOW_TEST_OPENAI` and
 
 ## Tests Passing
 
-- 58 Rust tests pass across core, OpenAI, settings, Linux platform, and RPC
+- 61 Rust tests pass across core, OpenAI, settings, Linux platform, and RPC
   crates. One hardware/desktop interaction test remains ignored by default.
 - Clippy passes across every Rust workspace target with warnings denied.
 - Rust formatting passes for the complete workspace.
@@ -107,7 +108,8 @@ The live API test used the opt-in `FREEFLOW_TEST_OPENAI` and
   icon and desktop entries, dmenu discovery, quoting, and hidden autostart.
 - Deterministic OpenAI tests cover realtime partial/final delivery, preserved
   server errors, disconnect and batch fallback, authentication rejection,
-  cancellation, polish, rate limits, delays, and malformed responses.
+  no-speech responses, cancellation, polish, rate limits, delays, and malformed
+  responses.
 
 The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
 
@@ -132,16 +134,18 @@ The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
 - Selected the Razer Kiyo by stable PulseAudio ID, persisted it to the private
   settings file, and captured real RMS data. After startup warm-up, preview
   became ready in roughly 200 ms and a 400 ms preview retained 440 ms of audio.
-- Validated the compact HUD visually during live capture.
+- Validated the 100×42 waveform-only HUD visually during live capture.
+- Held and released Ctrl+Win without speaking and confirmed FreeFlow returned to
+  idle without an error overlay.
 - Validated the installed desktop and autostart entries and confirmed
   `~/.local/bin/freeflow` resolves to the installed AppImage.
 
 ## Packaging Output
 
 - `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 132 MB,
-  SHA-256 `2cd5d2a8365bf24b4b657df217789c94b583153dd44455695b03d6df9924044a`
+  SHA-256 `d2a12c773b37d283c6f4e570b4110c85cb2e9a804855994453d4511d735e0d65`
 - `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 102 MB,
-  SHA-256 `1c197b173f05a373086f1bf2cce7ca659c3fdcc2dd1166aa5cdb4234124c3f3a`
+  SHA-256 `b22785b281faf96e1a9cd28d308d14317946035f1782dda792186b73156d4f8b`
 - `rust/target/release/freeflow-daemon`, bundled into both artifacts
 - `~/.local/share/freeflow/FreeFlow.AppImage`, installed for the current user
 - `~/.local/share/applications/com.freeflow.FreeFlow.Linux.desktop`

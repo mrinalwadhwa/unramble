@@ -212,9 +212,7 @@ impl OpenAIRealtimeSession {
                                 {
                                     let transcript = transcript.trim();
                                     let result = if transcript.is_empty() {
-                                        Err(FreeFlowError::InvalidResponse(
-                                            "realtime transcription was empty".into(),
-                                        ))
+                                        Err(FreeFlowError::SilentAudio)
                                     } else {
                                         Ok(transcript.to_owned())
                                     };

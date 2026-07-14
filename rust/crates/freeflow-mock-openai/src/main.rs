@@ -21,8 +21,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: freeflow-mock-openai [--address 127.0.0.1:8089] \\\n+                     [--scenario success|realtime-disconnect|batch-fallback|\\
-                     authentication-failure|rate-limit|delayed|malformed|polish-failure]"
+                    "Usage: freeflow-mock-openai [--address 127.0.0.1:8089] \
+                     [--scenario success|realtime-disconnect|realtime-error|batch-fallback|\
+                     authentication-failure|rate-limit|delayed|no-speech|malformed|\
+                     polish-failure]"
                 );
                 return Ok(());
             }
