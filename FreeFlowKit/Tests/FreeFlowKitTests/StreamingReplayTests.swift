@@ -59,6 +59,9 @@ struct StreamingReplay {
         let stepBytes = max(1, stepMS * 32)  // 16 kHz mono 16-bit = 32 bytes/ms
         let repeats = max(1, Int(
             readFlag("/tmp/freeflow-replay-repeat") ?? "") ?? 1)
+        // Optional unit-size override, to A/B test the guard-trigger rate.
+        let policy = Double(readFlag("/tmp/freeflow-replay-maxunit-sec") ?? "")
+            .map { LocalUnitPolicy(maximumUnitSeconds: $0) } ?? LocalUnitPolicy()
 
         var wavs = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path))
             ?? []).filter { $0.hasSuffix(".wav") }.sorted()
@@ -102,7 +105,8 @@ struct StreamingReplay {
             // release, so the editor is reconstructed from that single result.
             for run in 0..<repeats {
                 let provider = LocalStreamingProvider(
-                    sttEngine: nemotron, polishChatClient: client)
+                    sttEngine: nemotron, polishChatClient: client,
+                    unitPolicy: policy)
                 let result = try await provider.replay(
                     audio: pcm, stepBytes: stepBytes)
 
