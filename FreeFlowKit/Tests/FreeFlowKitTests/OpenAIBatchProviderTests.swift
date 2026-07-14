@@ -72,10 +72,47 @@ private final class AuthorizationRecorder: @unchecked Sendable {
     }
 }
 
+private final class APIKeyAccessRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reads = 0
+
+    var value: String {
+        lock.withLock {
+            reads += 1
+            return "sk-test"
+        }
+    }
+
+    var readCount: Int {
+        lock.withLock { reads }
+    }
+}
+
+private final class BatchRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: URLRequest?
+
+    func record(_ request: URLRequest) {
+        lock.withLock { self.request = request }
+    }
+
+    var snapshot: URLRequest? {
+        lock.withLock { request }
+    }
+}
+
 // MARK: - Stubbed tests
 
 @Suite("OpenAIBatchProvider – stubbed")
 struct OpenAIBatchProviderStubbedTests {
+
+    @Test("default session bounds the complete transcription resource")
+    func defaultSessionTotalTimeout() {
+        let configuration = OpenAIBatchProvider.defaultSessionConfiguration()
+
+        #expect(configuration.timeoutIntervalForRequest == 60)
+        #expect(configuration.timeoutIntervalForResource == 60)
+    }
 
     @Test("POST to audio/transcriptions endpoint")
     func endpointURL() async throws {
@@ -217,6 +254,59 @@ struct OpenAIBatchProviderStubbedTests {
         await #expect(throws: DictationError.self) {
             try await provider.dictate(audio: Data(), context: AppContext.empty)
         }
+    }
+
+    @Test("24,999,999-byte audio reaches request construction")
+    func audioImmediatelyBelowUploadLimitIsAccepted() async throws {
+        let recorder = BatchRequestRecorder()
+        let session = stubbedSession { request in
+            recorder.record(request)
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, Data(#"{"text":"ok"}"#.utf8))
+        }
+        let provider = OpenAIBatchProvider(
+            apiKey: "sk-test",
+            polishChatClient: nil,
+            session: session)
+
+        _ = try await provider.dictate(
+            audio: Data(count: 24_999_999), context: .empty)
+
+        let request = try #require(recorder.snapshot)
+        #expect(request.httpMethod == "POST")
+        #expect(request.httpBodyStream != nil)
+    }
+
+    @Test("25,000,000-byte audio is rejected before multipart construction or network")
+    func audioAtExclusiveUploadLimitIsRejectedBeforeRequestConstruction() async {
+        let apiKey = APIKeyAccessRecorder()
+        let session = stubbedSession { _ in
+            Issue.record("network should not be called for oversized audio")
+            throw URLError(.badServerResponse)
+        }
+        let provider = OpenAIBatchProvider(
+            apiKey: apiKey.value,
+            polishChatClient: nil,
+            session: session)
+
+        do {
+            _ = try await provider.dictate(
+                audio: Data(count: 25_000_000), context: .empty)
+            Issue.record("expected oversized-audio error")
+        } catch let error as DictationError {
+            #expect(
+                error == .audioTooLarge(
+                    maximumBytes: 24_999_999,
+                    actualBytes: 25_000_000))
+        } catch {
+            Issue.record("wrong error type: \(error)")
+        }
+
+        // The API key is read at the start of request construction, before the
+        // multipart body is allocated. Zero reads proves transcribe was not entered.
+        #expect(apiKey.readCount == 0)
     }
 
     @Test("401 maps to authenticationFailed")

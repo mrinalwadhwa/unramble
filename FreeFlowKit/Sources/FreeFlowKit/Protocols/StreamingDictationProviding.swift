@@ -34,6 +34,14 @@ public protocol StreamingDictationProviding: Sendable {
     /// provider, joins finalization, and recovers from the complete WAV.
     var finishStreamingWatchdog: TimeInterval { get }
 
+    /// Stable upper bound for `finishStreamingWatchdog`, in seconds.
+    ///
+    /// The outer pipeline snapshots this value before provider-owned audio
+    /// forwarding has necessarily drained. Providers whose finish watchdog
+    /// grows with submitted audio must override this property with a bound that
+    /// covers the largest supported session and does not change during it.
+    var maximumFinishStreamingWatchdog: TimeInterval { get }
+
     /// Register a handler to receive intermediate published text for the next
     /// session. Call before `startStreaming`. Passing `nil` clears the handler.
     ///
@@ -88,6 +96,9 @@ public protocol StreamingDictationProviding: Sendable {
 extension StreamingDictationProviding {
 
     public var finishStreamingWatchdog: TimeInterval { 30 }
+    public var maximumFinishStreamingWatchdog: TimeInterval {
+        finishStreamingWatchdog
+    }
 
     public func setChunkHandler(_ handler: (@Sendable (String) async -> Void)?) {}
 }

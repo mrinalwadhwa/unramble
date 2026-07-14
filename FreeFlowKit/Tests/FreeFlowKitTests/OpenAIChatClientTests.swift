@@ -88,6 +88,17 @@ func stubbedSession(handler: @escaping StubHandler) -> URLSession {
     return URLSession(configuration: config)
 }
 
+@Suite("OpenAIChatClient configuration")
+struct OpenAIChatClientConfigurationTests {
+    @Test("default session bounds the complete polish resource")
+    func defaultSessionTotalTimeout() {
+        let configuration = OpenAIChatClient.defaultSessionConfiguration()
+
+        #expect(configuration.timeoutIntervalForRequest == 30)
+        #expect(configuration.timeoutIntervalForResource == 30)
+    }
+}
+
 // MARK: - Request Construction
 
 @Suite("OpenAIChatClient – stubbed")

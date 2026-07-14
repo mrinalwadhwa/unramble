@@ -15,11 +15,31 @@ actor OpenAIRealtimeCommitSession {
         case blocked
     }
 
+    struct EvidenceSnapshot: Codable, Equatable, Sendable {
+        struct Item: Codable, Equatable, Sendable {
+            let sequence: Int
+            let coverageLowerBound: Int
+            let coverageUpperBound: Int
+            let submittedLowerBound: Int
+            let submittedUpperBound: Int
+            let itemID: String
+            let previousItemID: String?
+            let transcript: String
+        }
+
+        let sourceByteCount: Int
+        let items: [Item]
+    }
+
     enum Failure: Error, Equatable {
         case unalignedAudioByteCount(Int)
+        case invalidTrailingSilenceByteCount(
+            byteCount: Int,
+            trailingSilenceByteCount: Int)
         case appendExceedsCommitBoundary(
             available: Int,
             attempted: Int)
+        case hardBoundaryHasContinuation
         case sourceByteCountOverflow
         case captureAlreadySealed
         case polishAlreadyStarted
@@ -41,6 +61,7 @@ actor OpenAIRealtimeCommitSession {
     private var acknowledgedSequences: Set<Int> = []
     private var terminalItemIDs: Set<String> = []
     private var isCaptureSealed = false
+    private var committedAtHardBoundary = false
 
     private var storedFailure: (any Error)?
     private var acknowledgementWaiters:
@@ -127,6 +148,7 @@ actor OpenAIRealtimeCommitSession {
         try requireActiveCapture()
         try requireAligned(requested)
         guard requested > 0 else { return 0 }
+        try rejectContinuationAfterHardBoundary()
         let available = policy.maximumUniqueBytes - (sourceEnd - committedEnd)
         return min(
             requested,
@@ -137,6 +159,9 @@ actor OpenAIRealtimeCommitSession {
     func resampleForAppend(_ pcm16k: Data) throws -> Data {
         try requireActiveCapture()
         try requireAligned(pcm16k.count)
+        if !pcm16k.isEmpty {
+            try rejectContinuationAfterHardBoundary()
+        }
         return audioResampler.append(pcm16k)
     }
 
@@ -150,9 +175,28 @@ actor OpenAIRealtimeCommitSession {
         byteCount: Int,
         containsSpeech: Bool
     ) throws -> Bool {
+        try appendSucceeded(
+            byteCount: byteCount,
+            trailingSilenceByteCount: containsSpeech ? 0 : byteCount)
+    }
+
+    @discardableResult
+    func appendSucceeded(
+        byteCount: Int,
+        trailingSilenceByteCount appendTrailingSilenceBytes: Int
+    ) throws -> Bool {
         try requireActiveCapture()
         try requireAligned(byteCount)
+        guard appendTrailingSilenceBytes >= 0,
+            appendTrailingSilenceBytes <= byteCount
+        else {
+            throw Failure.invalidTrailingSilenceByteCount(
+                byteCount: byteCount,
+                trailingSilenceByteCount: appendTrailingSilenceBytes)
+        }
+        try requireAligned(appendTrailingSilenceBytes)
         guard byteCount > 0 else { return false }
+        try rejectContinuationAfterHardBoundary()
 
         let available = policy.maximumUniqueBytes - (sourceEnd - committedEnd)
         guard byteCount <= available else {
@@ -163,13 +207,14 @@ actor OpenAIRealtimeCommitSession {
         let (newSourceEnd, overflow) = sourceEnd.addingReportingOverflow(byteCount)
         guard !overflow else { throw Failure.sourceByteCountOverflow }
         sourceEnd = newSourceEnd
-        if containsSpeech {
-            trailingSilenceBytes = 0
-        } else {
+        if appendTrailingSilenceBytes == byteCount {
             let (newSilenceBytes, silenceOverflow) =
-                trailingSilenceBytes.addingReportingOverflow(byteCount)
+                trailingSilenceBytes.addingReportingOverflow(
+                    appendTrailingSilenceBytes)
             guard !silenceOverflow else { throw Failure.sourceByteCountOverflow }
             trailingSilenceBytes = newSilenceBytes
+        } else {
+            trailingSilenceBytes = appendTrailingSilenceBytes
         }
         return boundaryIsDue
     }
@@ -177,7 +222,8 @@ actor OpenAIRealtimeCommitSession {
     func prepareCommit(force: Bool) throws -> CommitPreparation {
         try requireActiveCapture()
         guard sourceEnd > committedEnd else { return .noAudio }
-        guard force || boundaryIsDue else { return .noAudio }
+        let boundary = currentBoundary
+        guard force || boundary != nil else { return .noAudio }
         guard canPrepareCommit else { return .blocked }
 
         let coverageRange = committedEnd..<sourceEnd
@@ -188,6 +234,9 @@ actor OpenAIRealtimeCommitSession {
         trailingSilenceBytes = 0
         preparedCommitCount += 1
         pendingAcknowledgementSequence = commit.sequence
+        if boundary == .hardMaximum {
+            committedAtHardBoundary = true
+        }
         return .ready(commit)
     }
 
@@ -327,6 +376,24 @@ actor OpenAIRealtimeCommitSession {
         return try reducer.resolvedItems().map(\.transcript)
     }
 
+    func resolvedEvidenceSnapshot() throws -> EvidenceSnapshot {
+        try requireSessionSuccess()
+        let items = try reducer.resolvedItems()
+        return EvidenceSnapshot(
+            sourceByteCount: sourceEnd,
+            items: items.map { item in
+                EvidenceSnapshot.Item(
+                    sequence: item.commit.sequence,
+                    coverageLowerBound: item.coverageRange.lowerBound,
+                    coverageUpperBound: item.coverageRange.upperBound,
+                    submittedLowerBound: item.submittedRange.lowerBound,
+                    submittedUpperBound: item.submittedRange.upperBound,
+                    itemID: item.itemID,
+                    previousItemID: item.previousItemID,
+                    transcript: item.transcript)
+            })
+    }
+
     func beginPolish() throws {
         try requireSessionSuccess()
         guard resolvedRawTranscript != nil else {
@@ -397,9 +464,20 @@ actor OpenAIRealtimeCommitSession {
     }
 
     private var boundaryIsDue: Bool {
-        policy.shouldCommit(
+        currentBoundary != nil
+    }
+
+    private var currentBoundary: RealtimeCommitPolicy.Boundary? {
+        policy.boundary(
             uniqueByteCount: sourceEnd - committedEnd,
             trailingSilenceByteCount: trailingSilenceBytes)
+    }
+
+    private func rejectContinuationAfterHardBoundary() throws {
+        guard committedAtHardBoundary else { return }
+        let failure = Failure.hardBoundaryHasContinuation
+        invalidate(with: failure)
+        throw failure
     }
 
     private var unresolvedItemCount: Int {

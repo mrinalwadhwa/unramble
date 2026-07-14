@@ -708,6 +708,36 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertEqual(dictation.dictateCallCount, 1)
     }
 
+    func testCustomSilenceThresholdCannotAcceptBelowSharedSpeechFloor() async {
+        let audio = MockAudioProvider()
+        audio.stubbedPeakRMS = 0.0004
+        audio.stubbedAmbientRMS = 0
+        let dictation = MockBatchProvider(stubbedText: "false speech")
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: dictation,
+            textInjector: MockTextInjector(),
+            coordinator: coordinator,
+            silenceThreshold: 0.0001)
+
+        await pipeline.activate()
+        await pipeline.complete()
+
+        XCTAssertEqual(AudioLevelAnalyzer.minimumAcceptedSpeechRMS, 0.0005)
+        XCTAssertEqual(
+            OpenAIStreamingProvider.pauseSilenceThreshold, 0)
+        XCTAssertLessThanOrEqual(
+            OpenAIStreamingProvider.pauseSilenceThreshold,
+            AudioLevelAnalyzer.minimumAcceptedSpeechRMS)
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(
+            dictation.dictateCallCount, 0,
+            "Capture must not accept audio below the Realtime pause classifier floor")
+    }
+
     // MARK: - Adaptive silence threshold
 
     func testAdaptiveThresholdAllowsQuietBuiltInMicSpeech() async {

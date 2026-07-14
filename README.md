@@ -44,7 +44,13 @@ response after key release. If that streaming path fails before delivery,
 FreeFlow recovers through batch transcription and chat polish using the exact
 complete recording.
 
-See [BENCHMARK.md](BENCHMARK.md) for detailed timing breakdowns.
+Long Realtime sessions start continued transcription items only after detected
+pauses. If a defensive hard boundary occurs without a pause and audio
+continues, FreeFlow rejects that candidate and uses the complete recording
+instead of trusting a word cut across independent transcription items.
+
+See [BENCHMARK.md](BENCHMARK.md) for detailed timing, long-dictation evidence,
+and the cloud verification environment.
 
 ## Private
 

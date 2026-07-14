@@ -10,6 +10,9 @@ import Foundation
 /// transcript is returned after regex preprocessing only.
 public struct OpenAIBatchProvider: BatchDictationProviding {
 
+    /// OpenAI requires transcription uploads to be strictly smaller than 25 MB.
+    static let maximumAudioBytes = 24_999_999
+
     private let apiKeyProvider: @Sendable () -> String
     private let model: String
     private let endpoint: URL
@@ -36,10 +39,18 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
         if let session {
             self.session = session
         } else {
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 60
-            self.session = URLSession(configuration: config)
+            self.session = URLSession(
+                configuration: Self.defaultSessionConfiguration())
         }
+    }
+
+    /// Bound both inactivity and total transfer time so the pipeline's cloud
+    /// recovery reserve cannot be consumed indefinitely by a trickling body.
+    static func defaultSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 60
+        return configuration
     }
 
     // MARK: - BatchDictationProviding
@@ -47,6 +58,11 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
     public func dictate(audio: Data, context: AppContext) async throws -> String {
         guard !audio.isEmpty else {
             throw DictationError.emptyAudio
+        }
+        guard audio.count <= Self.maximumAudioBytes else {
+            throw DictationError.audioTooLarge(
+                maximumBytes: Self.maximumAudioBytes,
+                actualBytes: audio.count)
         }
 
         let rawTranscript = try await transcribe(audio: audio)

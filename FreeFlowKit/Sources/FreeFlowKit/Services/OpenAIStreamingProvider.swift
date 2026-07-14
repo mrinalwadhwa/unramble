@@ -34,11 +34,43 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     /// Realtime model used by the production composition root.
     public static let defaultRealtimeModel = "gpt-realtime-2.1"
 
+    /// The app supports 300 seconds of cloud capture. The finish-watchdog bound
+    /// budgets another ten accounting seconds for queued forwarding and the
+    /// cumulative sample-rounding overhead of independently resampled items.
+    /// This cushion is not a longer supported recording or an admission fence.
+    static let finishWatchdogBoundSourceSeconds: TimeInterval = 310
+    static let finishWatchdogBoundWireAudioBytes =
+        Int(finishWatchdogBoundSourceSeconds * 48_000)
+
+    /// Only exact digital silence can authorize a continued Realtime item.
+    /// Any positive threshold can misclassify low-amplitude speech after an
+    /// earlier loud peak; under-counting pauses only delays finalization.
+    static let pauseSilenceThreshold: Float = 0
+
+    private static let multiCommitPolishFidelityInstructions = """
+        The polishing input is the complete ordered transcript assembled from one or more \
+        committed audio items. Preserve every dictated semantic statement and \
+        discourse-framing phrase in its original order. Never delete or summarize a \
+        complete sentence or clause merely because it sounds conversational, \
+        introductory, or redundant. For example, "Just circling back on this" is \
+        dictated content and must be preserved. Cleanup may still remove non-semantic \
+        filler sounds, explicit self-corrections or restarts, and accidental repetitions \
+        under the rules above.
+        """
+
     private let apiKeyProvider: @Sendable () -> String
     private let realtimeModel: String
     private let sttModel: String
     private let commitPolicy: RealtimeCommitPolicy
     private let maxUnresolvedItems: Int
+    typealias EvidenceObserver = @Sendable (
+        OpenAIRealtimeCommitSession.EvidenceSnapshot
+    ) async -> Void
+    struct RealtimeFinishResult: Sendable {
+        let response: String
+        let evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot
+    }
+    private let evidenceObserver: EvidenceObserver?
     private let serverEventTimeout: TimeInterval = 60
 
     // MARK: - State (guarded by lock)
@@ -122,19 +154,37 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     // MARK: - Init
 
-    public init(
+    public convenience init(
         apiKey: @autoclosure @escaping @Sendable () -> String,
         realtimeModel: String = OpenAIStreamingProvider.defaultRealtimeModel,
         sttModel: String = "gpt-4o-mini-transcribe",
         commitPolicy: RealtimeCommitPolicy = RealtimeCommitPolicy(),
         maxUnresolvedItems: Int = 2
     ) {
+        self.init(
+            apiKeyProvider: apiKey,
+            realtimeModel: realtimeModel,
+            sttModel: sttModel,
+            commitPolicy: commitPolicy,
+            maxUnresolvedItems: maxUnresolvedItems,
+            evidenceObserver: nil)
+    }
+
+    init(
+        apiKeyProvider: @escaping @Sendable () -> String,
+        realtimeModel: String,
+        sttModel: String,
+        commitPolicy: RealtimeCommitPolicy,
+        maxUnresolvedItems: Int,
+        evidenceObserver: EvidenceObserver?
+    ) {
         precondition(maxUnresolvedItems > 0)
-        self.apiKeyProvider = apiKey
+        self.apiKeyProvider = apiKeyProvider
         self.realtimeModel = realtimeModel
         self.sttModel = sttModel
         self.commitPolicy = commitPolicy
         self.maxUnresolvedItems = maxUnresolvedItems
+        self.evidenceObserver = evidenceObserver
     }
 
     deinit {
@@ -370,9 +420,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             self.currentTiming?.audioBytesSent ?? 0
         }
         let transcriptTimeout = Self.transcriptTimeout(forAudioBytes: bytesSent)
-        let responseText: String
+        let finishResult: RealtimeFinishResult
         do {
-            responseText = try await Self.withRealtimeSessionTimeout(
+            finishResult = try await Self.withRealtimeSessionTimeout(
                 seconds: transcriptTimeout,
                 waitingFor: "complete Realtime transcript and polish",
                 session: commitSession,
@@ -380,7 +430,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     task.cancel(with: .abnormalClosure, reason: nil)
                 },
                 operation: { [self] in
-                    try await Self.finishRealtimeSession(
+                    try await Self.finishRealtimeSessionResult(
                         session: commitSession,
                         send: { try await task.send(.string($0)) },
                         onAppendSent: { [self] _, submittedBytes in
@@ -410,7 +460,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         doneReader?.cancel()
         warmBackup()
 
-        let polished = responseText.trimmingCharacters(
+        do {
+            try await Self.notifyEvidenceObserver(
+                evidenceObserver,
+                evidence: finishResult.evidence)
+        } catch {
+            throw await fail(error)
+        }
+
+        let polished = finishResult.response.trimmingCharacters(
             in: .whitespacesAndNewlines)
         if polished.isEmpty {
             lock.withLock {
@@ -437,6 +495,11 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         // Let the provider's semantic timeout win under normal conditions,
         // while preserving time for whole-WAV recovery below the pipeline cap.
         return min(295, Self.transcriptTimeout(forAudioBytes: bytesSent) + 5)
+    }
+
+    public var maximumFinishStreamingWatchdog: TimeInterval {
+        Self.transcriptTimeout(
+            forAudioBytes: Self.finishWatchdogBoundWireAudioBytes) + 5
     }
 
     public func cancelStreaming() async {
@@ -786,10 +849,13 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             transcription["language"] = language
         }
 
+        let polishInstructions =
+            PolishPipeline.buildCloudSystemPrompt(
+                context: context, language: language)
+            + "\n\n" + multiCommitPolishFidelityInstructions
         let session: [String: Any] = [
             "type": "realtime",
-            "instructions": PolishPipeline.buildCloudSystemPrompt(
-                context: context, language: language),
+            "instructions": polishInstructions,
             "reasoning": ["effort": "minimal"],
             "audio": [
                 "input": [
@@ -1218,11 +1284,13 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                         eventID: eventID()))
                 try Task.checkCancellation()
                 onAppendSent?(appendCount, pcm24k.count)
-                let containsSpeech = AudioLevelAnalyzer.rmsLevel(pcm16: source)
-                    > 0.005
+                let trailingSilenceByteCount =
+                    AudioLevelAnalyzer.trailingSilenceByteCount(
+                        pcm16: source,
+                        threshold: pauseSilenceThreshold)
                 let shouldCommit = try await session.appendSucceeded(
                     byteCount: appendCount,
-                    containsSpeech: containsSpeech)
+                    trailingSilenceByteCount: trailingSilenceByteCount)
                 offset += appendCount
 
                 if shouldCommit {
@@ -1250,8 +1318,36 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         send: @escaping @Sendable (String) async throws -> Void,
         eventID: @escaping @Sendable () -> String = { UUID().uuidString },
         onAppendSent: (@Sendable (Int, Int) -> Void)? = nil,
-        onCommitSent: (@Sendable () -> Void)? = nil
+        onCommitSent: (@Sendable () -> Void)? = nil,
+        onEvidence: EvidenceObserver? = nil
     ) async throws -> String {
+        let result = try await finishRealtimeSessionResult(
+            session: session,
+            send: send,
+            eventID: eventID,
+            onAppendSent: onAppendSent,
+            onCommitSent: onCommitSent)
+        try await notifyEvidenceObserver(onEvidence, evidence: result.evidence)
+        return result.response
+    }
+
+    private static func notifyEvidenceObserver(
+        _ observer: EvidenceObserver?,
+        evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot
+    ) async throws {
+        if let observer {
+            await observer(evidence)
+        }
+        try Task.checkCancellation()
+    }
+
+    static func finishRealtimeSessionResult(
+        session: OpenAIRealtimeCommitSession,
+        send: @escaping @Sendable (String) async throws -> Void,
+        eventID: @escaping @Sendable () -> String = { UUID().uuidString },
+        onAppendSent: (@Sendable (Int, Int) -> Void)? = nil,
+        onCommitSent: (@Sendable () -> Void)? = nil
+    ) async throws -> RealtimeFinishResult {
         var ownsTransportTurn = false
         do {
             try await session.acquireTransportTurn()
@@ -1266,9 +1362,12 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 onCommitSent: onCommitSent)
             try await session.sealCapture()
             let transcript = try await session.waitForRawTranscript()
+            let evidence = try await session.resolvedEvidenceSnapshot()
             if transcript.isEmpty {
                 await session.releaseTransportTurn()
-                return ""
+                return RealtimeFinishResult(
+                    response: "",
+                    evidence: evidence)
             }
 
             try await session.beginPolish()
@@ -1279,7 +1378,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             try await send(buildResponseCreate(eventID: eventID()))
             let response = try await session.waitForPolishedResponse()
             await session.releaseTransportTurn()
-            return response
+            return RealtimeFinishResult(
+                response: response,
+                evidence: evidence)
         } catch {
             await session.fail(error)
             if ownsTransportTurn {

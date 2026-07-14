@@ -72,10 +72,11 @@ struct OpenAIRealtimeMessageTests {
         // turn_detection must be NSNull so the server does not auto-commit.
         #expect(input["turn_detection"] is NSNull)
 
+        let instructions = try #require(session["instructions"] as? String)
         #expect(
-            session["instructions"] as? String
-                == PolishPipeline.buildCloudSystemPrompt(
-                    context: context, language: "en"))
+            instructions.hasPrefix(
+                PolishPipeline.buildCloudSystemPrompt(
+                    context: context, language: "en")))
         let reasoning = try #require(session["reasoning"] as? [String: Any])
         #expect(reasoning["effort"] as? String == "minimal")
     }
@@ -104,6 +105,22 @@ struct OpenAIRealtimeMessageTests {
         let session = obj["session"] as! [String: Any]
         let instructions = try #require(session["instructions"] as? String)
         #expect(instructions.contains("Preceding text: Thanks for sending the draft."))
+    }
+
+    @Test("session.update preserves semantic discourse across committed items")
+    func sessionUpdatePreservesCommittedDiscourse() throws {
+        let json = OpenAIStreamingProvider.buildSessionUpdate(
+            sttModel: "m", language: "en", context: .empty)
+        let obj = try #require(
+            try JSONSerialization.jsonObject(
+                with: json.data(using: .utf8)!) as? [String: Any])
+        let session = try #require(obj["session"] as? [String: Any])
+        let instructions = try #require(session["instructions"] as? String)
+
+        #expect(instructions.contains("complete ordered transcript"))
+        #expect(instructions.contains("Never delete or summarize a complete sentence or clause"))
+        #expect(instructions.contains("Just circling back on this"))
+        #expect(instructions.contains("explicit self-corrections or restarts"))
     }
 
     @Test("polish request preserves the transcript exactly")
@@ -270,6 +287,30 @@ struct OpenAIRealtimeSessionSummaryTests {
 
 @Suite("OpenAIStreamingProvider – transcript timeout")
 struct OpenAIRealtimeTranscriptTimeoutTests {
+
+    @Test("maximum finish watchdog covers supported capture plus accounting cushion")
+    func maximumFinishWatchdog() {
+        let provider = OpenAIStreamingProvider(apiKey: "sk-test")
+        let watchdogBoundWireBytes =
+            OpenAIStreamingProvider.finishWatchdogBoundWireAudioBytes
+        let supportedSourceSamples = 300 * 16_000
+        let firstItemSamples = 190 * 16_000 + 1
+        let secondItemSamples = supportedSourceSamples - firstItemSamples
+        let supportedWireBytesWithPerItemRounding =
+            ((firstItemSamples * 3 + 1) / 2
+                + (secondItemSamples * 3 + 1) / 2) * 2
+        let requiredWatchdog = OpenAIStreamingProvider.transcriptTimeout(
+            forAudioBytes: watchdogBoundWireBytes) + 5
+
+        #expect(supportedWireBytesWithPerItemRounding == 300 * 48_000 + 2)
+        #expect(
+            watchdogBoundWireBytes > supportedWireBytesWithPerItemRounding)
+        #expect(OpenAIStreamingProvider.finishWatchdogBoundSourceSeconds == 310)
+        #expect(watchdogBoundWireBytes == 310 * 48_000)
+        #expect(requiredWatchdog == 175)
+        #expect(provider.finishStreamingWatchdog == 20)
+        #expect(provider.maximumFinishStreamingWatchdog == requiredWatchdog)
+    }
 
     @Test("zero bytes uses the 15 s floor")
     func zeroBytes() {

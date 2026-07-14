@@ -73,7 +73,7 @@ public actor DictationPipeline: PipelineProviding {
 
     /// Absolute floor for the adaptive threshold. Even with zero
     /// measured ambient noise, reject audio below this level.
-    private let minimumAdaptiveThreshold: Float = 0.0005
+    private let minimumAdaptiveThreshold = AudioLevelAnalyzer.minimumAcceptedSpeechRMS
 
     /// Ceiling for the adaptive threshold. AirPods noise cancellation
     /// can produce variable ambient RMS (0.002–0.015) depending on
@@ -104,6 +104,13 @@ public actor DictationPipeline: PipelineProviding {
     /// Shared barrier for overlapping cancel and retirement requests.
     private var cancellationDrain: CancellationDrain?
 
+    /// Invalidate completion operations that suspended before cancellation.
+    private var cancellationGeneration: UInt64 = 0
+
+    /// Completion owners may still mutate session state after cancellation.
+    private var completionOwnerCount = 0
+    private var completionOwnerWaiters: [CheckedContinuation<Void, Never>] = []
+
     /// Whether the current recording session is using streaming mode.
     private var isStreamingSession: Bool = false
 
@@ -131,6 +138,17 @@ public actor DictationPipeline: PipelineProviding {
     /// instead of attempting the cloud batch fallback.
     private let localMode: Bool
 
+    /// Cloud recordings finalize at this wall-clock limit so the complete WAV
+    /// remains inside the supported batch-recovery envelope.
+    private let cloudRecordingLimit: Duration
+    private let cloudRecordingLimitSleep: @Sendable (Duration) async -> Void
+    private let cloudRecordingLimitDidClaim: @Sendable () async -> Void
+    private let completionWillHandoff: @Sendable () async -> Void
+    private let activationDidBeginWaitingForCompletion: @Sendable () -> Void
+    private var cloudRecordingLimitID: UUID?
+    private var cloudRecordingLimitClaimedID: UUID?
+    private var cloudRecordingLimitTask: Task<Void, Never>?
+
     /// A retired pipeline cannot accept work after composition replacement.
     private var isRetired = false
 
@@ -157,6 +175,43 @@ public actor DictationPipeline: PipelineProviding {
         micDiagnosticStore: MicDiagnosticStore? = nil,
         localMode: Bool = false
     ) {
+        self.init(
+            audioProvider: audioProvider,
+            contextProvider: contextProvider,
+            batchProvider: batchProvider,
+            textInjector: textInjector,
+            coordinator: coordinator,
+            transcriptBuffer: transcriptBuffer,
+            silenceThreshold: silenceThreshold,
+            streamingProvider: streamingProvider,
+            onSessionExpired: onSessionExpired,
+            micDiagnosticStore: micDiagnosticStore,
+            localMode: localMode,
+            cloudRecordingLimit: .seconds(300),
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            cloudRecordingLimitDidClaim: {})
+    }
+
+    init(
+        audioProvider: AudioProviding,
+        contextProvider: AppContextProviding,
+        batchProvider: BatchDictationProviding? = nil,
+        textInjector: TextInjecting,
+        coordinator: RecordingCoordinator,
+        transcriptBuffer: TranscriptBuffer? = nil,
+        silenceThreshold: Float = 0.005,
+        streamingProvider: StreamingDictationProviding? = nil,
+        onSessionExpired: (@Sendable () -> Void)? = nil,
+        micDiagnosticStore: MicDiagnosticStore? = nil,
+        localMode: Bool = false,
+        cloudRecordingLimit: Duration = .seconds(300),
+        cloudRecordingLimitSleep: @escaping @Sendable (Duration) async -> Void,
+        cloudRecordingLimitDidClaim: @escaping @Sendable () async -> Void = {},
+        completionWillHandoff: @escaping @Sendable () async -> Void = {},
+        activationDidBeginWaitingForCompletion: @escaping @Sendable () -> Void = {}
+    ) {
         self.audioProvider = audioProvider
         self.contextProvider = contextProvider
         self.batchProvider = batchProvider
@@ -168,6 +223,12 @@ public actor DictationPipeline: PipelineProviding {
         self.onSessionExpired = onSessionExpired
         self.localMode = localMode
         self.micDiagnosticStore = micDiagnosticStore
+        self.cloudRecordingLimit = cloudRecordingLimit
+        self.cloudRecordingLimitSleep = cloudRecordingLimitSleep
+        self.cloudRecordingLimitDidClaim = cloudRecordingLimitDidClaim
+        self.completionWillHandoff = completionWillHandoff
+        self.activationDidBeginWaitingForCompletion =
+            activationDidBeginWaitingForCompletion
     }
 
     /// Compute the effective silence threshold for the current session.
@@ -195,7 +256,7 @@ public actor DictationPipeline: PipelineProviding {
             let raw = ambient * ambientMultiplier
             return min(max(raw, minimumAdaptiveThreshold), maximumAdaptiveThreshold)
         }
-        return silenceThreshold
+        return max(silenceThreshold, minimumAdaptiveThreshold)
     }
 
     private func beginOperation() -> Bool {
@@ -219,6 +280,91 @@ public actor DictationPipeline: PipelineProviding {
         }
     }
 
+    private func beginCompletionOwnership() {
+        completionOwnerCount += 1
+    }
+
+    private func endCompletionOwnership() {
+        completionOwnerCount -= 1
+        guard completionOwnerCount == 0 else { return }
+        let waiters = completionOwnerWaiters
+        completionOwnerWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    private func waitForCompletionOwners() async {
+        guard completionOwnerCount > 0 else { return }
+        await withCheckedContinuation { continuation in
+            completionOwnerWaiters.append(continuation)
+            activationDidBeginWaitingForCompletion()
+        }
+    }
+
+    private func armCloudRecordingLimit() {
+        guard !localMode else { return }
+
+        cancelPendingCloudRecordingLimit()
+        guard cloudRecordingLimitClaimedID == nil else { return }
+        let id = UUID()
+        let limit = cloudRecordingLimit
+        let sleep = cloudRecordingLimitSleep
+        cloudRecordingLimitID = id
+        cloudRecordingLimitTask = Task { [weak self] in
+            await sleep(limit)
+            guard !Task.isCancelled else { return }
+            await self?.completeCloudRecordingAtLimit(id: id)
+        }
+    }
+
+    /// Cancel a timer that has not started automatic completion. A physical key
+    /// release can race the limit callback after it has claimed the recording;
+    /// in that case the claimed task must remain alive to publish the result.
+    private func cancelPendingCloudRecordingLimit() {
+        guard cloudRecordingLimitID != nil else { return }
+        cloudRecordingLimitID = nil
+        cloudRecordingLimitTask?.cancel()
+        cloudRecordingLimitTask = nil
+    }
+
+    /// Cancel every recording-limit phase for explicit cancellation or
+    /// retirement. Return a claimed completion so teardown can drain it before a
+    /// replacement recording is allowed to start.
+    private func takeClaimedCloudRecordingLimitForCancellation()
+        -> Task<Void, Never>?
+    {
+        let claimedTask = cloudRecordingLimitClaimedID == nil
+            ? nil
+            : cloudRecordingLimitTask
+        cloudRecordingLimitID = nil
+        cloudRecordingLimitClaimedID = nil
+        cloudRecordingLimitTask?.cancel()
+        cloudRecordingLimitTask = nil
+        return claimedTask
+    }
+
+    private func completeCloudRecordingAtLimit(id: UUID) async {
+        guard cloudRecordingLimitID == id else { return }
+        cloudRecordingLimitID = nil
+        cloudRecordingLimitClaimedID = id
+        defer {
+            if cloudRecordingLimitClaimedID == id {
+                cloudRecordingLimitClaimedID = nil
+                cloudRecordingLimitTask = nil
+            }
+        }
+        await cloudRecordingLimitDidClaim()
+        guard !Task.isCancelled else { return }
+        Log.debug("[Pipeline] Cloud recording limit reached; completing full capture")
+        await complete()
+    }
+
+    private func waitForClaimedCloudRecordingLimit() async {
+        guard cloudRecordingLimitClaimedID != nil,
+            let claimedTask = cloudRecordingLimitTask
+        else { return }
+        await claimedTask.value
+    }
+
     // MARK: - PipelineProviding
 
     public var state: RecordingState {
@@ -233,6 +379,10 @@ public actor DictationPipeline: PipelineProviding {
             return
         }
         defer { endOperation() }
+        // A completion owner can keep mutating session state after cancellation
+        // resets the coordinator. Do not let a replacement recording overlap it.
+        await waitForClaimedCloudRecordingLimit()
+        await waitForCompletionOwners()
         let t0 = CFAbsoluteTimeGetCurrent()
         let currentState = await coordinator.state
         guard !isRetired, currentState == .idle else {
@@ -254,6 +404,7 @@ public actor DictationPipeline: PipelineProviding {
 
         recordingStartedAt = Date()
         audioSetupFailed = false
+        armCloudRecordingLimit()
 
         // State is now .recording — return immediately so the HUD can animate.
         // Audio setup runs in a detached task so it does not execute on the
@@ -499,19 +650,39 @@ public actor DictationPipeline: PipelineProviding {
             Log.debug("[Pipeline] complete() ignored - pipeline is retired")
             return
         }
-        defer { endOperation() }
+        beginCompletionOwnership()
+        defer {
+            endCompletionOwnership()
+            endOperation()
+        }
+        let completionGeneration = cancellationGeneration
+        cancelPendingCloudRecordingLimit()
+        if await abortCompletionIfCancelledOrRetired(
+            completionGeneration: completionGeneration
+        ) {
+            return
+        }
         let completeEnteredAt = CFAbsoluteTimeGetCurrent()
         Log.debug("[Pipeline] complete() entering")
         let currentState = await coordinator.state
-        guard !isRetired, currentState == .recording else {
+        if await abortCompletionIfCancelledOrRetired(
+            completionGeneration: completionGeneration
+        ) {
+            return
+        }
+        guard currentState == .recording else {
             Log.debug("[Pipeline] complete() ignored — state is \(currentState)")
             return
         }
 
         Log.debug("[Pipeline] complete() transitioning to processing")
         let stopped = await coordinator.stopRecording()
+        if await abortCompletionIfCancelledOrRetired(
+            completionGeneration: completionGeneration
+        ) {
+            return
+        }
         guard stopped else { return }
-        guard !isRetired else { return }
 
         // If audio setup is still in progress, give it a short window
         // to finish (covers the normal 500-900ms AVAudioEngine start).
@@ -652,6 +823,13 @@ public actor DictationPipeline: PipelineProviding {
             audioSetupTask = nil
         }
 
+        await completionWillHandoff()
+        if await abortCompletionIfCancelledOrRetired(
+            completionGeneration: completionGeneration
+        ) {
+            return
+        }
+
         // If audio setup failed (e.g. BT negotiation timeout), there
         // is no audio to transcribe. Reset and return immediately.
         if audioSetupFailed {
@@ -663,7 +841,6 @@ public actor DictationPipeline: PipelineProviding {
             return
         }
 
-        guard !isRetired else { return }
         let useStreaming = isStreamingSession
         let forwardingOperation = audioForwardingOperation
         audioForwardingOperation = nil
@@ -886,8 +1063,15 @@ public actor DictationPipeline: PipelineProviding {
         // a valid transcript instead of injecting it.
         let recordingDuration =
             recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let requiresCloudBatchWindow = !localMode && batchProvider != nil
+        let cloudStreamingProvider =
+            requiresCloudBatchWindow && useStreaming
+            ? streamingProvider
+            : nil
         let deadline = Self.pipelineDeadline(
-            forRecordingDuration: recordingDuration)
+            forRecordingDuration: recordingDuration,
+            cloudStreamingProvider: cloudStreamingProvider,
+            requiresCloudBatchWindow: requiresCloudBatchWindow)
         let pipelineDone = await Self.waitForCompletion(
             pipelineCompletion,
             timeout: .seconds(deadline))
@@ -929,15 +1113,54 @@ public actor DictationPipeline: PipelineProviding {
         self.recordingStartedAt = nil
     }
 
-    /// Compute the hard deadline for a pipeline task given how long the
-    /// user held the hotkey. The budget is
-    /// `max(30, recordingDuration + 45)` capped at 300 s. Short dictations
-    /// fast-fail on hangs within 45 s; long ones get a proportional
-    /// post-audio window for transcription tail, polish, and injection.
+    private func abortCompletionIfCancelledOrRetired(
+        completionGeneration: UInt64
+    ) async -> Bool {
+        guard cancellationGeneration == completionGeneration,
+            cancellationDrain == nil
+        else { return true }
+        guard Task.isCancelled || isRetired else { return false }
+        cancellationGeneration &+= 1
+        await cancelAndDrain()
+        return true
+    }
+
+    /// Time reserved after Realtime finalization for full-file transcription,
+    /// optional batch polish, injection, and teardown. The underlying network
+    /// clients use 60- and 30-second request timeouts; ten seconds covers the
+    /// surrounding pipeline work.
+    static let cloudBatchRecoveryReserve: TimeInterval = 100
+
+    /// Compute the hard deadline for a pipeline task given how long the user
+    /// held the hotkey. The base budget is `recordingDuration + 45`, capped at
+    /// 300 seconds. A cloud path with batch recovery also reserves the complete
+    /// fallback window after the streaming provider's stable maximum finish
+    /// watchdog. The five-minute product limit keeps that composed budget below
+    /// the 300-second ceiling.
     static func pipelineDeadline(
-        forRecordingDuration duration: TimeInterval
+        forRecordingDuration duration: TimeInterval,
+        cloudStreamingProvider: StreamingDictationProviding?,
+        requiresCloudBatchWindow: Bool
     ) -> TimeInterval {
-        let budget = duration + 45.0
+        pipelineDeadline(
+            forRecordingDuration: duration,
+            cloudStreamingMaximumFinishWatchdog:
+                cloudStreamingProvider?.maximumFinishStreamingWatchdog,
+            requiresCloudBatchWindow: requiresCloudBatchWindow)
+    }
+
+    static func pipelineDeadline(
+        forRecordingDuration duration: TimeInterval,
+        cloudStreamingMaximumFinishWatchdog: TimeInterval? = nil,
+        requiresCloudBatchWindow: Bool = false
+    ) -> TimeInterval {
+        var budget = max(30.0, duration + 45.0)
+        if requiresCloudBatchWindow {
+            budget = max(
+                budget,
+                max(0, cloudStreamingMaximumFinishWatchdog ?? 0)
+                    + cloudBatchRecoveryReserve)
+        }
         return min(300.0, max(30.0, budget))
     }
 
@@ -971,6 +1194,7 @@ public actor DictationPipeline: PipelineProviding {
     }
 
     public func cancel() async {
+        cancellationGeneration &+= 1
         await cancelAndDrain()
     }
 
@@ -998,6 +1222,8 @@ public actor DictationPipeline: PipelineProviding {
     }
 
     private func performCancellationDrain() async {
+        let runningCloudRecordingLimitTask =
+            takeClaimedCloudRecordingLimitForCancellation()
         let runningPipelineTask = pipelineTask
         pipelineTask = nil
         let runningContextTask = pendingContext
@@ -1041,6 +1267,7 @@ public actor DictationPipeline: PipelineProviding {
         await runningSetupTask?.value
         await runningPipelineTask?.value
         _ = await runningContextTask?.value
+        await runningCloudRecordingLimitTask?.value
 
         // Setup can publish a forwarding operation after cancellation if it was
         // inside a non-cancellable engine load. Capture and drain that operation,
@@ -1072,6 +1299,7 @@ public actor DictationPipeline: PipelineProviding {
     /// invisible old recording cannot continue while Qwen cancellation drains.
     public func beginRetirement() {
         isRetired = true
+        cancellationGeneration &+= 1
         _ = startCancellationDrain()
     }
 

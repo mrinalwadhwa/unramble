@@ -5,6 +5,11 @@ import Foundation
 /// buffering, and scheduler delays cannot change source coverage.
 public struct RealtimeCommitPolicy: Equatable, Sendable {
 
+    enum Boundary: Equatable, Sendable {
+        case trailingSilence
+        case hardMaximum
+    }
+
     static let sourceBytesPerSecond = 16_000 * MemoryLayout<Int16>.size
 
     /// A 7 MiB source slice becomes at most 10.5 MiB of 24 kHz PCM and
@@ -18,7 +23,7 @@ public struct RealtimeCommitPolicy: Equatable, Sendable {
     let trailingSilenceBytesRequired: Int
 
     public init(
-        maxChunkSeconds: TimeInterval = 300,
+        maxChunkSeconds: TimeInterval = 310,
         minSilenceCommitSeconds: TimeInterval = 180,
         requiredSilenceSeconds: TimeInterval = 10
     ) {
@@ -50,11 +55,26 @@ public struct RealtimeCommitPolicy: Equatable, Sendable {
         uniqueByteCount: Int,
         trailingSilenceByteCount: Int
     ) -> Bool {
-        if uniqueByteCount >= maximumUniqueBytes {
-            return true
+        boundary(
+            uniqueByteCount: uniqueByteCount,
+            trailingSilenceByteCount: trailingSilenceByteCount) != nil
+    }
+
+    func boundary(
+        uniqueByteCount: Int,
+        trailingSilenceByteCount: Int
+    ) -> Boundary? {
+        // Silence takes precedence at an exact tie. The acoustic pause makes a
+        // later item safe; a non-silence hard cut does not.
+        if uniqueByteCount >= minimumUniqueBytesBeforeSilence,
+            trailingSilenceByteCount >= trailingSilenceBytesRequired
+        {
+            return .trailingSilence
         }
-        return uniqueByteCount >= minimumUniqueBytesBeforeSilence
-            && trailingSilenceByteCount >= trailingSilenceBytesRequired
+        if uniqueByteCount >= maximumUniqueBytes {
+            return .hardMaximum
+        }
+        return nil
     }
 
     private static func alignedByteCount(_ seconds: TimeInterval) -> Int {

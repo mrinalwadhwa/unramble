@@ -61,9 +61,14 @@ final class AudioPipelineTests: XCTestCase {
                 continue
             }
 
-            // Load WAV and extract PCM.
+            // Parse RIFF chunks instead of assuming PCM begins at byte 44.
             let wavData = try Data(contentsOf: wavPath)
-            guard wavData.count > 44 else {
+            let fixture = try WAVFixture(data: wavData)
+            guard fixture.sampleRate == 16_000,
+                fixture.channels == 1,
+                fixture.bitsPerSample == 16
+            else {
+                XCTFail("Unsupported audio fixture format: \(wavPath.lastPathComponent)")
                 skipped += 1
                 continue
             }
@@ -73,13 +78,13 @@ final class AudioPipelineTests: XCTestCase {
             audio.enablePCMStream = true
             audio.stubbedPeakRMS = 0.05  // above silence threshold
 
-            // Set up a buffer with the WAV data for batch fallback.
-            let duration = Double(wavData.count - 44) / (2 * 16000)  // 16kHz 16-bit mono
+            // Canonicalize the WAV used by batch fallback so it contains the
+            // exact same PCM bytes that the streaming path receives.
             audio.stubbedBuffer = AudioBuffer(
-                data: wavData,
-                duration: duration,
-                sampleRate: 16000,
-                channels: 1
+                data: fixture.canonicalWAV,
+                duration: fixture.duration,
+                sampleRate: fixture.sampleRate,
+                channels: fixture.channels
             )
 
             // Capture injected text.
@@ -98,8 +103,8 @@ final class AudioPipelineTests: XCTestCase {
             // Activate and feed audio.
             await pipeline.activate()
 
-            // Feed PCM chunks (skip WAV header, 4096-byte chunks).
-            let pcm = wavData.subdata(in: 44..<wavData.count)
+            // Feed the parsed PCM payload in 4096-byte chunks.
+            let pcm = fixture.pcm
             let chunkSize = 4096
             var offset = 0
             while offset < pcm.count {

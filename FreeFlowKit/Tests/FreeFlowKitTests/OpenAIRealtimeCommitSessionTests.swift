@@ -72,7 +72,7 @@ struct OpenAIRealtimeCommitSessionTests {
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: maximumUniqueBytes,
                 minimumUniqueBytesBeforeSilence: maximumUniqueBytes,
-                trailingSilenceBytesRequired: 2),
+                trailingSilenceBytesRequired: 0),
             maxUnresolvedItems: maxUnresolvedItems)
     }
 
@@ -89,7 +89,7 @@ struct OpenAIRealtimeCommitSessionTests {
             #expect(count > 0)
             let shouldCommit = try await session.appendSucceeded(
                 byteCount: count,
-                containsSpeech: true)
+                containsSpeech: false)
             offset += count
 
             if shouldCommit {
@@ -127,7 +127,11 @@ struct OpenAIRealtimeCommitSessionTests {
 
     @Test("finishing on a committed boundary creates no empty commit")
     func exactBoundaryFinish() async throws {
-        let session = makeSession()
+        let session = OpenAIRealtimeCommitSession(
+            policy: RealtimeCommitPolicy(
+                maximumUniqueBytes: 8,
+                minimumUniqueBytesBeforeSilence: 8,
+                trailingSilenceBytesRequired: 2))
         _ = try await session.appendSucceeded(
             byteCount: 8,
             containsSpeech: true)
@@ -143,6 +147,37 @@ struct OpenAIRealtimeCommitSessionTests {
         #expect(try await session.waitForRawTranscript() == "segment-0")
     }
 
+    @Test("source after a non-silence hard boundary invalidates the candidate")
+    func hardBoundaryContinuationFails() async throws {
+        let session = OpenAIRealtimeCommitSession(
+            policy: RealtimeCommitPolicy(
+                maximumUniqueBytes: 8,
+                minimumUniqueBytesBeforeSilence: 8,
+                trailingSilenceBytesRequired: 2))
+        _ = try await session.appendSucceeded(
+            byteCount: 8,
+            containsSpeech: true)
+        let commit = try #require(
+            try await session.prepareCommit(force: false).commit)
+        try await acknowledgeAndComplete(
+            commit,
+            session: session,
+            previousItemID: nil)
+
+        await #expect(
+            throws: OpenAIRealtimeCommitSession.Failure
+                .hardBoundaryHasContinuation
+        ) {
+            _ = try await session.maximumAppendByteCount(requested: 2)
+        }
+        await #expect(
+            throws: OpenAIRealtimeCommitSession.Failure
+                .hardBoundaryHasContinuation
+        ) {
+            try await session.sealCapture()
+        }
+    }
+
     @Test("odd PCM byte counts fail explicitly")
     func rejectsUnalignedPCM() async {
         let session = makeSession()
@@ -152,6 +187,21 @@ struct OpenAIRealtimeCommitSessionTests {
             _ = try await session.appendSucceeded(
                 byteCount: 3,
                 containsSpeech: true)
+        }
+    }
+
+    @Test("negative trailing silence fails explicitly")
+    func rejectsNegativeTrailingSilence() async {
+        let session = makeSession()
+        await #expect(
+            throws: OpenAIRealtimeCommitSession.Failure
+                .invalidTrailingSilenceByteCount(
+                    byteCount: 8,
+                    trailingSilenceByteCount: -2)
+        ) {
+            _ = try await session.appendSucceeded(
+                byteCount: 8,
+                trailingSilenceByteCount: -2)
         }
     }
 
@@ -393,6 +443,58 @@ struct OpenAIRealtimeCommitSessionTests {
                 == "we should go  go go now")
     }
 
+    @Test("evidence preserves exact coverage and server item order")
+    func resolvedEvidence() async throws {
+        let session = makeSession(maxUnresolvedItems: 3)
+        var commits: [RealtimeTranscriptLedger.Commit] = []
+
+        for byteCount in [8, 8, 4] {
+            _ = try await session.appendSucceeded(
+                byteCount: byteCount,
+                containsSpeech: byteCount == 4)
+            let commit = try #require(
+                try await session.prepareCommit(force: byteCount == 4).commit)
+            commits.append(commit)
+            try await session.apply(
+                .commitAcknowledged(
+                    serverEventID: "ack-\(commit.sequence)",
+                    itemID: "item-\(commit.sequence)",
+                    predecessor: commit.sequence == 0
+                        ? .root
+                        : .item("item-\(commit.sequence - 1)")))
+        }
+        for sequence in [2, 0, 1] {
+            try await session.apply(
+                .completed(
+                    serverEventID: "terminal-\(sequence)",
+                    itemID: "item-\(sequence)",
+                    contentIndex: 0,
+                    transcript: "segment-\(sequence)"))
+        }
+        try await session.sealCapture()
+        _ = try await session.waitForRawTranscript()
+
+        let evidence = try await session.resolvedEvidenceSnapshot()
+
+        #expect(evidence.sourceByteCount == 20)
+        #expect(evidence.items.map(\.sequence) == [0, 1, 2])
+        #expect(evidence.items.map(\.coverageLowerBound) == [0, 8, 16])
+        #expect(evidence.items.map(\.coverageUpperBound) == [8, 16, 20])
+        #expect(evidence.items.map(\.submittedLowerBound) == [0, 8, 16])
+        #expect(evidence.items.map(\.submittedUpperBound) == [8, 16, 20])
+        #expect(evidence.items.map(\.itemID) == ["item-0", "item-1", "item-2"])
+        #expect(evidence.items.map(\.previousItemID) == [nil, "item-0", "item-1"])
+        #expect(
+            evidence.items.map(\.transcript)
+                == ["segment-0", "segment-1", "segment-2"])
+        #expect(commits.map(\.coverageRange) == [0..<8, 8..<16, 16..<20])
+        let encoded = try JSONEncoder().encode(evidence)
+        #expect(
+            try JSONDecoder().decode(
+                OpenAIRealtimeCommitSession.EvidenceSnapshot.self,
+                from: encoded) == evidence)
+    }
+
     @Test("completed response text overrides preceding deltas")
     func completedResponseTextIsAuthoritative() async throws {
         let session = makeSession()
@@ -461,15 +563,75 @@ struct OpenAIRealtimeCommitSessionTests {
 @Suite("OpenAI Realtime multi-commit orchestration")
 struct OpenAIRealtimeMultiCommitOrchestrationTests {
 
+    @Test("accepted quiet speech cannot authorize a silence commit")
+    func acceptedQuietSpeechDoesNotCommitAsSilence() async throws {
+        let samples = (0..<320).map { index in
+            Int16(index.isMultiple(of: 2) ? 20 : -20)
+        }
+        let source = pcm16(samples)
+        let level = AudioLevelAnalyzer.rmsLevel(pcm16: source)
+        #expect(OpenAIStreamingProvider.pauseSilenceThreshold == 0)
+        #expect(level > OpenAIStreamingProvider.pauseSilenceThreshold)
+        #expect(level > AudioLevelAnalyzer.minimumAcceptedSpeechRMS)
+        #expect(level < 0.005)
+
+        let session = OpenAIRealtimeCommitSession(
+            policy: RealtimeCommitPolicy(
+                maximumUniqueBytes: source.count * 2,
+                minimumUniqueBytesBeforeSilence: source.count,
+                trailingSilenceBytesRequired: source.count),
+            maxUnresolvedItems: 2)
+        let transport = SelectiveFailingRealtimeSend(
+            rejectedType: "input_audio_buffer.commit")
+
+        try await OpenAIStreamingProvider.sendRealtimeAudio(
+            source,
+            session: session,
+            send: { try await transport.send($0) })
+
+        #expect(
+            await transport.messageTypes()
+                == ["input_audio_buffer.append"])
+    }
+
+    @Test("any nonzero captured audio cannot authorize a silence commit")
+    func nonzeroAudioDoesNotCommitAsSilence() async throws {
+        var samples = [Int16](repeating: 0, count: 320)
+        samples[0] = 1
+        let source = pcm16(samples)
+        let level = AudioLevelAnalyzer.rmsLevel(pcm16: source)
+        #expect(level > 0)
+        #expect(level < AudioLevelAnalyzer.minimumAcceptedSpeechRMS)
+
+        let session = OpenAIRealtimeCommitSession(
+            policy: RealtimeCommitPolicy(
+                maximumUniqueBytes: source.count * 2,
+                minimumUniqueBytesBeforeSilence: source.count,
+                trailingSilenceBytesRequired: source.count),
+            maxUnresolvedItems: 2)
+        let transport = SelectiveFailingRealtimeSend(
+            rejectedType: "input_audio_buffer.commit")
+
+        try await OpenAIStreamingProvider.sendRealtimeAudio(
+            source,
+            session: session,
+            send: { try await transport.send($0) })
+
+        #expect(
+            await transport.messageTypes()
+                == ["input_audio_buffer.append"])
+    }
+
     @Test("waits for every item then polishes one ordered aggregate")
     func orderedAggregate() async throws {
         let session = OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: 8,
                 minimumUniqueBytesBeforeSilence: 8,
-                trailingSilenceBytesRequired: 2),
+                trailingSilenceBytesRequired: 0),
             maxUnresolvedItems: 2)
         let exchange = InteractiveRealtimeExchange()
+        let evidenceRecorder = RealtimeEvidenceRecorder()
         let reader = Task {
             try await OpenAIStreamingProvider.readRealtimeSessionEvents(
                 session: session,
@@ -495,7 +657,8 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let finishTask = Task {
             try await OpenAIStreamingProvider.finishRealtimeSession(
                 session: session,
-                send: { await exchange.send($0) })
+                send: { await exchange.send($0) },
+                onEvidence: { await evidenceRecorder.record($0) })
         }
 
         await exchange.yield(
@@ -539,6 +702,13 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             #"{"type":"response.done","response":{"status":"completed"}}"#)
 
         #expect(try await finishTask.value == "Polished words.")
+        let evidence = await evidenceRecorder.snapshots()
+        #expect(evidence.count == 1)
+        #expect(evidence.first?.sourceByteCount == 20)
+        #expect(evidence.first?.items.map(\.sequence) == [0, 1, 2])
+        #expect(
+            evidence.first?.items.map(\.transcript)
+                == ["we should go", "", "go go now"])
         try await reader.value
     }
 
@@ -577,6 +747,67 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             try await reader.value
         }
         #expect(await exchange.sent().count == 3)
+    }
+
+    @Test("empty aggregate still publishes exact evidence")
+    func emptyAggregateEvidence() async throws {
+        let recorder = RealtimeEvidenceRecorder()
+        let (_, finish) = try await startObservedFinish(
+            transcript: "",
+            onEvidence: { await recorder.record($0) })
+
+        #expect(try await finish.value.isEmpty)
+        let snapshots = await recorder.snapshots()
+        #expect(snapshots.count == 1)
+        #expect(snapshots.first?.sourceByteCount == 8)
+        #expect(snapshots.first?.items.map(\.transcript) == [""])
+    }
+
+    @Test("slow evidence observer does not retain the transport turn")
+    func slowEvidenceObserverReleasesTransport() async throws {
+        let observer = BlockingRealtimeEvidenceObserver()
+        let (session, finish) = try await startObservedFinish(
+            transcript: "raw words",
+            onEvidence: { await observer.observe($0) })
+        await observer.waitUntilStarted()
+
+        let transportAcquired = AsyncStartProbe()
+        let nextTransportTurn = Task {
+            try await session.acquireTransportTurn()
+            await transportAcquired.markStarted()
+            await session.releaseTransportTurn()
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await transportAcquired.hasStarted())
+
+        await observer.release()
+        #expect(try await finish.value == "Polished words.")
+        try await nextTransportTurn.value
+    }
+
+    @Test("cancelling a slow evidence observer preserves transport cleanup")
+    func cancelledEvidenceObserverReleasesTransport() async throws {
+        let observer = BlockingRealtimeEvidenceObserver()
+        let (session, finish) = try await startObservedFinish(
+            transcript: "raw words",
+            onEvidence: { await observer.observe($0) })
+        await observer.waitUntilStarted()
+        finish.cancel()
+
+        let transportAcquired = AsyncStartProbe()
+        let nextTransportTurn = Task {
+            try await session.acquireTransportTurn()
+            await transportAcquired.markStarted()
+            await session.releaseTransportTurn()
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await transportAcquired.hasStarted())
+
+        await observer.release()
+        await #expect(throws: CancellationError.self) {
+            _ = try await finish.value
+        }
+        try await nextTransportTurn.value
     }
 
     @Test("all-empty committed items skip the polish transaction")
@@ -1046,11 +1277,11 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         }
         #expect(
             wireAudio
-                == AudioResampler.resample16kTo24k(first + second))
+                == AudioResamplerOracle.resample16kTo24k(first + second))
     }
 
-    @Test("hard boundaries preserve each source slice on the wire")
-    func hardBoundaryWireCoverage() async throws {
+    @Test("wire source continuing after a hard boundary fails closed")
+    func hardBoundaryWireContinuationFails() async throws {
         let session = OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: 8,
@@ -1058,7 +1289,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 trailingSilenceBytesRequired: 2),
             maxUnresolvedItems: 3)
         let exchange = InteractiveRealtimeExchange()
-        let source = Data((0..<20).map(UInt8.init))
+        let source = pcm16([3_000, -3_000, 3_000, -3_000, 3_000])
 
         let audio = Task {
             try await OpenAIStreamingProvider.sendRealtimeAudio(
@@ -1068,36 +1299,19 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         }
         await exchange.waitForCommitCount(1)
         try await acknowledge(sequence: 0, session: session)
-        await exchange.waitForCommitCount(2)
-        try await acknowledge(sequence: 1, session: session)
-        try await audio.value
-
-        let finish = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
-                session: session,
-                send: { await exchange.send($0) })
+        await #expect(
+            throws: OpenAIRealtimeCommitSession.Failure
+                .hardBoundaryHasContinuation
+        ) {
+            try await audio.value
         }
-        await exchange.waitForCommitCount(3)
-        try await acknowledge(sequence: 2, session: session)
-        for sequence in [2, 0, 1] {
-            try await session.apply(
-                .completed(
-                    serverEventID: "terminal-\(sequence)",
-                    itemID: "item-\(sequence)",
-                    contentIndex: 0,
-                    transcript: ""))
-        }
-        #expect(try await finish.value.isEmpty)
 
         let items = try await committedAudioItems(in: exchange.sent())
-        let ranges = [0..<8, 8..<16, 16..<20]
-        #expect(items.count == ranges.count)
-        for (item, range) in zip(items, ranges) {
-            #expect(
-                item
-                    == AudioResampler.resample16kTo24k(
-                        source.subdata(in: range)))
-        }
+        #expect(items.count == 1)
+        #expect(
+            items[0]
+                == AudioResamplerOracle.resample16kTo24k(
+                    source.subdata(in: 0..<8)))
     }
 
     @Test("a missing server event fails the session at its deadline")
@@ -1134,6 +1348,41 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 minimumUniqueBytesBeforeSilence: 8,
                 trailingSilenceBytesRequired: 2),
             maxUnresolvedItems: 2)
+    }
+
+    private func startObservedFinish(
+        transcript: String,
+        onEvidence: @escaping OpenAIStreamingProvider.EvidenceObserver
+    ) async throws -> (
+        OpenAIRealtimeCommitSession,
+        Task<String, any Error>
+    ) {
+        let session = makeOrchestrationSession()
+        let exchange = InteractiveRealtimeExchange()
+        _ = try await session.appendSucceeded(
+            byteCount: 8,
+            containsSpeech: true)
+        let finish = Task {
+            try await OpenAIStreamingProvider.finishRealtimeSession(
+                session: session,
+                send: { await exchange.send($0) },
+                onEvidence: onEvidence)
+        }
+
+        await exchange.waitForCommitCount(1)
+        try await acknowledge(sequence: 0, session: session)
+        try await session.apply(
+            .completed(
+                serverEventID: "terminal-0",
+                itemID: "item-0",
+                contentIndex: 0,
+                transcript: transcript))
+        if !transcript.isEmpty {
+            await exchange.waitForSentCount(3)
+            try await session.completeResponseText("Polished words.")
+            try await session.completeResponse()
+        }
+        return (session, finish)
     }
 
     private func resolvedSession() async throws -> OpenAIRealtimeCommitSession {
@@ -1337,6 +1586,52 @@ private actor AsyncStartProbe {
 
     func hasStarted() -> Bool {
         started
+    }
+}
+
+private actor RealtimeEvidenceRecorder {
+    private var values: [OpenAIRealtimeCommitSession.EvidenceSnapshot] = []
+
+    func record(_ value: OpenAIRealtimeCommitSession.EvidenceSnapshot) {
+        values.append(value)
+    }
+
+    func snapshots() -> [OpenAIRealtimeCommitSession.EvidenceSnapshot] {
+        values
+    }
+}
+
+private actor BlockingRealtimeEvidenceObserver {
+    private var started = false
+    private var released = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func observe(_ snapshot: OpenAIRealtimeCommitSession.EvidenceSnapshot) async {
+        started = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilStarted() async {
+        guard !started else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !released else { return }
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 }
 

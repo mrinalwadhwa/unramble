@@ -2,6 +2,220 @@ import XCTest
 
 @testable import FreeFlowKit
 
+private final class RecordingLimitSleepGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    private var _requestedDurations: [Duration] = []
+    private var _observedCancellation: Bool?
+
+    var callCount: Int {
+        lock.withLock { _requestedDurations.count }
+    }
+
+    var requestedDurations: [Duration] {
+        lock.withLock { _requestedDurations }
+    }
+
+    var observedCancellation: Bool? {
+        lock.withLock { _observedCancellation }
+    }
+
+    func sleep(for duration: Duration) async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                _requestedDurations.append(duration)
+                if released { return true }
+                self.continuation = continuation
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+        lock.withLock {
+            _observedCancellation = Task.isCancelled
+        }
+    }
+
+    func release() {
+        let continuation = lock.withLock {
+            released = true
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
+}
+
+private final class MultiRecordingLimitSleepGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuations: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var released: Set<Int> = []
+    private var durations: [Duration] = []
+    private var cancellations: [Int: Bool] = [:]
+
+    var callCount: Int {
+        lock.withLock { durations.count }
+    }
+
+    func observedCancellation(for call: Int) -> Bool? {
+        lock.withLock { cancellations[call] }
+    }
+
+    func sleep(for duration: Duration) async {
+        let call = lock.withLock {
+            let call = durations.count
+            durations.append(duration)
+            return call
+        }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                if released.contains(call) { return true }
+                continuations[call] = continuation
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+        lock.withLock {
+            cancellations[call] = Task.isCancelled
+        }
+    }
+
+    func release(call: Int) {
+        let continuation = lock.withLock {
+            released.insert(call)
+            return continuations.removeValue(forKey: call)
+        }
+        continuation?.resume()
+    }
+}
+
+private actor RecordingLimitClaimGate {
+    private var claimed = false
+    private var released = false
+    private var observedCancellation: Bool?
+    private var claimWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func pauseAfterClaim() async {
+        claimed = true
+        let waiters = claimWaiters
+        claimWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+
+        if !released {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+        observedCancellation = Task.isCancelled
+    }
+
+    func waitUntilClaimed() async {
+        guard !claimed else { return }
+        await withCheckedContinuation { continuation in
+            claimWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !released else { return }
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func cancellationObserved() -> Bool? {
+        observedCancellation
+    }
+}
+
+private actor AsyncCompletionProbe {
+    private var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+
+    func hasCompleted() -> Bool {
+        completed
+    }
+}
+
+private final class CompletionWaitProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting = false
+
+    var hasWaiter: Bool {
+        lock.withLock { waiting }
+    }
+
+    func markWaiting() {
+        lock.withLock { waiting = true }
+    }
+}
+
+private actor SuspensionGate {
+    private var entered = false
+    private var released = false
+    private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func waitForRelease() async {
+        entered = true
+        let waiters = entryWaiters
+        entryWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+
+        guard !released else { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { continuation in
+            entryWaiters.append(continuation)
+        }
+    }
+
+    func release() {
+        guard !released else { return }
+        released = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+}
+
+private final class GatedStartAudioProvider: AudioProviding, @unchecked Sendable {
+    private let base = MockAudioProvider()
+    private let startGate: SuspensionGate
+
+    init(startGate: SuspensionGate) {
+        self.startGate = startGate
+    }
+
+    var isRecording: Bool { base.isRecording }
+    var pcmAudioStream: AsyncStream<Data>? { base.pcmAudioStream }
+    var audioLevelStream: AsyncStream<Float>? { base.audioLevelStream }
+    var peakRMS: Float { base.peakRMS }
+    var ambientRMS: Float { base.ambientRMS }
+    var micProximity: MicProximity { base.micProximity }
+    var gainFactor: Float { base.gainFactor }
+    var deviceName: String { base.deviceName }
+    func startRecording() async throws {
+        await startGate.waitForRelease()
+        try await base.startRecording()
+    }
+
+    func stopRecording() async throws -> AudioBuffer {
+        try await base.stopRecording()
+    }
+}
+
 final class StreamingPipelineTests: XCTestCase {
 
     // MARK: - Helpers
@@ -64,7 +278,10 @@ final class StreamingPipelineTests: XCTestCase {
         coordinator: RecordingCoordinator = RecordingCoordinator(),
         transcriptBuffer: TranscriptBuffer? = nil,
         localMode: Bool = false,
-        onSessionExpired: (@Sendable () -> Void)? = nil
+        onSessionExpired: (@Sendable () -> Void)? = nil,
+        cloudRecordingLimitSleep: @escaping @Sendable (Duration) async -> Void = {
+            try? await Task.sleep(for: $0)
+        }
     ) -> (
         DictationPipeline, MockAudioProvider, MockAppContextProvider,
         MockBatchProvider, MockStreamingProvider,
@@ -81,12 +298,761 @@ final class StreamingPipelineTests: XCTestCase {
             transcriptBuffer: transcriptBuffer,
             streamingProvider: streamingProvider,
             onSessionExpired: onSessionExpired,
-            localMode: localMode
+            localMode: localMode,
+            cloudRecordingLimitSleep: cloudRecordingLimitSleep
         )
         return (
             pipeline, audio, contextProvider, dictation,
             streamingProvider, textInjector, coordinator
         )
+    }
+
+    // MARK: - Cloud recording limit
+
+    func testCompleteAlreadyCancelledBeforeEntryDrainsRecording() async {
+        let entryGate = SuspensionGate()
+        let (pipeline, audio, _, dictation, streaming, injector, coordinator) =
+            makeStreamingPipeline()
+
+        await pipeline.activate()
+        let recordingStarted = await waitUntil { audio.startCallCount == 1 }
+        XCTAssertTrue(recordingStarted)
+
+        let completeTask = Task {
+            await entryGate.waitForRelease()
+            await pipeline.complete()
+        }
+        await entryGate.waitUntilEntered()
+        completeTask.cancel()
+        await entryGate.release()
+        await completeTask.value
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertFalse(audio.isRecording)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testCompleteCancellationDuringSetupDrainsProcessing() async {
+        let setupGate = SuspensionGate()
+        let audio = GatedStartAudioProvider(startGate: setupGate)
+        let dictation = MockBatchProvider()
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: dictation,
+            textInjector: injector,
+            coordinator: coordinator)
+
+        await pipeline.activate()
+        await setupGate.waitUntilEntered()
+
+        let completeTask = Task { await pipeline.complete() }
+        let processingStarted = await waitUntilState(
+            .processing, coordinator: coordinator)
+        XCTAssertTrue(processingStarted)
+
+        completeTask.cancel()
+        await setupGate.release()
+        await completeTask.value
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertFalse(audio.isRecording)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testExplicitCancelInvalidatesManualCompleteSuspendedDuringSetup() async {
+        let setupGate = SuspensionGate()
+        let cancelCompletion = AsyncCompletionProbe()
+        let audio = GatedStartAudioProvider(startGate: setupGate)
+        let dictation = MockBatchProvider(stubbedText: "Late dictation")
+        let streaming = MockStreamingProvider(stubbedText: "Late streaming result")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: dictation,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        await setupGate.waitUntilEntered()
+
+        let completeTask = Task { await pipeline.complete() }
+        let processingStarted = await waitUntilState(
+            .processing, coordinator: coordinator)
+        XCTAssertTrue(processingStarted)
+
+        let cancelTask = Task {
+            await pipeline.cancel()
+            await cancelCompletion.markCompleted()
+        }
+        let cancellationEntered = await waitUntil {
+            streaming.cancelCallCount > 0
+        }
+        XCTAssertTrue(cancellationEntered)
+        let completedBeforeSetupRelease = await cancelCompletion.hasCompleted()
+        XCTAssertFalse(completedBeforeSetupRelease)
+
+        await setupGate.release()
+        await cancelTask.value
+        await completeTask.value
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testCompleteEnteringDuringCancellationDrainIsRejected() async {
+        let cancelGate = SuspensionGate()
+        let completeCompletion = AsyncCompletionProbe()
+        let batch = MockBatchProvider(stubbedText: "Late dictation")
+        let streaming = MockStreamingProvider(stubbedText: "Late streaming result")
+        streaming.cancelStreamingHook = {
+            if streaming.cancelCallCount == 1 {
+                await cancelGate.waitForRelease()
+            }
+        }
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: batch,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        let setupFinished = await waitUntil {
+            audio.startCallCount == 1 && streaming.startCallCount == 1
+        }
+        XCTAssertTrue(setupFinished)
+
+        let cancelTask = Task { await pipeline.cancel() }
+        await cancelGate.waitUntilEntered()
+        let stateWhileDrainBlocked = await coordinator.state
+        XCTAssertEqual(stateWhileDrainBlocked, .recording)
+
+        let completeTask = Task {
+            await pipeline.complete()
+            await completeCompletion.markCompleted()
+        }
+        var completeReturned = false
+        for _ in 0..<10_000 {
+            if await completeCompletion.hasCompleted() {
+                completeReturned = true
+                break
+            }
+            await Task.yield()
+        }
+
+        XCTAssertTrue(completeReturned)
+        let stateAfterLateComplete = await coordinator.state
+        XCTAssertEqual(stateAfterLateComplete, .recording)
+        XCTAssertEqual(batch.dictateCallCount, 0)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        await cancelGate.release()
+        await cancelTask.value
+        await completeTask.value
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle)
+    }
+
+    func testStaleManualCompleteCannotCancelReplacementRecording() async {
+        let handoffGate = SuspensionGate()
+        let activationWaitProbe = CompletionWaitProbe()
+        let activationCompletion = AsyncCompletionProbe()
+        let audio = makeStreamingAudioProvider()
+        let dictation = MockBatchProvider(stubbedText: "Stale dictation")
+        let streaming = MockStreamingProvider(stubbedText: "Stale streaming result")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: dictation,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            completionWillHandoff: {
+                await handoffGate.waitForRelease()
+            },
+            activationDidBeginWaitingForCompletion: {
+                activationWaitProbe.markWaiting()
+            })
+
+        await pipeline.activate()
+        let firstSetupFinished = await waitUntil {
+            audio.startCallCount == 1 && streaming.startCallCount == 1
+        }
+        XCTAssertTrue(firstSetupFinished)
+
+        let staleCompleteTask = Task { await pipeline.complete() }
+        await handoffGate.waitUntilEntered()
+        await pipeline.cancel()
+
+        let cancelledState = await coordinator.state
+        XCTAssertEqual(cancelledState, .idle)
+
+        let replacementActivationTask = Task {
+            await pipeline.activate()
+            await activationCompletion.markCompleted()
+        }
+        let activationReachedBarrierOrStarted = await waitUntil {
+            activationWaitProbe.hasWaiter || audio.startCallCount == 2
+        }
+        XCTAssertTrue(activationReachedBarrierOrStarted)
+        XCTAssertTrue(activationWaitProbe.hasWaiter)
+        XCTAssertEqual(audio.startCallCount, 1)
+        let completedWhileStaleOwnerActive = await activationCompletion.hasCompleted()
+        XCTAssertFalse(completedWhileStaleOwnerActive)
+
+        await handoffGate.release()
+        await staleCompleteTask.value
+        await replacementActivationTask.value
+
+        let replacementStarted = await waitUntil {
+            audio.startCallCount == 2 && streaming.startCallCount == 2
+        }
+        XCTAssertTrue(replacementStarted)
+
+        let stateAfterStaleCompletion = await coordinator.state
+        XCTAssertEqual(stateAfterStaleCompletion, .recording)
+        XCTAssertTrue(audio.isRecording)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        await pipeline.cancel()
+    }
+
+    func testReplacementActivationWaitsForStaleEarlySilenceCleanup() async {
+        let cleanupGate = SuspensionGate()
+        let activationWaitProbe = CompletionWaitProbe()
+        let activationCompletion = AsyncCompletionProbe()
+        let audio = makeStreamingAudioProvider()
+        audio.stubbedPeakRMS = 0.001
+        let dictation = MockBatchProvider(stubbedText: "Unexpected dictation")
+        let streaming = MockStreamingProvider(stubbedText: "Unexpected streaming result")
+        streaming.cancelStreamingHook = {
+            if streaming.cancelCallCount == 1 {
+                await cleanupGate.waitForRelease()
+            }
+        }
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: dictation,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            activationDidBeginWaitingForCompletion: {
+                activationWaitProbe.markWaiting()
+            })
+
+        await pipeline.activate()
+        let firstSetupFinished = await waitUntil {
+            audio.startCallCount == 1 && streaming.startCallCount == 1
+        }
+        XCTAssertTrue(firstSetupFinished)
+
+        let staleCompleteTask = Task { await pipeline.complete() }
+        await cleanupGate.waitUntilEntered()
+        await pipeline.cancel()
+
+        let replacementActivationTask = Task {
+            await pipeline.activate()
+            await activationCompletion.markCompleted()
+        }
+        let activationReachedBarrierOrStarted = await waitUntil {
+            activationWaitProbe.hasWaiter || audio.startCallCount == 2
+        }
+        XCTAssertTrue(activationReachedBarrierOrStarted)
+        XCTAssertTrue(activationWaitProbe.hasWaiter)
+        XCTAssertEqual(audio.startCallCount, 1)
+        let completedWhileStaleOwnerActive = await activationCompletion.hasCompleted()
+        XCTAssertFalse(completedWhileStaleOwnerActive)
+
+        await cleanupGate.release()
+        await staleCompleteTask.value
+        await replacementActivationTask.value
+
+        let replacementStarted = await waitUntil {
+            audio.startCallCount == 2 && streaming.startCallCount == 2
+        }
+        XCTAssertTrue(replacementStarted)
+        let replacementState = await coordinator.state
+        XCTAssertEqual(replacementState, .recording)
+        XCTAssertTrue(audio.isRecording)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        await pipeline.cancel()
+    }
+
+    func testCancelDoesNotAwaitClaimedCompletionDuringSetupDrain() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let setupGate = SuspensionGate()
+        let cancelCompletion = AsyncCompletionProbe()
+        let audio = GatedStartAudioProvider(startGate: setupGate)
+        let streaming = MockStreamingProvider()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: MockBatchProvider(),
+            textInjector: MockTextInjector(),
+            coordinator: coordinator,
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        await setupGate.waitUntilEntered()
+        let automaticCompletionArmed = await waitUntil {
+            sleepGate.callCount == 1
+        }
+        XCTAssertTrue(automaticCompletionArmed)
+
+        sleepGate.release()
+        let processingStarted = await waitUntilState(
+            .processing, coordinator: coordinator)
+        XCTAssertTrue(processingStarted)
+
+        let cancelTask = Task {
+            await pipeline.cancel()
+            await cancelCompletion.markCompleted()
+        }
+        let cancellationEntered = await waitUntil {
+            streaming.cancelCallCount > 0
+        }
+        XCTAssertTrue(cancellationEntered)
+        await setupGate.release()
+
+        var cancellationCompleted = false
+        for _ in 0..<10_000 {
+            if await cancelCompletion.hasCompleted() {
+                cancellationCompleted = true
+                break
+            }
+            await Task.yield()
+        }
+        XCTAssertTrue(cancellationCompleted)
+        if cancellationCompleted {
+            await cancelTask.value
+        }
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertFalse(audio.isRecording)
+    }
+
+    func testCloudRecordingLimitCompletesWithExactWAVAndLateReleaseIsNoOp() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let audio = makeStreamingAudioProvider()
+        // Timer scheduling is not a correctness boundary. Even a capture that
+        // exceeds the Realtime hard guard must reach whole-WAV recovery intact.
+        let sourcePCM = Data(
+            repeating: 0x01,
+            count: 310 * 16_000 * MemoryLayout<Int16>.size + 4_096)
+        let expectedWAV = WAVEncoder.encode(
+            pcmData: sourcePCM,
+            sampleRate: 16_000,
+            channels: 1,
+            bitsPerSample: 16)
+        audio.stubbedBuffer = AudioBuffer(
+            data: expectedWAV,
+            duration: WAVEncoder.duration(
+                byteCount: sourcePCM.count,
+                sampleRate: 16_000,
+                channels: 1,
+                bitsPerSample: 16),
+            sampleRate: 16_000,
+            channels: 1,
+            bitsPerSample: 16)
+        let batch = MockBatchProvider(stubbedText: "Recovered complete dictation")
+        let streaming = MockStreamingProvider()
+        streaming.stubbedFinishError = OpenAIRealtimeCommitSession.Failure
+            .hardBoundaryHasContinuation
+        let (pipeline, _, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            audioProvider: audio,
+            batchProvider: batch,
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let armed = await waitUntil {
+            sleepGate.callCount == 1 && streaming.startCallCount == 1
+        }
+        XCTAssertTrue(armed)
+        XCTAssertEqual(sleepGate.requestedDurations, [.seconds(300)])
+
+        sleepGate.release()
+        let injected = await waitUntil { injector.injectionCount == 1 }
+        let returnedToIdle = await waitUntilState(.idle, coordinator: coordinator)
+        let finalState = await coordinator.state
+        XCTAssertTrue(injected)
+        XCTAssertTrue(returnedToIdle)
+        XCTAssertEqual(batch.lastReceivedAudio, expectedWAV)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered complete dictation")
+        XCTAssertEqual(audio.stopCallCount, 1)
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertEqual(sleepGate.observedCancellation, false)
+
+        // The physical key release arrives after automatic completion.
+        await pipeline.complete()
+        XCTAssertEqual(audio.stopCallCount, 1)
+        XCTAssertEqual(batch.dictateCallCount, 1)
+        XCTAssertEqual(injector.injectionCount, 1)
+    }
+
+    func testManualCompleteCancelsCloudRecordingLimit() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let (pipeline, _, _, _, _, injector, _) = makeStreamingPipeline(
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let armed = await waitUntil { sleepGate.callCount == 1 }
+        XCTAssertTrue(armed)
+
+        await pipeline.complete()
+        sleepGate.release()
+        let timerReturned = await waitUntil { sleepGate.observedCancellation != nil }
+
+        XCTAssertTrue(timerReturned)
+        XCTAssertEqual(sleepGate.observedCancellation, true)
+        XCTAssertEqual(injector.injectionCount, 1)
+    }
+
+    func testCancelCancelsCloudRecordingLimit() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let (pipeline, audio, _, _, streaming, injector, coordinator) =
+            makeStreamingPipeline(cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let armed = await waitUntil {
+            sleepGate.callCount == 1 && audio.startCallCount == 1
+        }
+        XCTAssertTrue(armed)
+
+        await pipeline.cancel()
+        sleepGate.release()
+        let timerReturned = await waitUntil { sleepGate.observedCancellation != nil }
+        let finalState = await coordinator.state
+
+        XCTAssertTrue(timerReturned)
+        XCTAssertEqual(sleepGate.observedCancellation, true)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+        XCTAssertEqual(finalState, .idle)
+    }
+
+    func testRetireCancelsCloudRecordingLimit() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let (pipeline, _, _, _, streaming, injector, _) = makeStreamingPipeline(
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let armed = await waitUntil { sleepGate.callCount == 1 }
+        XCTAssertTrue(armed)
+
+        await pipeline.retire()
+        sleepGate.release()
+        let timerReturned = await waitUntil { sleepGate.observedCancellation != nil }
+
+        XCTAssertTrue(timerReturned)
+        XCTAssertEqual(sleepGate.observedCancellation, true)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testLocalRecordingDoesNotArmCloudRecordingLimit() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let (pipeline, _, _, _, streaming, injector, _) = makeStreamingPipeline(
+            localMode: true,
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let started = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(started)
+        XCTAssertEqual(sleepGate.callCount, 0)
+
+        await pipeline.complete()
+
+        XCTAssertEqual(sleepGate.callCount, 0)
+        XCTAssertEqual(injector.injectionCount, 1)
+    }
+
+    func testCancelledOldLimitCannotCompleteNewRecordingGeneration() async {
+        let sleepGate = MultiRecordingLimitSleepGate()
+        let (pipeline, audio, _, _, streaming, injector, coordinator) =
+            makeStreamingPipeline(cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let firstArmed = await waitUntil {
+            sleepGate.callCount == 1 && audio.startCallCount == 1
+        }
+        XCTAssertTrue(firstArmed)
+        await pipeline.cancel()
+        let stopCallCountAfterCancel = audio.stopCallCount
+
+        await pipeline.activate()
+        let secondArmed = await waitUntil {
+            sleepGate.callCount == 2 && audio.startCallCount == 2
+        }
+        XCTAssertTrue(secondArmed)
+
+        sleepGate.release(call: 0)
+        let oldTimerReturned = await waitUntil {
+            sleepGate.observedCancellation(for: 0) != nil
+        }
+        XCTAssertTrue(oldTimerReturned)
+        XCTAssertEqual(sleepGate.observedCancellation(for: 0), true)
+        let recordingState = await coordinator.state
+        XCTAssertEqual(recordingState, .recording)
+        XCTAssertEqual(audio.stopCallCount, stopCallCountAfterCancel)
+
+        await pipeline.complete()
+        sleepGate.release(call: 1)
+        let currentTimerReturned = await waitUntil {
+            sleepGate.observedCancellation(for: 1) != nil
+        }
+        XCTAssertTrue(currentTimerReturned)
+        XCTAssertEqual(sleepGate.observedCancellation(for: 1), true)
+        XCTAssertEqual(streaming.finishCallCount, 1)
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(audio.stopCallCount, stopCallCountAfterCancel + 1)
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle)
+    }
+
+    func testCancelDrainsAutomaticCompletionDuringClaimHandoff() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let claimGate = RecordingLimitClaimGate()
+        let cancelCompletion = AsyncCompletionProbe()
+        let streaming = MockStreamingProvider()
+        let pipeline = DictationPipeline(
+            audioProvider: makeStreamingAudioProvider(),
+            contextProvider: MockAppContextProvider(),
+            batchProvider: MockBatchProvider(),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator(),
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            },
+            cloudRecordingLimitDidClaim: {
+                await claimGate.pauseAfterClaim()
+            })
+
+        await pipeline.activate()
+        let armed = await waitUntil { sleepGate.callCount == 1 }
+        XCTAssertTrue(armed)
+        sleepGate.release()
+        await claimGate.waitUntilClaimed()
+
+        let cancelTask = Task {
+            await pipeline.cancel()
+            await cancelCompletion.markCompleted()
+        }
+        let cancellationEntered = await waitUntil {
+            streaming.cancelCallCount > 0
+        }
+        XCTAssertTrue(cancellationEntered)
+        await Task.yield()
+        let completedBeforeRelease = await cancelCompletion.hasCompleted()
+        XCTAssertFalse(completedBeforeRelease)
+
+        await claimGate.release()
+        await cancelTask.value
+
+        let observedCancellation = await claimGate.cancellationObserved()
+        XCTAssertEqual(observedCancellation, true)
+    }
+
+    func testReactivationWaitsForClaimedAutomaticCompletion() async {
+        let sleepGate = MultiRecordingLimitSleepGate()
+        let claimGate = RecordingLimitClaimGate()
+        let activationCompletion = AsyncCompletionProbe()
+        let audio = makeStreamingAudioProvider()
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: MockBatchProvider(),
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: MockStreamingProvider(),
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            },
+            cloudRecordingLimitDidClaim: {
+                await claimGate.pauseAfterClaim()
+            })
+
+        await pipeline.activate()
+        let firstArmed = await waitUntil {
+            sleepGate.callCount == 1 && audio.startCallCount == 1
+        }
+        XCTAssertTrue(firstArmed)
+        sleepGate.release(call: 0)
+        await claimGate.waitUntilClaimed()
+
+        // The physical release finishes this recording while the automatic
+        // completion owns, but has not yet entered, its complete() call.
+        await pipeline.complete()
+        XCTAssertEqual(injector.injectionCount, 1)
+        let stateAfterManualCompletion = await coordinator.state
+        XCTAssertEqual(stateAfterManualCompletion, .idle)
+
+        let activationTask = Task {
+            await pipeline.activate()
+            await activationCompletion.markCompleted()
+        }
+        for _ in 0..<100 { await Task.yield() }
+        let completedBeforeClaimRetired =
+            await activationCompletion.hasCompleted()
+        XCTAssertFalse(completedBeforeClaimRetired)
+
+        await claimGate.release()
+        await activationTask.value
+        let secondArmed = await waitUntil {
+            sleepGate.callCount == 2 && audio.startCallCount == 2
+        }
+        XCTAssertTrue(secondArmed)
+        let reactivatedState = await coordinator.state
+        XCTAssertEqual(reactivatedState, .recording)
+
+        await pipeline.complete()
+        sleepGate.release(call: 1)
+        XCTAssertEqual(injector.injectionCount, 2)
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle)
+    }
+
+    func testCancelDrainsAutomaticCompletionBlockedInBatch() async {
+        let sleepGate = MultiRecordingLimitSleepGate()
+        let batch = CancellationInsensitiveBatchProvider(
+            firstResult: "late result",
+            retryResult: "next generation")
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("offline")
+        streaming.cancelStreamingHook = {
+            await batch.releaseFirstCallIfStarted()
+        }
+        let audio = makeStreamingAudioProvider()
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: batch,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let automaticCompletionArmed = await waitUntil {
+            sleepGate.callCount == 1 && streaming.startCallCount == 1
+        }
+        XCTAssertTrue(automaticCompletionArmed)
+        sleepGate.release(call: 0)
+        await batch.waitUntilFirstCallStarts()
+
+        await pipeline.cancel()
+        let cancelledState = await coordinator.state
+        XCTAssertEqual(cancelledState, .idle)
+        XCTAssertEqual(injector.injectionCount, 0)
+        XCTAssertEqual(audio.stopCallCount, 1)
+
+        streaming.stubbedStartError = nil
+        await pipeline.activate()
+        let nextGenerationArmed = await waitUntil {
+            sleepGate.callCount == 2 && streaming.startCallCount == 2
+        }
+        XCTAssertTrue(nextGenerationArmed)
+        await pipeline.complete()
+        sleepGate.release(call: 1)
+
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Mock streaming dictation")
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle)
+    }
+
+    func testRetireDrainsAutomaticCompletionBlockedInBatch() async {
+        let sleepGate = RecordingLimitSleepGate()
+        let batch = CancellationInsensitiveBatchProvider(
+            firstResult: "late result",
+            retryResult: "unused")
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("offline")
+        streaming.cancelStreamingHook = {
+            await batch.releaseFirstCallIfStarted()
+        }
+        let audio = makeStreamingAudioProvider()
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            batchProvider: batch,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming,
+            cloudRecordingLimitSleep: { duration in
+                await sleepGate.sleep(for: duration)
+            })
+
+        await pipeline.activate()
+        let automaticCompletionArmed = await waitUntil {
+            sleepGate.callCount == 1 && streaming.startCallCount == 1
+        }
+        XCTAssertTrue(automaticCompletionArmed)
+        sleepGate.release()
+        await batch.waitUntilFirstCallStarts()
+
+        await pipeline.retire()
+
+        let retiredState = await coordinator.state
+        XCTAssertEqual(retiredState, .idle)
+        XCTAssertEqual(injector.injectionCount, 0)
+        XCTAssertEqual(sleepGate.observedCancellation, false)
+        await pipeline.activate()
+        XCTAssertEqual(streaming.startCallCount, 1)
     }
 
     private func waitUntil(
@@ -97,6 +1063,17 @@ final class StreamingPipelineTests: XCTestCase {
             await Task.yield()
         }
         return condition()
+    }
+
+    private func waitUntilState(
+        _ expected: RecordingState,
+        coordinator: RecordingCoordinator
+    ) async -> Bool {
+        for _ in 0..<10_000 {
+            if await coordinator.state == expected { return true }
+            await Task.yield()
+        }
+        return await coordinator.state == expected
     }
 
     /// Emit PCM chunks in the background so the forwarding operation has data.

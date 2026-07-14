@@ -3,6 +3,23 @@ import Testing
 
 @testable import FreeFlowKit
 
+private final class GrowingFinishWatchdogProvider:
+    StreamingDictationProviding, @unchecked Sendable
+{
+    var finishStreamingWatchdog: TimeInterval = 20
+    let maximumFinishStreamingWatchdog: TimeInterval = 175
+
+    func startStreaming(
+        context _: AppContext,
+        language _: String?,
+        micProximity _: MicProximity
+    ) async throws {}
+
+    func sendAudio(_: Data) async throws {}
+    func finishStreaming() async throws -> String { "" }
+    func cancelStreaming() async {}
+}
+
 // ---------------------------------------------------------------------------
 // Tests for DictationPipeline.pipelineDeadline.
 //
@@ -42,5 +59,65 @@ struct PipelineDeadlineTests {
     func cappedAtCeiling() {
         let d = DictationPipeline.pipelineDeadline(forRecordingDuration: 600)
         #expect(d == 300.0)
+    }
+
+    @Test("batch-only cloud path reserves transcription, polish, and teardown")
+    func batchOnlyRecoveryReserve() {
+        let d = DictationPipeline.pipelineDeadline(
+            forRecordingDuration: 2,
+            cloudStreamingMaximumFinishWatchdog: nil,
+            requiresCloudBatchWindow: true)
+
+        #expect(d == DictationPipeline.cloudBatchRecoveryReserve)
+        #expect(d == 100)
+    }
+
+    @Test("cloud streaming deadline starts its batch reserve after the watchdog")
+    func streamingRecoveryReserve() {
+        let watchdog: TimeInterval = 21
+        let d = DictationPipeline.pipelineDeadline(
+            forRecordingDuration: 2,
+            cloudStreamingMaximumFinishWatchdog: watchdog,
+            requiresCloudBatchWindow: true)
+
+        #expect(d - watchdog >= DictationPipeline.cloudBatchRecoveryReserve)
+        #expect(d == 121)
+    }
+
+    @Test("cloud outer deadline reserves the stable maximum while child watchdog grows")
+    func streamingRecoveryUsesMaximumWatchdog() {
+        let provider = GrowingFinishWatchdogProvider()
+        let earlyDynamicWatchdog = provider.finishStreamingWatchdog
+        let earlyDeadline = DictationPipeline.pipelineDeadline(
+            forRecordingDuration: 2,
+            cloudStreamingProvider: provider,
+            requiresCloudBatchWindow: true)
+
+        provider.finishStreamingWatchdog = 175
+        let lateDeadline = DictationPipeline.pipelineDeadline(
+            forRecordingDuration: 2,
+            cloudStreamingProvider: provider,
+            requiresCloudBatchWindow: true)
+
+        #expect(earlyDynamicWatchdog == 20)
+        #expect(earlyDeadline == 275)
+        #expect(lateDeadline == earlyDeadline)
+    }
+
+    @Test("five-minute cloud boundary leaves at least the promised reserve")
+    func supportedCloudMaximumReserve() {
+        let sourceDuration: TimeInterval = 300
+        let wireBytes = Int(sourceDuration * 48_000)
+        let watchdog = min(
+            295,
+            OpenAIStreamingProvider.transcriptTimeout(forAudioBytes: wireBytes) + 5)
+        let d = DictationPipeline.pipelineDeadline(
+            forRecordingDuration: sourceDuration,
+            cloudStreamingMaximumFinishWatchdog: watchdog,
+            requiresCloudBatchWindow: true)
+
+        #expect(watchdog == 170)
+        #expect(d == 300)
+        #expect(d - watchdog >= DictationPipeline.cloudBatchRecoveryReserve)
     }
 }

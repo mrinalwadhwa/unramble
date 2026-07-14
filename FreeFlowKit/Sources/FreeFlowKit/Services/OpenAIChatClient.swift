@@ -42,10 +42,18 @@ public struct OpenAIChatClient: PolishChatClient {
         if let session {
             self.session = session
         } else {
-            let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 30
-            self.session = URLSession(configuration: config)
+            self.session = URLSession(
+                configuration: Self.defaultSessionConfiguration())
         }
+    }
+
+    /// Bound both inactivity and total transfer time so batch transcription
+    /// always leaves a finite polish stage inside the recovery reserve.
+    static func defaultSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 30
+        return configuration
     }
 
     /// Send a two-message chat completion and return the assistant's reply.

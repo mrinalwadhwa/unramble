@@ -29,7 +29,10 @@ at runtime.
 Keychain access, trigger password prompts). `FREEFLOW_TEST_OPENAI=1`
 enables live tests that hit the real OpenAI API and require
 `OPENAI_API_KEY` to be set. `FREEFLOW_TEST_OPENAI_BENCH=1` additionally
-enables the latency benchmark suite.
+enables the latency benchmark suite. `FREEFLOW_TEST_OPENAI_LONG=1` enables the
+separately gated real-speech, five-minute-source, and exact-WAV batch checks.
+Set `FREEFLOW_TEST_OPENAI_REALTIME_PACED=1` to feed the five-minute source in
+real time, and set `FREEFLOW_TEST_EVIDENCE_DIR` to write case-specific JSON.
 
 ## Project structure
 
@@ -55,6 +58,13 @@ flowchart LR
     R --> Q[Fine-tuned Qwen polish via MLX]
     Q --> I[Rolling chunks and final tail injection]
 ```
+
+The cloud path commits continued Realtime items only at detected pauses,
+assembles an item-correlated raw transcript, polishes once, and injects once.
+A non-silence hard guard with later source invalidates Realtime and transfers
+authority to exact-WAV batch recovery. The gated
+`CloudDictationLiveHarnessTests` exercise current-policy real speech,
+five-minute source scheduling, connection pacing, and exact-WAV recovery.
 
 ## Customize
 
