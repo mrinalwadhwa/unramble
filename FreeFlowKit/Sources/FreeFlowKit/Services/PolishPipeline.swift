@@ -1135,6 +1135,14 @@ public enum PolishPipeline {
                     preprocessed: stripped, casual: casual,
                     noPreceding: noPreceding)
             }
+            if stripModelBreaks,
+                let fallback = guardAgainstFabrication(
+                    polished: cleaned, preprocessed: stripped) {
+                return adjustFirstCharCasing(
+                    normalizeFormatting(fallback, casual: casual),
+                    preprocessed: stripped, casual: casual,
+                    noPreceding: noPreceding)
+            }
             return adjustFirstCharCasing(
                 normalizeFormatting(cleaned, casual: casual),
                 preprocessed: stripped, casual: casual,
@@ -1639,6 +1647,33 @@ public enum PolishPipeline {
             Log.debug(
                 "[CONTENT_GUARD] dropped run=\(longestMissingRun)"
                 + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+        return nil
+    }
+
+    /// Detect when polish invented content not present in the input.
+    ///
+    /// The mirror of `guardAgainstContentLoss`: content words in the polished
+    /// output but not in the input mean the model fabricated text, often by
+    /// completing a dangling fragment. More than a few such words is a
+    /// fabrication, so fall back to the raw input. Number and casing
+    /// normalization introduce no new content words.
+    ///
+    /// Returns the preprocessed text as fallback, or nil if no fabrication.
+    static func guardAgainstFabrication(
+        polished: String, preprocessed: String,
+        maximumNovelWords: Int = 3
+    ) -> String? {
+        let inputWords = Set(contentWords(preprocessed))
+        let novel = Set(contentWords(polished)).subtracting(inputWords)
+        if novel.count > maximumNovelWords {
+            Log.debug(
+                "[FABRICATION_GUARD] novel=\(novel.count)"
+                + " — falling back to preprocessed"
+                + " | novel=\(novel.sorted())"
                 + " | polished=\"\(polished)\""
                 + " | preprocessed=\"\(preprocessed)\"")
             return preprocessed

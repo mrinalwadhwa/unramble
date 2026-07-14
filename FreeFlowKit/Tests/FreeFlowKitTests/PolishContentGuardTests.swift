@@ -84,6 +84,36 @@ struct PolishContentGuardTests {
         #expect(out.lowercased().contains("cache"))
         #expect(out.lowercased().contains("latency"))
     }
+
+    @Test("fabricated content falls back to the raw input")
+    func fabricationFallsBack() {
+        let raw = "the only thing I'm worried about is memory usage on the "
+            + "reporting cluster"
+        // The model invented a clause that is not in the input.
+        let polished = "The only thing I am still doing is waiting for the "
+            + "next job to start. I'm worried about memory usage on the "
+            + "reporting cluster."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == raw)
+    }
+
+    @Test("faithful polish adds no fabricated content")
+    func faithfulPolishNoFabrication() {
+        let raw = "we finished moving the services on tuesday and the results "
+            + "look really encouraging"
+        let polished = "We finished moving the services on Tuesday, and the "
+            + "results look really encouraging."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == nil)
+    }
+
+    @Test("number normalization is not fabrication")
+    func numberNormalizationNotFabrication() {
+        let raw = "latency dropped by about forty percent overnight"
+        let polished = "Latency dropped by about 40% overnight."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == nil)
+    }
 }
 
 /// Echoes the input but deletes a middle clause, simulating a model that
