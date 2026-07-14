@@ -1,0 +1,36 @@
+appId: com.freeflow.FreeFlow.Linux
+productName: FreeFlow
+artifactName: FreeFlow-Linux-${version}-${arch}.${ext}
+directories:
+  output: dist
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: ../rust/target/release/freeflow-daemon
+    to: bin/freeflow-daemon
+linux:
+  category: Utility
+  executableName: freeflow
+  icon: build/icon.png
+  maintainer: Mrinal Wadhwa <mrinalwadhwa@users.noreply.github.com>
+  syncDesktopName: true
+  target:
+    - AppImage
+    - deb
+  desktop:
+    entry:
+      Name: FreeFlow
+      Comment: Push-to-talk dictation for Linux
+      Keywords: Dictation;Speech;Voice;
+      StartupNotify: false
+      StartupWMClass: FreeFlow
+appImage:
+  artifactName: FreeFlow-Linux-${version}-${arch}.AppImage
+deb:
+  artifactName: FreeFlow-Linux-${version}-${arch}.deb
+  depends:
+    - libasound2
+    - libsecret-1-0
+    - libx11-6
+    - libxtst6
