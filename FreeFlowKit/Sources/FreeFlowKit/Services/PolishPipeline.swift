@@ -1124,6 +1124,17 @@ public enum PolishPipeline {
                     preprocessed: stripped, casual: casual,
                     noPreceding: noPreceding)
             }
+            // Streaming units must not lose content. A dropped run of spoken
+            // words falls back to the raw unit. The batch path keeps the
+            // model's edits so intentional corrections are not reverted.
+            if stripModelBreaks,
+                let fallback = guardAgainstContentLoss(
+                    polished: cleaned, preprocessed: stripped) {
+                return adjustFirstCharCasing(
+                    normalizeFormatting(fallback, casual: casual),
+                    preprocessed: stripped, casual: casual,
+                    noPreceding: noPreceding)
+            }
             return adjustFirstCharCasing(
                 normalizeFormatting(cleaned, casual: casual),
                 preprocessed: stripped, casual: casual,
@@ -1596,6 +1607,62 @@ public enum PolishPipeline {
         }
 
         return nil
+    }
+
+    /// Detect when polish dropped a contiguous run of spoken content.
+    ///
+    /// Compare ordered content words (letters only, 3+ characters, lowercased,
+    /// excluding spelled-out numbers) in the input against a set of the same in
+    /// the output. A long run of input words absent from the output means a
+    /// clause or sentence was summarized away, so fall back to the raw input.
+    /// Scattered gaps from filler removal, number normalization, or dedup stay
+    /// short and pass.
+    ///
+    /// Returns the preprocessed text as fallback, or nil if no dropped run.
+    static func guardAgainstContentLoss(
+        polished: String, preprocessed: String,
+        maxConsecutiveMissing: Int = 3
+    ) -> String? {
+        let inputWords = contentWords(preprocessed)
+        let outputWords = Set(contentWords(polished))
+        var longestMissingRun = 0
+        var currentRun = 0
+        for word in inputWords {
+            if outputWords.contains(word) {
+                currentRun = 0
+            } else {
+                currentRun += 1
+                longestMissingRun = max(longestMissingRun, currentRun)
+            }
+        }
+        if longestMissingRun > maxConsecutiveMissing {
+            Log.debug(
+                "[CONTENT_GUARD] dropped run=\(longestMissingRun)"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+        return nil
+    }
+
+    /// Spelled-out numbers are excluded from content-word coverage because
+    /// faithful polish rewrites them as digits ("forty" becomes "40").
+    private static let numberWords: Set<String> = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight",
+        "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+        "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+        "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
+        "thousand", "million", "billion",
+    ]
+
+    /// Extract lowercased letter-only words of 3+ characters, excluding
+    /// spelled-out numbers.
+    private static func contentWords(_ text: String) -> [String] {
+        text.lowercased()
+            .split { !$0.isLetter }
+            .map(String.init)
+            .filter { $0.count >= 3 && !numberWords.contains($0) }
     }
 
     /// Send preprocessed text through the model, dropping the preceding
