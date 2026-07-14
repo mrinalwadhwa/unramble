@@ -57,6 +57,8 @@ struct StreamingReplay {
         let only = readFlag("/tmp/freeflow-replay-only")
         let stepMS = Int(readFlag("/tmp/freeflow-replay-step-ms") ?? "") ?? 3000
         let stepBytes = max(1, stepMS * 32)  // 16 kHz mono 16-bit = 32 bytes/ms
+        let repeats = max(1, Int(
+            readFlag("/tmp/freeflow-replay-repeat") ?? "") ?? 1)
 
         var wavs = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path))
             ?? []).filter { $0.hasSuffix(".wav") }.sorted()
@@ -94,30 +96,27 @@ struct StreamingReplay {
             guard wav.count > 44 else { continue }
             let pcm = wav.subdata(in: WAVEncoder.headerSize..<wav.count)
 
-            let provider = LocalStreamingProvider(
-                sttEngine: nemotron, polishChatClient: client)
-            let previews = ChunkCollector()
-            provider.setChunkHandler { text in previews.append(text) }
+            // The recognizer is deterministic, so the raw STT is fixed; polish
+            // is not, so repeat to measure its run-to-run error rate. Each run
+            // uses a fresh provider. Production injects the whole result once at
+            // release, so the editor is reconstructed from that single result.
+            for run in 0..<repeats {
+                let provider = LocalStreamingProvider(
+                    sttEngine: nemotron, polishChatClient: client)
+                let result = try await provider.replay(
+                    audio: pcm, stepBytes: stepBytes)
 
-            let result = try await provider.replay(
-                audio: pcm, stepBytes: stepBytes)
+                var editor = ""
+                Self.appendChunk(result, to: &editor)
+                let editorText = editor.trimmingCharacters(in: .whitespaces)
 
-            // Production injects the whole result once at release. Reconstruct
-            // what the editor would contain from that single injection. The
-            // per-unit previews are logged for insight only.
-            var editor = ""
-            Self.appendChunk(result, to: &editor)
-
-            log.log("[\(name)]")
-            for (i, preview) in previews.all.enumerated() {
-                log.log("  unit \(i + 1): \"\(visible(preview))\"")
+                // One machine-parseable record per run for offline scoring.
+                let record = "{\"wav\":\"\(name)\",\"run\":\(run)"
+                    + ",\"paras\":\(paragraphCount(editorText))"
+                    + ",\"stt\":\"\(jsonEscape(provider.lastRawTranscript))\""
+                    + ",\"out\":\"\(jsonEscape(editorText))\"}"
+                log.log("[[RUN]] \(record)")
             }
-
-            let editorText = editor.trimmingCharacters(in: .whitespaces)
-            log.log("  --- raw STT: \(provider.lastRawTranscript)")
-            log.log("  --- EDITOR (\(paragraphCount(editorText)) paragraphs):")
-            log.log(indent(editorText))
-            log.log("")
         }
 
         await nemotron.unload()
@@ -179,6 +178,15 @@ struct StreamingReplay {
 /// Make newlines visible in the log so break placement is unambiguous.
 private func visible(_ s: String) -> String {
     s.replacingOccurrences(of: "\n", with: "\\n")
+}
+
+/// Escape a string for a single-line JSON record.
+private func jsonEscape(_ s: String) -> String {
+    s.replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+        .replacingOccurrences(of: "\n", with: "\\n")
+        .replacingOccurrences(of: "\r", with: "\\r")
+        .replacingOccurrences(of: "\t", with: "\\t")
 }
 
 private func indent(_ s: String) -> String {
