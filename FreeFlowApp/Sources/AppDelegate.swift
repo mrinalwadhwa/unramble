@@ -383,11 +383,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #endif
         } else {
             // Cloud mode: OpenAI STT + cloud polish.
-            let polishClient = OpenAIChatClient(
-                apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
-            batchProvider = OpenAIBatchProvider(
+            batchProvider = OpenAIFileTranscriber(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
-                polishChatClient: polishClient)
+                language: Settings.shared.language.languageCode)
             streamingProvider = OpenAIStreamingProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
             onSessionExpired = { [weak self] in

@@ -32,20 +32,24 @@ private func toneWAV(seconds: Double = 1.0, sampleRate: Int = 16000) -> Data {
         pcmData: pcm, sampleRate: sampleRate, channels: 1, bitsPerSample: 16)
 }
 
-private actor BatchPolishSpy: PolishChatClient {
-    private(set) var models: [String] = []
+private func requestBody(_ request: URLRequest) -> Data? {
+    if let body = request.httpBody { return body }
+    guard let stream = request.httpBodyStream else { return nil }
 
-    func complete(
-        model: String,
-        systemPrompt: String,
-        userPrompt: String
-    ) async throws -> String {
-        models.append(model)
-        return "polished fallback."
+    stream.open()
+    defer { stream.close() }
+    var body = Data()
+    var buffer = [UInt8](repeating: 0, count: 4_096)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        guard count >= 0 else { return nil }
+        if count == 0 { break }
+        body.append(contentsOf: buffer.prefix(count))
     }
+    return body
 }
 
-private final class MutableAPIKey: @unchecked Sendable {
+private final class MutableString: @unchecked Sendable {
     private let lock = NSLock()
     private var storedValue: String
 
@@ -88,7 +92,7 @@ private final class APIKeyAccessRecorder: @unchecked Sendable {
     }
 }
 
-private final class BatchRequestRecorder: @unchecked Sendable {
+private final class RequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var request: URLRequest?
 
@@ -103,12 +107,12 @@ private final class BatchRequestRecorder: @unchecked Sendable {
 
 // MARK: - Stubbed tests
 
-@Suite("OpenAIBatchProvider – stubbed")
-struct OpenAIBatchProviderStubbedTests {
+@Suite("OpenAIFileTranscriber – stubbed")
+struct OpenAIFileTranscriberStubbedTests {
 
     @Test("default session bounds the complete transcription resource")
     func defaultSessionTotalTimeout() {
-        let configuration = OpenAIBatchProvider.defaultSessionConfiguration()
+        let configuration = OpenAIFileTranscriber.defaultSessionConfiguration()
 
         #expect(configuration.timeoutIntervalForRequest == 60)
         #expect(configuration.timeoutIntervalForResource == 60)
@@ -116,50 +120,48 @@ struct OpenAIBatchProviderStubbedTests {
 
     @Test("POST to audio/transcriptions endpoint")
     func endpointURL() async throws {
-        var capturedRequest: URLRequest?
+        let recorder = RequestRecorder()
         let session = stubbedSession { request in
-            capturedRequest = request
+            recorder.record(request)
             let body = #"{"text":"hello world"}"#
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200,
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "sk-test",
-            polishChatClient: nil,
             session: session)
         _ = try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
 
-        let request = try #require(capturedRequest)
+        let request = try #require(recorder.snapshot)
         #expect(request.url?.absoluteString == "https://api.openai.com/v1/audio/transcriptions")
         #expect(request.httpMethod == "POST")
     }
 
     @Test("Bearer auth header from API key")
     func authHeader() async throws {
-        var capturedRequest: URLRequest?
+        let recorder = RequestRecorder()
         let session = stubbedSession { request in
-            capturedRequest = request
+            recorder.record(request)
             let body = #"{"text":"ok"}"#
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200,
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "sk-my-key",
-            polishChatClient: nil,
             session: session)
         _ = try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
 
-        let request = try #require(capturedRequest)
+        let request = try #require(recorder.snapshot)
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-my-key")
     }
 
     @Test("Reads a replacement API key without rebuilding the provider")
     func refreshedAuthHeader() async throws {
-        let apiKey = MutableAPIKey("sk-expired")
+        let apiKey = MutableString("sk-expired")
         let recorder = AuthorizationRecorder()
         let session = stubbedSession { request in
             recorder.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
@@ -169,9 +171,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: apiKey.value,
-            polishChatClient: nil,
             session: session)
 
         _ = try await provider.dictate(audio: silentWAV(), context: .empty)
@@ -185,22 +186,21 @@ struct OpenAIBatchProviderStubbedTests {
 
     @Test("multipart content type with boundary")
     func contentType() async throws {
-        var capturedRequest: URLRequest?
+        let recorder = RequestRecorder()
         let session = stubbedSession { request in
-            capturedRequest = request
+            recorder.record(request)
             let body = #"{"text":"ok"}"#
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 200,
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         _ = try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
 
-        let request = try #require(capturedRequest)
+        let request = try #require(recorder.snapshot)
         let ct = request.value(forHTTPHeaderField: "Content-Type") ?? ""
         #expect(ct.hasPrefix("multipart/form-data; boundary="))
     }
@@ -208,7 +208,7 @@ struct OpenAIBatchProviderStubbedTests {
     @Test("multipart body contains file and model fields")
     func bodyFields() {
         let audio = silentWAV()
-        let body = OpenAIBatchProvider.buildMultipartBody(
+        let body = OpenAIFileTranscriber.buildMultipartBody(
             audio: audio,
             model: "gpt-4o-mini-transcribe",
             boundary: "BOUNDARY")
@@ -227,12 +227,60 @@ struct OpenAIBatchProviderStubbedTests {
         #expect(contains("--BOUNDARY--\r\n"))
     }
 
+    @Test("configured language is sent with the transcription request")
+    func languageField() async throws {
+        let recorder = RequestRecorder()
+        let session = stubbedSession { request in
+            recorder.record(request)
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, Data(#"{"text":"bonjour"}"#.utf8))
+        }
+        let provider = OpenAIFileTranscriber(
+            apiKey: "k",
+            language: "fr",
+            session: session)
+
+        _ = try await provider.dictate(audio: silentWAV(), context: .empty)
+
+        let request = try #require(recorder.snapshot)
+        let body = try #require(requestBody(request))
+        #expect(body.range(of: Data("name=\"language\"".utf8)) != nil)
+        #expect(body.range(of: Data("\r\n\r\nfr\r\n".utf8)) != nil)
+    }
+
+    @Test("reads the current language when constructing each request")
+    func refreshedLanguageField() async throws {
+        let language = MutableString("en")
+        let recorder = RequestRecorder()
+        let session = stubbedSession { request in
+            recorder.record(request)
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, Data(#"{"text":"bonjour"}"#.utf8))
+        }
+        let provider = OpenAIFileTranscriber(
+            apiKey: "k",
+            language: language.value,
+            session: session)
+        language.value = "fr"
+
+        _ = try await provider.dictate(audio: silentWAV(), context: .empty)
+
+        let request = try #require(recorder.snapshot)
+        let body = try #require(requestBody(request))
+        #expect(body.range(of: Data("\r\n\r\nfr\r\n".utf8)) != nil)
+        #expect(body.range(of: Data("\r\n\r\nen\r\n".utf8)) == nil)
+    }
+
     @Test("multipart body contains audio bytes")
     func bodyAudioBytes() {
         // Use a small audio payload with a recognizable marker.
         let marker: [UInt8] = [0xDE, 0xAD, 0xBE, 0xEF]
         let audio = Data(marker)
-        let body = OpenAIBatchProvider.buildMultipartBody(
+        let body = OpenAIFileTranscriber.buildMultipartBody(
             audio: audio,
             model: "m",
             boundary: "B")
@@ -247,9 +295,8 @@ struct OpenAIBatchProviderStubbedTests {
             Issue.record("network should not be called for empty audio")
             throw URLError(.badServerResponse)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         await #expect(throws: DictationError.self) {
             try await provider.dictate(audio: Data(), context: AppContext.empty)
@@ -258,7 +305,7 @@ struct OpenAIBatchProviderStubbedTests {
 
     @Test("24,999,999-byte audio reaches request construction")
     func audioImmediatelyBelowUploadLimitIsAccepted() async throws {
-        let recorder = BatchRequestRecorder()
+        let recorder = RequestRecorder()
         let session = stubbedSession { request in
             recorder.record(request)
             let response = HTTPURLResponse(
@@ -266,9 +313,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, Data(#"{"text":"ok"}"#.utf8))
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "sk-test",
-            polishChatClient: nil,
             session: session)
 
         _ = try await provider.dictate(
@@ -286,9 +332,8 @@ struct OpenAIBatchProviderStubbedTests {
             Issue.record("network should not be called for oversized audio")
             throw URLError(.badServerResponse)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: apiKey.value,
-            polishChatClient: nil,
             session: session)
 
         do {
@@ -318,9 +363,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "bad",
-            polishChatClient: nil,
             session: session)
         await #expect(throws: DictationError.authenticationFailed) {
             try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
@@ -336,9 +380,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         do {
             _ = try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
@@ -360,9 +403,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         do {
             _ = try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
@@ -383,9 +425,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         await #expect(throws: DictationError.self) {
             try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
@@ -401,9 +442,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         await #expect(throws: DictationError.self) {
             try await provider.dictate(audio: silentWAV(), context: AppContext.empty)
@@ -412,9 +452,7 @@ struct OpenAIBatchProviderStubbedTests {
 
     @Test("already-clean transcript passes through without LLM")
     func cleanTranscriptPassthrough() async throws {
-        // When polish client is nil AND the transcript is already clean,
-        // the regex preprocessing runs (may capitalize first letter) and
-        // the skip heuristic returns the result unchanged.
+        // Deterministic cleanup leaves an already-clean transcript unchanged.
         let session = stubbedSession { request in
             let body = #"{"text":"The deployment went smoothly."}"#
             let response = HTTPURLResponse(
@@ -422,42 +460,17 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         let result = try await provider.dictate(
             audio: silentWAV(), context: AppContext.empty)
         #expect(result == "The deployment went smoothly.")
     }
 
-    @Test("batch fallback retains chat polish")
-    func batchFallbackPolish() async throws {
-        let session = stubbedSession { request in
-            let body = #"{"text":"Um this needs cleanup"}"#
-            let response = HTTPURLResponse(
-                url: request.url!, statusCode: 200,
-                httpVersion: nil, headerFields: nil)!
-            return (response, body.data(using: .utf8)!)
-        }
-        let polish = BatchPolishSpy()
-        let provider = OpenAIBatchProvider(
-            apiKey: "k",
-            polishChatClient: polish,
-            polishModel: "batch-polish-model",
-            session: session)
-
-        let result = try await provider.dictate(
-            audio: silentWAV(), context: .empty)
-
-        #expect(result == "polished fallback.")
-        #expect(await polish.models == ["batch-polish-model"])
-    }
-
-    @Test("dictated punctuation substituted when polish client is nil")
-    func dictatedPunctuationWithoutLLM() async throws {
-        // "hello comma world" → "Hello, world" via regex substitution
-        // even without LLM.
+    @Test("dictated punctuation receives deterministic cleanup")
+    func dictatedPunctuationCleanup() async throws {
+        // "hello comma world" -> "Hello, world" without another model call.
         let session = stubbedSession { request in
             let body = #"{"text":"hello comma world"}"#
             let response = HTTPURLResponse(
@@ -465,13 +478,32 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         let result = try await provider.dictate(
             audio: silentWAV(), context: AppContext.empty)
         #expect(result == "Hello, world")
+    }
+
+    @Test("non-English fallback preserves words that resemble English fillers")
+    func nonEnglishTranscriptPreservation() async throws {
+        let session = stubbedSession { request in
+            let body = #"{"text":"um zehn Uhr"}"#
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, body.data(using: .utf8)!)
+        }
+        let provider = OpenAIFileTranscriber(
+            apiKey: "k",
+            language: "de",
+            session: session)
+
+        let result = try await provider.dictate(
+            audio: silentWAV(), context: AppContext.empty)
+
+        #expect(result == "um zehn Uhr")
     }
 
     @Test("empty transcript returns empty string")
@@ -483,9 +515,8 @@ struct OpenAIBatchProviderStubbedTests {
                 httpVersion: nil, headerFields: nil)!
             return (response, body.data(using: .utf8)!)
         }
-        let provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            polishChatClient: nil,
             session: session)
         let result = try await provider.dictate(
             audio: silentWAV(), context: AppContext.empty)
@@ -496,9 +527,9 @@ struct OpenAIBatchProviderStubbedTests {
 // MARK: - Live integration (gated)
 
 @Suite(
-    "OpenAIBatchProvider – live",
+    "OpenAIFileTranscriber – live",
     .disabled(if: ProcessInfo.processInfo.environment["FREEFLOW_TEST_OPENAI"] != "1"))
-struct OpenAIBatchProviderLiveTests {
+struct OpenAIFileTranscriberLiveTests {
 
     private var apiKey: String {
         ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? ""
@@ -510,8 +541,7 @@ struct OpenAIBatchProviderLiveTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIBatchProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIFileTranscriber(apiKey: apiKey)
         // A 1 kHz tone is not speech, so the transcript will likely be empty
         // or a short placeholder. We just verify the call succeeds.
         _ = try await provider.dictate(audio: toneWAV(), context: AppContext.empty)
@@ -523,25 +553,9 @@ struct OpenAIBatchProviderLiveTests {
             Issue.record("OPENAI_API_KEY not set")
             return
         }
-        let provider = OpenAIBatchProvider(
-            apiKey: apiKey, polishChatClient: nil)
+        let provider = OpenAIFileTranscriber(apiKey: apiKey)
         _ = try await provider.dictate(
             audio: silentWAV(seconds: 0.5), context: AppContext.empty)
     }
 
-    @Test("live: batch dictate with polish pipeline")
-    func liveWithPolish() async throws {
-        guard !apiKey.isEmpty else {
-            Issue.record("OPENAI_API_KEY not set")
-            return
-        }
-        let polish = OpenAIChatClient(apiKey: apiKey)
-        let provider = OpenAIBatchProvider(
-            apiKey: apiKey, polishChatClient: polish)
-        // Silent audio should produce an empty transcript → polish returns ""
-        let result = try await provider.dictate(
-            audio: silentWAV(), context: AppContext.empty)
-        // Just assert the call completes without throwing.
-        _ = result
-    }
 }

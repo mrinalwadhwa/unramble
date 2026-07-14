@@ -1,14 +1,14 @@
 import Foundation
 
-/// Dictation provider that calls OpenAI's audio transcription endpoint
-/// and optionally runs the shared polish pipeline on the result.
+/// Exact-WAV fallback that calls OpenAI's audio transcription endpoint.
 ///
 /// Send a complete WAV file to the `/v1/audio/transcriptions` endpoint,
-/// receive the raw transcript, then run it through `PolishPipeline` for
-/// regex substitution, skip-heuristic, and (if a chat client is provided)
-/// LLM refinement. When no polish chat client is provided, the raw
-/// transcript is returned after regex preprocessing only.
-public struct OpenAIBatchProvider: BatchDictationProviding {
+/// receive the raw transcript, then apply deterministic English punctuation
+/// and formatting cleanup. Other languages pass through unchanged after
+/// trimming so English-specific rules cannot delete valid words. The fallback
+/// deliberately has no second model-polish request: Realtime remains the only
+/// cloud polish architecture.
+public struct OpenAIFileTranscriber: BatchDictationProviding {
 
     /// OpenAI requires transcription uploads to be strictly smaller than 25 MB.
     static let maximumAudioBytes = 24_999_999
@@ -16,26 +16,21 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
     private let apiKeyProvider: @Sendable () -> String
     private let model: String
     private let endpoint: URL
-    private let polishChatClient: (any PolishChatClient)?
-    private let polishModel: String
     private let session: URLSession
-
-    /// Language code for polish prompt selection (e.g. "en", "fr").
-    public var language: String?
+    /// Read once at request start so settings changes apply between sessions.
+    private let languageProvider: @Sendable () -> String?
 
     public init(
         apiKey: @autoclosure @escaping @Sendable () -> String,
         model: String = "gpt-4o-mini-transcribe",
+        language: @autoclosure @escaping @Sendable () -> String? = nil,
         endpoint: URL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
-        polishChatClient: (any PolishChatClient)?,
-        polishModel: String = PolishPipeline.polishModel,
         session: URLSession? = nil
     ) {
         self.apiKeyProvider = apiKey
         self.model = model
+        self.languageProvider = language
         self.endpoint = endpoint
-        self.polishChatClient = polishChatClient
-        self.polishModel = polishModel
         if let session {
             self.session = session
         } else {
@@ -65,19 +60,25 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
                 actualBytes: audio.count)
         }
 
-        let rawTranscript = try await transcribe(audio: audio)
+        let configuredLanguage = languageProvider()?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let language = configuredLanguage?.isEmpty == false
+            ? configuredLanguage : nil
+        let rawTranscript = try await transcribe(
+            audio: audio, language: language)
         try Task.checkCancellation()
         let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             return ""
         }
 
-        return await polish(trimmed, context: context)
+        return Self.cleanUp(trimmed, context: context, language: language)
     }
 
     // MARK: - Transcription
 
-    private func transcribe(audio: Data) async throws -> String {
+    private func transcribe(audio: Data, language: String?) async throws -> String {
         let boundary = "FreeFlowKit-" + UUID().uuidString
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -86,7 +87,7 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
             forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKeyProvider())", forHTTPHeaderField: "Authorization")
         request.httpBody = Self.buildMultipartBody(
-            audio: audio, model: model, boundary: boundary)
+            audio: audio, model: model, language: language, boundary: boundary)
 
         let data: Data
         let response: URLResponse
@@ -109,16 +110,19 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
             throw DictationError.rateLimited
         default:
             let message =
-                OpenAIChatClient.extractErrorMessage(data)
+                Self.extractErrorMessage(data)
                 ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
             throw DictationError.requestFailed(
                 statusCode: http.statusCode, message: message)
         }
     }
 
-    /// Build a multipart/form-data body containing the audio file and model field.
+    /// Build the multipart/form-data transcription request body.
     static func buildMultipartBody(
-        audio: Data, model: String, boundary: String
+        audio: Data,
+        model: String,
+        language: String? = nil,
+        boundary: String
     ) -> Data {
         let crlf = "\r\n"
         var body = Data()
@@ -142,6 +146,15 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
             "Content-Disposition: form-data; name=\"response_format\"\(crlf)\(crlf)")
         body.appendString("json\(crlf)")
 
+        if let language = language?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !language.isEmpty
+        {
+            body.appendString("--\(boundary)\(crlf)")
+            body.appendString(
+                "Content-Disposition: form-data; name=\"language\"\(crlf)\(crlf)")
+            body.appendString("\(language)\(crlf)")
+        }
+
         // Closing boundary.
         body.appendString("--\(boundary)--\(crlf)")
 
@@ -159,51 +172,31 @@ public struct OpenAIBatchProvider: BatchDictationProviding {
         return text
     }
 
-    // MARK: - Polishing
+    private static func extractErrorMessage(_ data: Data) -> String? {
+        guard
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let error = json["error"] as? [String: Any],
+            let message = error["message"] as? String
+        else {
+            return nil
+        }
+        return message
+    }
 
-    /// Run the polish pipeline on the raw transcript.
-    ///
-    /// Deterministic preprocessing always runs. LLM polish only runs
-    /// when a chat client is configured. LLM failures fall back to the
-    /// preprocessed text.
-    private func polish(_ raw: String, context: AppContext) async -> String {
+    /// Apply only deterministic cleanup to degraded fallback output.
+    private static func cleanUp(
+        _ raw: String, context: AppContext, language: String?
+    ) -> String {
+        guard language == nil || language == "en" else {
+            return raw
+        }
         let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
         let substituted = PolishPipeline.substituteDictatedPunctuation(
             raw, casual: casual,
             precedingText: context.focusedFieldContent)
         let stripped = PolishPipeline.stripKeepTags(
             substituted, casual: casual)
-
-        guard let polishChatClient else {
-            return PolishPipeline.normalizeFormatting(
-                stripped, casual: casual)
-        }
-
-        let systemPrompt = PolishPipeline.buildCloudSystemPrompt(
-            context: context, language: language)
-        let userPrompt = PolishPipeline.buildUserPrompt(
-            substituted, context: context, language: language)
-
-        do {
-            let polished = try await polishChatClient.complete(
-                model: polishModel,
-                systemPrompt: systemPrompt,
-                userPrompt: userPrompt)
-            if polished.isEmpty {
-                return PolishPipeline.normalizeFormatting(
-                    stripped, casual: casual)
-            }
-            let untagged = PolishPipeline.stripKeepTags(
-                polished, casual: casual)
-            let normalized = PolishPipeline.normalizeFormatting(
-                untagged, casual: casual)
-            return PolishPipeline.matchInputCasing(
-                normalized, preprocessedInput: substituted,
-                casual: casual)
-        } catch {
-            return PolishPipeline.normalizeFormatting(
-                stripped, casual: casual)
-        }
+        return PolishPipeline.normalizeFormatting(stripped, casual: casual)
     }
 }
 

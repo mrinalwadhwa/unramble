@@ -277,6 +277,7 @@ final class StreamingPipelineTests: XCTestCase {
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
         transcriptBuffer: TranscriptBuffer? = nil,
+        micDiagnosticStore: MicDiagnosticStore? = nil,
         localMode: Bool = false,
         onSessionExpired: (@Sendable () -> Void)? = nil,
         cloudRecordingLimitSleep: @escaping @Sendable (Duration) async -> Void = {
@@ -298,6 +299,7 @@ final class StreamingPipelineTests: XCTestCase {
             transcriptBuffer: transcriptBuffer,
             streamingProvider: streamingProvider,
             onSessionExpired: onSessionExpired,
+            micDiagnosticStore: micDiagnosticStore,
             localMode: localMode,
             cloudRecordingLimitSleep: cloudRecordingLimitSleep
         )
@@ -2259,6 +2261,24 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "Streaming result")
     }
 
+    func testStreamingSuccessIsIdentifiedInDiagnostics() async {
+        let streaming = MockStreamingProvider(stubbedText: "Streaming result")
+        let dictation = MockBatchProvider(stubbedText: "Batch result")
+        let diagnostics = MicDiagnosticStore()
+        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming,
+            micDiagnosticStore: diagnostics)
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+
+        let text = await diagnostics.formattedDiagnostics()
+        XCTAssertTrue(text.contains("result=ok_realtime"), text)
+    }
+
     func testStreamingFailureFallsToBatchHTTP() async {
         // When streaming fails, batch HTTP should be called as fallback.
         let streaming = MockStreamingProvider()
@@ -2278,6 +2298,25 @@ final class StreamingPipelineTests: XCTestCase {
             dictation.dictateCallCount, 1,
             "Batch should be called as fallback when streaming fails")
         XCTAssertEqual(injector.lastInjectedText, "Batch fallback")
+    }
+
+    func testStreamingFallbackSuccessIsIdentifiedInDiagnostics() async {
+        let streaming = MockStreamingProvider()
+        streaming.stubbedFinishError = DictationError.networkError("ws died")
+        let dictation = MockBatchProvider(stubbedText: "Batch fallback")
+        let diagnostics = MicDiagnosticStore()
+        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming,
+            micDiagnosticStore: diagnostics)
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+
+        let text = await diagnostics.formattedDiagnostics()
+        XCTAssertTrue(text.contains("result=ok_http_fallback"), text)
     }
 
     func testBothStreamingAndBatchFailPreservesCompleteWAVForRetry() async {

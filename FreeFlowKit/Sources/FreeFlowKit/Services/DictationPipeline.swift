@@ -101,6 +101,17 @@ public actor DictationPipeline: PipelineProviding {
         let task: Task<Void, Never>
     }
 
+    private enum DictationSource: String {
+        case local
+        case realtime
+        case httpFallback = "http_fallback"
+    }
+
+    private struct ResolvedDictation {
+        let text: String
+        let source: DictationSource
+    }
+
     /// Shared barrier for overlapping cancel and retirement requests.
     private var cancellationDrain: CancellationDrain?
 
@@ -980,17 +991,20 @@ public actor DictationPipeline: PipelineProviding {
             }
 
             // Resolve the transcript from the appropriate provider.
-            let dictatedText: String?
+            let resolvedDictation: ResolvedDictation?
             if useStreaming, let streaming = streamingProvider {
                 if localMode {
-                    dictatedText = await finishLocalDictation(
+                    let text = await finishLocalDictation(
                         streaming: streaming,
                         streamingCandidateIsValid: streamingCandidateIsValid,
                         audioBuffer: audioBuffer,
                         context: context,
                         coordinator: coordinator)
+                    resolvedDictation = text.map {
+                        ResolvedDictation(text: $0, source: .local)
+                    }
                 } else if let batchProvider {
-                    dictatedText = await finishCloudDictation(
+                    resolvedDictation = await finishCloudDictation(
                         streaming: streaming,
                         streamingCandidateIsValid: streamingCandidateIsValid,
                         audioBuffer: audioBuffer,
@@ -1002,30 +1016,33 @@ public actor DictationPipeline: PipelineProviding {
                 } else {
                     Log.debug("[Pipeline] No batch provider, cannot finish cloud dictation")
                     await coordinator.reset()
-                    dictatedText = nil
+                    resolvedDictation = nil
                 }
             } else if let batchProvider {
                 Log.debug("[Pipeline] batch mode, sending to dictation service")
-                dictatedText = await batchDictate(
+                let text = await batchDictate(
                     audioBuffer: audioBuffer,
                     context: context,
                     batchProvider: batchProvider,
                     coordinator: coordinator,
                     diagnosticStartedAt: t0,
                     silenceThreshold: postRecordThreshold)
+                resolvedDictation = text.map {
+                    ResolvedDictation(text: $0, source: .httpFallback)
+                }
             } else {
                 Log.debug("[Pipeline] No dictation provider available")
                 await coordinator.reset()
-                dictatedText = nil
+                resolvedDictation = nil
             }
 
-            guard let dictatedText else { return }
+            guard let resolvedDictation else { return }
 
             let t4 = CFAbsoluteTimeGetCurrent()
 
             // Inject the result.
             await injectResult(
-                dictatedText,
+                resolvedDictation.text,
                 context: context,
                 audioBuffer: audioBuffer,
                 coordinator: coordinator,
@@ -1036,7 +1053,7 @@ public actor DictationPipeline: PipelineProviding {
                 silenceThreshold: postRecordThreshold,
                 t0: t0, t1: t1, t4: t4,
                 completeEnteredAt: completeEnteredAt,
-                mode: useStreaming ? "streaming" : "batch")
+                mode: resolvedDictation.source.rawValue)
         }
 
         self.pipelineTask = task
@@ -1118,9 +1135,9 @@ public actor DictationPipeline: PipelineProviding {
     }
 
     /// Time reserved after Realtime finalization for full-file transcription,
-    /// optional batch polish, injection, and teardown. The underlying network
-    /// clients use 60- and 30-second request timeouts; ten seconds covers the
-    /// surrounding pipeline work.
+    /// deterministic cleanup, injection, and teardown. The HTTP request is
+    /// bounded at 60 seconds; the remaining budget covers pipeline handoff and
+    /// downstream delivery without clipping the recovery path.
     static let cloudBatchRecoveryReserve: TimeInterval = 100
 
     /// Compute the hard deadline for a pipeline task given how long the user
@@ -1408,8 +1425,9 @@ public actor DictationPipeline: PipelineProviding {
         coordinator: RecordingCoordinator,
         diagnosticStartedAt: CFAbsoluteTime,
         silenceThreshold: Float
-    ) async -> String? {
+    ) async -> ResolvedDictation? {
         var text: String?
+        var source = DictationSource.realtime
         if streamingCandidateIsValid {
             Log.debug("[Pipeline] finishing streaming session (cloud)")
             let finishOperation = StreamingFinishOperation {
@@ -1442,6 +1460,7 @@ public actor DictationPipeline: PipelineProviding {
 
         if text == nil {
             guard !Task.isCancelled else { return nil }
+            source = .httpFallback
             Log.debug("[Pipeline] Falling back to batch HTTP")
             text = await batchDictate(
                 audioBuffer: audioBuffer,
@@ -1455,7 +1474,8 @@ public actor DictationPipeline: PipelineProviding {
         if text == nil {
             Log.debug("[Pipeline] Both streaming and batch failed")
         }
-        return text
+        guard let text else { return nil }
+        return ResolvedDictation(text: text, source: source)
     }
 
     // MARK: - Result Injection
@@ -1554,7 +1574,7 @@ public actor DictationPipeline: PipelineProviding {
                     threshold: silenceThreshold,
                     duration: audioBuffer.duration,
                     latency: t5 - t0,
-                    result: "ok"
+                    result: "ok_\(mode)"
                 ))
         }
 

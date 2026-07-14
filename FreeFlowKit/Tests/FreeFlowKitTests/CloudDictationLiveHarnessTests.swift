@@ -284,10 +284,9 @@ struct CloudDictationLiveHarnessTests {
                 $0.category == "meeting"
                     && $0.input.hasPrefix("the key takeaways")
             })
-        var provider = OpenAIBatchProvider(
+        let provider = OpenAIFileTranscriber(
             apiKey: apiKey,
-            polishChatClient: nil)
-        provider.language = "en"
+            language: "en")
 
         let startedAt = Date()
         let output = try await provider.dictate(

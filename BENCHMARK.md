@@ -30,10 +30,11 @@ release the key.
    polish request, then inject exactly one final result through accessibility.
 
 If the Realtime path fails, the pipeline can then use
-`POST /v1/audio/transcriptions` and polish that transcript through the
-chat-completion path. Cloud delivery is atomic, so recovery always sends the
-exact complete WAV before injecting one final result. This is serial recovery,
-not a request racing the live WebSocket.
+`POST /v1/audio/transcriptions`, followed by deterministic English cleanup or
+unchanged non-English pass-through. There is no second model request. Cloud
+delivery is atomic, so recovery always sends the exact complete WAV before
+injecting one final result. This is serial recovery, not a request racing the
+live WebSocket.
 
 Cloud recording auto-finalizes after 300 seconds of wall time. The 310-second
 source guard allows for scheduling delay without treating a hard acoustic cut

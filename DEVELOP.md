@@ -43,10 +43,10 @@ overlay. Sources are in `Sources/`, bundled HTML and assets in
 `Resources/`.
 
 **`FreeFlowKit/`** — Swift package with the testable core. The
-dictation pipeline, streaming and batch OpenAI providers, the polish
-pipeline, audio capture, device switching, text injection, Keychain
-storage, and the recording state machine. Protocols for every provider
-enable dependency injection in tests.
+dictation pipeline, Realtime and HTTP file-transcription OpenAI providers,
+the polish pipeline, audio capture, device switching, text injection,
+Keychain storage, and the recording state machine. Protocols for every
+provider enable dependency injection in tests.
 
 The supported local pipeline is incremental and has one production speech
 recognizer:
@@ -108,8 +108,7 @@ defaults:
 |----------|------|---------|-------------|
 | `realtimeModel` | `OpenAIStreamingProvider.swift` | `gpt-realtime-2.1` | Production Realtime connection and response polish |
 | `sttModel` | `OpenAIStreamingProvider.swift` | `gpt-4o-mini-transcribe` | Realtime transcription |
-| `model` | `OpenAIBatchProvider.swift` | `gpt-4o-mini-transcribe` | Batch fallback transcription |
-| `polishModel` | `PolishPipeline.swift` | `gpt-5.4-nano` | HTTP batch fallback polish |
+| `model` | `OpenAIFileTranscriber.swift` | `gpt-4o-mini-transcribe` | HTTP fallback transcription |
 
 The local Nemotron and Qwen repository revisions, selected files, and hashes
 are pinned in `scripts/models.sh`. The fine-tuned adapter source is tracked at

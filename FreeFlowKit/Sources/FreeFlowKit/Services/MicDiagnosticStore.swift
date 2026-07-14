@@ -11,7 +11,7 @@ public struct MicDiagnosticEntry: Sendable {
     public let threshold: Float
     public let duration: TimeInterval
     public let latency: TimeInterval  // total pipeline latency
-    public let result: String  // "ok", "silent", "empty", "error"
+    public let result: String  // e.g. "ok_realtime", "ok_http_fallback", "silent"
 
     public init(
         timestamp: Date = Date(),

@@ -41,8 +41,8 @@ dictations can skip the WebSocket handshake.
 
 The same Realtime connection transcribes the audio and returns one polished
 response after key release. If that streaming path fails before delivery,
-FreeFlow recovers through batch transcription and chat polish using the exact
-complete recording.
+FreeFlow recovers through HTTP file transcription and deterministic cleanup
+using the exact complete recording.
 
 Long Realtime sessions start continued transcription items only after detected
 pauses. If a defensive hard boundary occurs without a pause and audio

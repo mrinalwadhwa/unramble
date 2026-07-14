@@ -39,11 +39,10 @@ final class AudioPipelineTests: XCTestCase {
         }
 
         // Build providers.
-        let polishClient = OpenAIChatClient(apiKey: apiKey)
         let streamingProvider = OpenAIStreamingProvider(apiKey: apiKey)
-        let batchProvider = OpenAIBatchProvider(
+        let batchProvider = OpenAIFileTranscriber(
             apiKey: apiKey,
-            polishChatClient: polishClient)
+            language: "en")
 
         var passed = 0
         var mismatched = 0
