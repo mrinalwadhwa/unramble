@@ -223,7 +223,12 @@ struct LocalStreamingProviderTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine,
             polishChatClient: polishClient,
-            cycleInterval: 0.001)
+            cycleInterval: 0.001,
+            // A small cap closes a unit on the sent audio so the background
+            // cycle starts polishing, which this test then cancels mid-flight.
+            unitPolicy: LocalUnitPolicy(
+                minimumSpeechBytes: 2, softPauseSilenceBytes: 2,
+                hardPauseSilenceBytes: 4, maximumUnitBytes: 1000))
         let collector = ChunkCollector()
         provider.setChunkHandler { text in await collector.append(text) }
 
@@ -322,10 +327,10 @@ struct LocalStreamingProviderTests {
         #expect(polishClient.completeCallCount == 1)
     }
 
-    // MARK: - Rolling injection
+    // MARK: - One final transcript
 
-    @Test("Emits committed chunks live and returns only the tail")
-    func rollingInjection() async throws {
+    @Test("Returns the whole transcript; a preview handler does not truncate it")
+    func returnsFullTranscript() async throws {
         let engine = ScriptedRecognizer(transcripts: [
             "Hi there.",
             "Hi there. This is a test.",
@@ -336,24 +341,17 @@ struct LocalStreamingProviderTests {
             polishChatClient: nil,
             cycleInterval: 0.05)
 
+        // A preview handler is set, but it must not change the returned text.
         let collector = ChunkCollector()
         provider.setChunkHandler { text in await collector.append(text) }
 
-        let tail = try await provider.replay(
+        let result = try await provider.replay(
             audio: makePCM(bytes: 96_000), stepBytes: 32_000)
 
-        let chunks = await collector.all()
-
-        // Rolling injection happened: at least one chunk was emitted.
-        #expect(!chunks.isEmpty)
-        // Chunks plus the returned tail reconstruct the full text, with
-        // each sentence appearing exactly once (forward-only).
-        let full = (chunks + [tail])
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-        #expect(full == "Hi there. This is a test. Almost done.")
-        // The committed text is not re-returned from finishStreaming.
-        #expect(!tail.contains("Hi there"))
+        // The whole transcript comes back at once, nothing dropped.
+        #expect(result.contains("Hi there"))
+        #expect(result.contains("This is a test"))
+        #expect(result.contains("Almost done"))
     }
 
     // MARK: - Paragraph breaks

@@ -1,20 +1,17 @@
 import Foundation
 
-/// On-device streaming dictation with committed, rolling injection.
+/// On-device streaming dictation that assembles one final transcript.
 ///
 /// Accumulate PCM audio during recording and feed each new slice to one
-/// incremental recognition session. Every `cycleInterval` seconds, hand the
-/// running transcript to a `CommitTracker`, which returns the sentences that
-/// have become stable (unchanged since the previous cycle and followed by
-/// more text). Those committed sentences are polished and emitted through the
-/// chunk handler, so they are injected while the user keeps talking.
+/// incremental recognition session. Every `cycleInterval` seconds, decide
+/// whether the current unit has ended — an acoustic pause or a size cap, per
+/// `LocalUnitPolicy` — and if so polish that unit and append it to an internal
+/// transcript. Nothing is injected mid-stream; `finishStreaming` closes the
+/// final unit and returns the whole polished transcript for one injection.
 ///
-/// Because streaming recognition revises text near the live edge, only
-/// sentences that have stopped changing are committed — never the
-/// volatile tail. At finish, the remaining tail is polished and returned
-/// as the final chunk. When no chunk handler is set (single-commit
-/// callers and unit tests), nothing is emitted mid-session and the whole
-/// polished transcript is returned from `finishStreaming`.
+/// A pause bounds each unit so the polish model sees short input and stays
+/// faithful. A chunk handler, if set, mirrors each closed unit for a preview
+/// but never changes what `finishStreaming` returns.
 public final class LocalStreamingProvider: StreamingDictationProviding,
     @unchecked Sendable
 {
@@ -26,6 +23,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private let polishChatClient: (any PolishChatClient)?
     private let polishModel: String
     private let cycleInterval: TimeInterval
+    private let unitPolicy: LocalUnitPolicy
+    private let silenceThreshold: Float
 
     // MARK: - State (guarded by lock)
 
@@ -50,8 +49,15 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         lock.withLock { polishedTranscript }
     }
 
-    /// Tracks which sentences have stabilized and been committed.
-    private var commitTracker = CommitTracker()
+    /// Audio byte offset where the current, not-yet-closed unit began.
+    private var unitStartByte = 0
+
+    /// Running count of trailing silence bytes at the live edge. A long
+    /// enough run closes the current unit.
+    private var trailingSilenceBytes = 0
+
+    /// The recognition transcript already turned into closed units.
+    private var committedTranscript = ""
 
     /// Incremental transcription session for the current dictation.
     private var recognitionSession: (any LocalRecognitionSession)?
@@ -74,12 +80,6 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     /// Receives each committed chunk's polished text for live injection.
     private var chunkHandler: (@Sendable (String) async -> Void)?
 
-    /// Whether any committed chunk was emitted through the handler this
-    /// session. The pipeline clears the handler before `finishStreaming`,
-    /// so this — not the current handler — decides whether committed text
-    /// was already injected and thus must be omitted from the return.
-    private var didEmitChunks = false
-
     private struct Finalization {
         let id: UUID
         let generation: UInt64
@@ -89,8 +89,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private struct FinishSnapshot {
         let audio: Data
         let context: AppContext
-        let rolling: Bool
         let committed: String
+        let committedTranscript: String
         let recognitionError: (any Error)?
         let session: (any LocalRecognitionSession)?
         let newAudio: Data
@@ -109,6 +109,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         polishChatClient: (any PolishChatClient)?,
         polishModel: String = PolishPipeline.polishModel,
         cycleInterval: TimeInterval = 3,
+        unitPolicy: LocalUnitPolicy = LocalUnitPolicy(),
+        silenceThreshold: Float? = nil,
         loadSTT: (@Sendable () async throws -> Void)? = nil
     ) {
         self.sttEngine = sttEngine
@@ -116,6 +118,9 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         self.polishChatClient = polishChatClient
         self.polishModel = polishModel
         self.cycleInterval = cycleInterval
+        self.unitPolicy = unitPolicy
+        self.silenceThreshold = silenceThreshold
+            ?? AudioLevelAnalyzer.minimumAcceptedSpeechRMS
     }
 
     // MARK: - StreamingDictationProviding
@@ -181,11 +186,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         lock.withLock {
             guard sessionGeneration == cancellationGeneration else { return }
             accumulatedAudio = Data()
-            commitTracker = CommitTracker()
             committedPolished = ""
+            committedTranscript = ""
+            unitStartByte = 0
+            trailingSilenceBytes = 0
             rawTranscript = ""
             polishedTranscript = ""
-            didEmitChunks = false
             recognitionSession = nil
             recognitionError = nil
             fedBytes = 0
@@ -226,11 +232,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             sessionGeneration &+= 1
             accumulatedAudio = Data()
             currentContext = context
-            commitTracker = CommitTracker()
             committedPolished = ""
+            committedTranscript = ""
+            unitStartByte = 0
+            trailingSilenceBytes = 0
             rawTranscript = ""
             polishedTranscript = ""
-            didEmitChunks = false
             finishing = false
             recognitionSession = newSession
             recognitionError = nil
@@ -298,8 +305,8 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             return FinishSnapshot(
                 audio: accumulatedAudio,
                 context: currentContext,
-                rolling: didEmitChunks,
                 committed: committedPolished,
+                committedTranscript: committedTranscript,
                 recognitionError: recognitionError,
                 session: recognitionSession,
                 newAudio: accumulatedAudio.subdata(in: start..<end),
@@ -318,7 +325,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 return true
             }
             guard published else { throw CancellationError() }
-            return snapshot.rolling ? "" : snapshot.committed
+            return snapshot.committed
         }
 
         guard let session = snapshot.session else {
@@ -370,41 +377,33 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 return true
             }
             guard published else { throw CancellationError() }
-            return snapshot.rolling ? "" : snapshot.committed
+            return snapshot.committed
         }
 
-        // Keep commit tracking transactional across the async polish call.
-        let transaction = lock.withLock {
-            () -> (CommitTracker, [String])? in
-            guard sessionGeneration == generation, !Task.isCancelled else {
-                return nil
-            }
-            var candidate = commitTracker
-            let remaining = candidate.commitRemaining(trimmed)
-            return (candidate, remaining)
-        }
-        guard let (candidateTracker, tailSentences) = transaction else {
-            throw CancellationError()
-        }
-        let tailText = tailSentences.joined(separator: " ")
+        // Close the final unit: everything recognized since the last unit
+        // boundary. Polish it, append to the accumulated transcript, and
+        // return the whole transcript for one injection.
+        let finalUnit = Self.unitText(
+            from: trimmed, committed: snapshot.committedTranscript)
             .trimmingCharacters(in: .whitespaces)
 
         let polishStart = CFAbsoluteTimeGetCurrent()
-        var tailPolished = ""
-        if !tailText.isEmpty {
-            tailPolished = await polishWithPreceding(
-                tailText, preceding: snapshot.committed,
+        var finalPolished = ""
+        if !finalUnit.isEmpty {
+            finalPolished = await polishWithPreceding(
+                finalUnit, preceding: snapshot.committed,
                 context: snapshot.context)
         }
         try requireCurrentSession(generation)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
-        let full = Self.joinPolished(snapshot.committed, tailPolished)
+        let full = Self.joinPolished(snapshot.committed, finalPolished)
 
         let published = lock.withLock {
             guard sessionGeneration == generation, !Task.isCancelled else {
                 return false
             }
-            commitTracker = candidateTracker
+            committedPolished = full
+            committedTranscript = trimmed
             rawTranscript = trimmed
             polishedTranscript = full
             accumulatedAudio = Data()
@@ -412,11 +411,9 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         }
         guard published else { throw CancellationError() }
 
-        Log.debug("[LocalStreaming] Finish (committed=\(candidateTracker.committed) tailSentences=\(tailSentences.count) rolling=\(snapshot.rolling) stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
+        Log.debug("[LocalStreaming] Finish (stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
-        // When committed chunks were injected live, return only the tail.
-        // Otherwise return the whole transcript.
-        return snapshot.rolling ? tailPolished : full
+        return full
     }
 
     private func requireCurrentSession(_ generation: UInt64) throws {
@@ -531,34 +528,32 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let sttElapsed = CFAbsoluteTimeGetCurrent() - sttStart
         guard !trimmed.isEmpty else { return }
 
-        // Commit any sentences that have stabilized since the last cycle.
-        let transaction = lock.withLock {
-            () -> (CommitTracker, [String], String)? in
+        // Update the trailing-silence run and decide whether a unit closes.
+        let decision = lock.withLock {
+            () -> (String, String)? in
             guard sessionGeneration == generation, !finishing,
                 recognitionError == nil
             else { return nil }
-            var candidate = commitTracker
-            let newly = candidate.ingest(trimmed)
-            return (candidate, newly, committedPolished)
+            Self.applyTrailingSilence(
+                &trailingSilenceBytes, slice: newAudio,
+                threshold: silenceThreshold)
+            let unitBytes = fedBytes - unitStartByte
+            guard unitPolicy.boundary(
+                unitByteCount: unitBytes,
+                trailingSilenceByteCount: trailingSilenceBytes) != nil
+            else { return nil }
+            let unit = Self.unitText(
+                from: trimmed, committed: committedTranscript)
+                .trimmingCharacters(in: .whitespaces)
+            return (unit, committedPolished)
         }
-        guard let (candidateTracker, newly, preceding) = transaction else {
-            return
-        }
-        guard !newly.isEmpty else {
-            lock.withLock {
-                guard sessionGeneration == generation, !finishing,
-                    recognitionError == nil
-                else { return }
-                commitTracker = candidateTracker
-            }
-            Log.debug("[LocalStreaming] Cycle: no new committed sentences (committed=\(candidateTracker.committed), stt=\(String(format: "%.2f", sttElapsed))s)")
+        guard let (unitText, preceding) = decision, !unitText.isEmpty else {
             return
         }
 
-        let text = newly.joined(separator: " ")
         let polishStart = CFAbsoluteTimeGetCurrent()
         let polished = await polishWithPreceding(
-            text, preceding: preceding, context: context)
+            unitText, preceding: preceding, context: context)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
 
         let publication = lock.withLock {
@@ -566,18 +561,18 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             guard sessionGeneration == generation, !finishing,
                 recognitionError == nil
             else { return (false, nil) }
-            commitTracker = candidateTracker
             committedPolished = Self.joinPolished(committedPolished, polished)
-            if chunkHandler != nil { didEmitChunks = true }
+            committedTranscript = trimmed
+            unitStartByte = fedBytes
+            trailingSilenceBytes = 0
             return (true, chunkHandler)
         }
         guard publication.0 else { return }
-        let handler = publication.1
 
-        Log.debug("[LocalStreaming] Committed +\(newly.count) sentences (total=\(candidateTracker.committed), stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
+        Log.debug("[LocalStreaming] Closed unit (\(unitText.count) chars, stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
-        // Emit for live injection. Skipped when no handler is set.
-        if let handler {
+        // A preview handler may mirror the unit; it does not gate the return.
+        if let handler = publication.1 {
             await handler(polished)
         }
     }
@@ -591,6 +586,33 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         if acc.isEmpty { return piece }
         if piece.isEmpty { return acc }
         return piece.hasPrefix("\n") ? acc + piece : acc + " " + piece
+    }
+
+    /// The part of `transcript` not yet emitted as a closed unit. Uses the
+    /// longest common prefix with the already-committed transcript, so a
+    /// revision inside the committed region re-emits only the changed tail
+    /// rather than duplicating settled text.
+    private static func unitText(
+        from transcript: String, committed: String
+    ) -> String {
+        let commonLength = transcript.commonPrefix(with: committed).count
+        return String(transcript.dropFirst(commonLength))
+    }
+
+    /// Extend or reset the running trailing-silence count from one fed slice.
+    /// A fully silent slice extends the run; any speech resets it to that
+    /// slice's own trailing silence.
+    private static func applyTrailingSilence(
+        _ trailing: inout Int, slice: Data, threshold: Float
+    ) {
+        guard !slice.isEmpty else { return }
+        let sliceTrailing = AudioLevelAnalyzer.trailingSilenceByteCount(
+            pcm16: slice, threshold: threshold)
+        if sliceTrailing == slice.count {
+            trailing += slice.count
+        } else {
+            trailing = sliceTrailing
+        }
     }
 
     // MARK: - Audio

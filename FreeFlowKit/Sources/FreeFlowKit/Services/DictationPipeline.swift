@@ -537,27 +537,11 @@ public actor DictationPipeline: PipelineProviding {
             let micProximity = audioProvider.micProximity
             let language = self.language
 
-            if localMode {
-                // The local provider still publishes rolling chunks. Cloud
-                // output remains atomic because arbitrary target applications
-                // cannot safely revise text after injection.
-                let injector = textInjector
-                streaming.setChunkHandler { text in
-                    let horizontal = CharacterSet(charactersIn: " \t")
-                    let toInject = text.trimmingCharacters(in: horizontal)
-                    guard !toInject.trimmingCharacters(
-                        in: .whitespacesAndNewlines).isEmpty else { return }
-                    let ctx = await AXAppContextProvider().readContext()
-                    do {
-                        try await injector.inject(text: toInject, into: ctx)
-                        Log.debug("[Pipeline] Injected chunk (\(toInject.count) chars)")
-                    } catch {
-                        Log.debug("[Pipeline] Chunk injection failed: \(error)")
-                    }
-                }
-            } else {
-                streaming.setChunkHandler(nil)
-            }
+            // Neither mode injects mid-stream. Local assembles one final
+            // transcript from bounded units; cloud stays atomic because
+            // arbitrary target applications cannot safely revise text after
+            // injection. The pipeline injects each provider's result once.
+            streaming.setChunkHandler(nil)
 
             // Timeout the streaming setup to avoid blocking complete()
             // indefinitely. ensureConnected()/sendPing can hang when the

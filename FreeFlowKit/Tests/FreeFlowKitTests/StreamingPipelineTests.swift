@@ -2158,7 +2158,7 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "Complete cloud result")
     }
 
-    func testLocalPipelineSetsChunkHandlerOnStreamingProvider() async {
+    func testLocalPipelineDoesNotSetChunkHandler() async {
         let streaming = MockStreamingProvider()
         let (pipeline, _, _, _, _, _, _) = makeStreamingPipeline(
             streamingProvider: streaming,
@@ -2167,7 +2167,9 @@ final class StreamingPipelineTests: XCTestCase {
         await pipeline.activate()
         let didStart = await waitUntil { streaming.startCallCount == 1 }
         XCTAssertTrue(didStart)
-        XCTAssertTrue(streaming.hasChunkHandler)
+        XCTAssertFalse(
+            streaming.hasChunkHandler,
+            "Local assembles one final result and does not inject mid-stream")
         await pipeline.cancel()
     }
 
