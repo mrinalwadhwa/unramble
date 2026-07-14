@@ -1,11 +1,14 @@
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, AtomicU8, Ordering},
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU8, Ordering},
+    },
 };
 
 use async_trait::async_trait;
 use cpal::{
-    BufferSize, Device, HostId, SampleFormat, Stream, SupportedBufferSize,
+    BufferSize, Device, Host, HostId, SampleFormat, Stream, SupportedBufferSize,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use freeflow_core::{
@@ -40,7 +43,79 @@ struct LocatedDevice {
     metadata: AudioDevice,
 }
 
+#[derive(Default)]
+struct AudioHostCache {
+    hosts: HashMap<HostId, Host>,
+}
+
+impl AudioHostCache {
+    fn host(&mut self, host_id: HostId) -> std::result::Result<&Host, cpal::Error> {
+        match self.hosts.entry(host_id) {
+            std::collections::hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                Ok(entry.insert(cpal::host_from_id(host_id)?))
+            }
+        }
+    }
+
+    fn enumerate_host_once(
+        &mut self,
+        host_id: HostId,
+    ) -> std::result::Result<Vec<LocatedDevice>, cpal::Error> {
+        let host = self.host(host_id)?;
+        let default_id = host
+            .default_input_device()
+            .and_then(|device| device.id().ok());
+        let devices = host.input_devices()?;
+        Ok(devices
+            .filter_map(|device| {
+                let native_id = device.id().ok()?;
+                let name = device.to_string();
+                let id = format!("{}::{native_id}", host_id.name().to_ascii_lowercase());
+                let is_default = default_id.as_ref() == Some(&native_id);
+                Some(LocatedDevice {
+                    host_id,
+                    device,
+                    metadata: AudioDevice {
+                        id,
+                        name,
+                        is_default,
+                        backend: host_id.name().to_owned(),
+                    },
+                })
+            })
+            .collect())
+    }
+
+    fn enumerate_host(&mut self, host_id: HostId) -> Vec<LocatedDevice> {
+        let was_cached = self.hosts.contains_key(&host_id);
+        match self.enumerate_host_once(host_id) {
+            Ok(devices) => devices,
+            Err(first_error) if was_cached => {
+                debug!(
+                    backend = host_id.name(),
+                    error = %first_error,
+                    "cached audio backend disconnected; reconnecting"
+                );
+                self.hosts.remove(&host_id);
+                match self.enumerate_host_once(host_id) {
+                    Ok(devices) => devices,
+                    Err(error) => {
+                        warn!(backend = host_id.name(), %error, "could not enumerate audio backend");
+                        Vec::new()
+                    }
+                }
+            }
+            Err(error) => {
+                warn!(backend = host_id.name(), %error, "could not enumerate audio backend");
+                Vec::new()
+            }
+        }
+    }
+}
+
 pub struct LinuxAudioProvider {
+    hosts: Arc<Mutex<AudioHostCache>>,
     selected_id: RwLock<Option<String>>,
     session: AsyncMutex<Option<CaptureSession>>,
     chunks: broadcast::Sender<AudioChunk>,
@@ -61,6 +136,7 @@ impl LinuxAudioProvider {
         let (chunks, _) = broadcast::channel(128);
         let (levels, _) = broadcast::channel(128);
         Self {
+            hosts: Arc::new(Mutex::new(AudioHostCache::default())),
             selected_id: RwLock::new(None),
             session: AsyncMutex::new(None),
             chunks,
@@ -100,44 +176,23 @@ impl LinuxAudioProvider {
         Ok(capture)
     }
 
-    fn enumerate_host(host_id: HostId) -> Vec<LocatedDevice> {
-        let Ok(host) = cpal::host_from_id(host_id) else {
-            return Vec::new();
-        };
-        let default_id = host
-            .default_input_device()
-            .and_then(|device| device.id().ok());
-        let devices = match host.input_devices() {
-            Ok(devices) => devices,
-            Err(error) => {
-                warn!(backend = host_id.name(), %error, "could not enumerate audio backend");
-                return Vec::new();
-            }
-        };
-        devices
-            .filter_map(|device| {
-                let native_id = device.id().ok()?;
-                let name = device.to_string();
-                let id = format!("{}::{native_id}", host_id.name().to_ascii_lowercase());
-                let is_default = default_id.as_ref() == Some(&native_id);
-                Some(LocatedDevice {
-                    host_id,
-                    device,
-                    metadata: AudioDevice {
-                        id,
-                        name,
-                        is_default,
-                        backend: host_id.name().to_owned(),
-                    },
-                })
-            })
-            .collect()
+    fn enumerate_cached_host(
+        hosts: &Arc<Mutex<AudioHostCache>>,
+        host_id: HostId,
+    ) -> Result<Vec<LocatedDevice>> {
+        hosts
+            .lock()
+            .map_err(|_| FreeFlowError::Audio("audio host cache lock was poisoned".into()))
+            .map(|mut hosts| hosts.enumerate_host(host_id))
     }
 
-    fn enumerate_devices() -> Result<Vec<LocatedDevice>> {
+    fn enumerate_devices(hosts: &Arc<Mutex<AudioHostCache>>) -> Result<Vec<LocatedDevice>> {
+        let mut hosts = hosts
+            .lock()
+            .map_err(|_| FreeFlowError::Audio("audio host cache lock was poisoned".into()))?;
         let mut found: Vec<_> = cpal::available_hosts()
             .into_iter()
-            .flat_map(Self::enumerate_host)
+            .flat_map(|host_id| hosts.enumerate_host(host_id))
             .collect();
         if found.is_empty() {
             return Err(FreeFlowError::NoAudioDevice);
@@ -146,24 +201,26 @@ impl LinuxAudioProvider {
         Ok(found)
     }
 
-    fn resolve_device(selected_id: Option<&str>) -> Result<(LocatedDevice, bool)> {
+    fn resolve_device(
+        hosts: &Arc<Mutex<AudioHostCache>>,
+        selected_id: Option<&str>,
+    ) -> Result<(LocatedDevice, bool)> {
         if let Some(selected_id) = selected_id
             && let Some((backend, _)) = selected_id.split_once("::")
             && let Some(host_id) = cpal::available_hosts()
                 .into_iter()
                 .find(|host_id| host_id.name().eq_ignore_ascii_case(backend))
-            && let Some(device) = Self::enumerate_host(host_id)
+            && let Some(device) = Self::enumerate_cached_host(hosts, host_id)?
                 .into_iter()
                 .find(|device| device.metadata.id == selected_id)
         {
             return Ok((device, false));
         }
-        let devices = Self::enumerate_devices()?;
+        let default_host_id = cpal::available_hosts().into_iter().next();
+        let devices = Self::enumerate_devices(hosts)?;
         let fallback = devices
             .iter()
-            .find(|device| {
-                device.metadata.is_default && device.host_id == cpal::default_host().id()
-            })
+            .find(|device| device.metadata.is_default && Some(device.host_id) == default_host_id)
             .or_else(|| devices.iter().find(|device| device.metadata.is_default))
             .or_else(|| devices.first())
             .cloned()
@@ -368,8 +425,9 @@ impl AudioProvider for LinuxAudioProvider {
             }
         }
         drop(cached);
+        let hosts = self.hosts.clone();
         let resolved =
-            tokio::task::spawn_blocking(move || Self::resolve_device(selected.as_deref()))
+            tokio::task::spawn_blocking(move || Self::resolve_device(&hosts, selected.as_deref()))
                 .await
                 .map_err(|error| FreeFlowError::Internal(error.to_string()))?;
         let (located, fell_back) = match resolved {
@@ -472,8 +530,9 @@ impl AudioProvider for LinuxAudioProvider {
     }
 
     async fn available_devices(&self) -> Result<Vec<AudioDevice>> {
-        tokio::task::spawn_blocking(|| {
-            Self::enumerate_devices()
+        let hosts = self.hosts.clone();
+        tokio::task::spawn_blocking(move || {
+            Self::enumerate_devices(&hosts)
                 .map(|devices| devices.into_iter().map(|device| device.metadata).collect())
         })
         .await

@@ -21,7 +21,8 @@ The current user's persistent microphone is `Gaming Webcam [Kiyo] Analog
 Stereo`. It is stored by stable PulseAudio ID. FreeFlow pre-opens the stream at
 daemon startup, pauses it while idle, and resumes that exact cached device
 before attempting a fresh PipeWire enumeration. Preview measured about 200 ms
-from request to ready capture after warm-up.
+from request to ready capture after warm-up. CPAL backend hosts also remain
+cached for the daemon lifetime so UI refreshes reuse one PulseAudio connection.
 
 The configured cloud path is OpenAI throughout: `gpt-realtime-whisper` handles
 speech, `gpt-4o-mini-transcribe` provides batch fallback, and `gpt-5.4-nano`
@@ -112,7 +113,8 @@ The live API test used the opt-in `FREEFLOW_TEST_OPENAI` and
 ## Tests Passing
 
 - 64 Rust tests pass across core, OpenAI, settings, Linux platform, and RPC
-  crates. One hardware/desktop interaction test remains ignored by default.
+  crates. Two live hardware/desktop interaction tests remain ignored by
+  default.
 - Clippy passes across every Rust workspace target with warnings denied.
 - Rust formatting passes for the complete workspace.
 - Ten Electron main-process and utility tests pass, including top-panel-aware
@@ -122,6 +124,8 @@ The live API test used the opt-in `FREEFLOW_TEST_OPENAI` and
   pass.
 - The isolated user-installer test passes for AppImage copying, safe symlinking,
   icon and desktop entries, dmenu discovery, quoting, and hidden autostart.
+- The opt-in live PulseAudio regression test performs 96 device refreshes and
+  confirms they reuse one CPAL connection.
 - Deterministic OpenAI tests cover realtime partial/final delivery, preserved
   server errors, disconnect and batch fallback, authentication rejection,
   no-speech responses, cancellation, polish, rate limits, delays, and malformed
@@ -155,6 +159,10 @@ The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
   became ready in roughly 200 ms and a 400 ms preview retained 440 ms of audio.
   The final packaged build then resumed that same cached Kiyo on activation
   without a new enumeration or fallback warning.
+- Reproduced a PipeWire-Pulse outage with 57 leaked FreeFlow CPAL clients and
+  79 daemon sockets. Restarted the saturated compatibility service, then
+  verified the fixed provider retained one client through 96 device refreshes
+  while `pactl` and the Pulse server remained available.
 - Validated the 100×42 waveform-only HUD visually during live capture.
 - Verified the packaged HUD at Hyprland coordinates `[908, 56]` on the
   1920×1200 monitor. The active workspace stayed on workspace 2 and the focused
@@ -170,10 +178,10 @@ The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
 
 ## Packaging Output
 
-- `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 137,877,030 bytes,
-  SHA-256 `9e24e2740d232a2484a9f5a577d53d006ad2ced40c7cdc7ebaa98ae1d79ac34b`
-- `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 106,818,684 bytes,
-  SHA-256 `73923c2ed23fd872596c31ce83153693264a21c791d39d819cf2dc6512626a36`
+- `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 137,868,532 bytes,
+  SHA-256 `d27a3f5089a0f3dbdb38856798e556151c8264ed4b6a00c57e972fc147480cd9`
+- `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 106,804,440 bytes,
+  SHA-256 `e6c3cb3168b813f7cfdd6831e26ca4b4f78f8d70b16005f6256f99db09d08cc3`
 - `rust/target/release/freeflow-daemon`, bundled into both artifacts
 - `~/.local/share/freeflow/FreeFlow.AppImage`, installed for the current user
 - `~/.local/share/applications/com.freeflow.FreeFlow.Linux.desktop`
