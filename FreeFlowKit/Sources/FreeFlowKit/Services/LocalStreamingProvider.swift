@@ -59,6 +59,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     /// The recognition transcript already turned into closed units.
     private var committedTranscript = ""
 
+    /// The last polished sentence, held provisional until the following unit
+    /// confirms it is complete. It is carried onto the next unit's input so a
+    /// sentence split across a pause is re-polished whole. Empty when nothing
+    /// is pending.
+    private var carry = ""
+
     /// Incremental transcription session for the current dictation.
     private var recognitionSession: (any LocalRecognitionSession)?
 
@@ -91,6 +97,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let context: AppContext
         let committed: String
         let committedTranscript: String
+        let carry: String
         let recognitionError: (any Error)?
         let session: (any LocalRecognitionSession)?
         let newAudio: Data
@@ -195,6 +202,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             accumulatedAudio = Data()
             committedPolished = ""
             committedTranscript = ""
+            carry = ""
             unitStartByte = 0
             trailingSilenceBytes = 0
             rawTranscript = ""
@@ -241,6 +249,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             currentContext = context
             committedPolished = ""
             committedTranscript = ""
+            carry = ""
             unitStartByte = 0
             trailingSilenceBytes = 0
             rawTranscript = ""
@@ -314,6 +323,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 context: currentContext,
                 committed: committedPolished,
                 committedTranscript: committedTranscript,
+                carry: carry,
                 recognitionError: recognitionError,
                 session: recognitionSession,
                 newAudio: accumulatedAudio.subdata(in: start..<end),
@@ -328,11 +338,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 guard sessionGeneration == generation, !Task.isCancelled else {
                     return false
                 }
-                polishedTranscript = snapshot.committed
+                polishedTranscript = Self.joinPolished(
+                    snapshot.committed, snapshot.carry)
                 return true
             }
             guard published else { throw CancellationError() }
-            return snapshot.committed
+            return Self.joinPolished(snapshot.committed, snapshot.carry)
         }
 
         guard let session = snapshot.session else {
@@ -379,26 +390,37 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                     return false
                 }
                 rawTranscript = ""
-                polishedTranscript = snapshot.committed
+                polishedTranscript = Self.joinPolished(
+                    snapshot.committed, snapshot.carry)
                 accumulatedAudio = Data()
                 return true
             }
             guard published else { throw CancellationError() }
-            return snapshot.committed
+            return Self.joinPolished(snapshot.committed, snapshot.carry)
         }
 
-        // Close the final unit: everything recognized since the last unit
-        // boundary. Polish it, append to the accumulated transcript, and
-        // return the whole transcript for one injection.
+        // Close the final unit: the held sentence plus everything recognized
+        // since the last unit boundary, polished and committed in full — no
+        // sentence is held past the end.
         let finalUnit = Self.unitText(
             from: trimmed, committed: snapshot.committedTranscript)
             .trimmingCharacters(in: .whitespaces)
+        let combined: String
+        var finalPolished = ""
+        if finalUnit.isEmpty {
+            // No new speech; commit the held sentence as it already stands.
+            combined = ""
+            finalPolished = snapshot.carry
+        } else if snapshot.carry.isEmpty {
+            combined = finalUnit
+        } else {
+            combined = Self.stripTerminator(snapshot.carry) + " " + finalUnit
+        }
 
         let polishStart = CFAbsoluteTimeGetCurrent()
-        var finalPolished = ""
-        if !finalUnit.isEmpty {
+        if !combined.isEmpty {
             finalPolished = await polishWithPreceding(
-                finalUnit, preceding: snapshot.committed,
+                combined, preceding: snapshot.committed,
                 context: snapshot.context)
         }
         try requireCurrentSession(generation)
@@ -411,6 +433,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             }
             committedPolished = full
             committedTranscript = trimmed
+            carry = ""
             rawTranscript = trimmed
             polishedTranscript = full
             accumulatedAudio = Data()
@@ -536,7 +559,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
         // Update the trailing-silence run and decide whether a unit closes.
         let decision = lock.withLock {
-            () -> (LocalUnitPolicy.Boundary, String, String)? in
+            () -> (LocalUnitPolicy.Boundary, String, String, String)? in
             guard sessionGeneration == generation, !finishing,
                 recognitionError == nil
             else { return nil }
@@ -551,16 +574,27 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             let unit = Self.unitText(
                 from: trimmed, committed: committedTranscript)
                 .trimmingCharacters(in: .whitespaces)
-            return (boundary, unit, committedPolished)
+            return (boundary, unit, committedPolished, carry)
         }
-        guard let (boundary, unitText, preceding) = decision,
+        guard let (boundary, unitText, preceding, heldCarry) = decision,
             !unitText.isEmpty
         else { return }
 
+        // Prepend the held sentence so a sentence split across this boundary is
+        // re-polished whole; the model, seeing the full clause, decides where
+        // the real sentence break is.
+        let combined = heldCarry.isEmpty
+            ? unitText
+            : Self.stripTerminator(heldCarry) + " " + unitText
+
         let polishStart = CFAbsoluteTimeGetCurrent()
         let polished = await polishWithPreceding(
-            unitText, preceding: preceding, context: context)
+            combined, preceding: preceding, context: context)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
+
+        // Commit every sentence but the last; hold the last until the next unit
+        // (or finish) confirms it is complete.
+        let (commit, newCarry) = Self.splitTrailingSentence(polished)
 
         // A hard pause is a safe point to reset recognition and shed the audio
         // already recognized, bounding memory across a long dictation. Build
@@ -575,7 +609,10 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             guard sessionGeneration == generation, !finishing,
                 recognitionError == nil
             else { return (false, nil) }
-            committedPolished = Self.joinPolished(committedPolished, polished)
+            if !commit.isEmpty {
+                committedPolished = Self.joinPolished(committedPolished, commit)
+            }
+            carry = newCarry
             if boundary == .hardPause, let fresh {
                 recognitionSession = fresh
                 let end = accumulatedAudio.count
@@ -610,6 +647,32 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         if acc.isEmpty { return piece }
         if piece.isEmpty { return acc }
         return piece.hasPrefix("\n") ? acc + piece : acc + " " + piece
+    }
+
+    private static let sentenceBoundary = try! NSRegularExpression(
+        pattern: #"([.!?]["'”’)\]]?\s+|\n+)"#)
+
+    /// Split polished text into the part to commit (every sentence but the
+    /// last) and the last sentence to hold. The model terminates every unit,
+    /// so its last sentence may be an unfinished fragment; holding it lets the
+    /// next unit complete it.
+    private static func splitTrailingSentence(
+        _ text: String
+    ) -> (committed: String, carry: String) {
+        let ns = text as NSString
+        let matches = sentenceBoundary.matches(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        guard let last = matches.last else { return ("", text) }
+        let split = last.range.location + last.range.length
+        return (ns.substring(to: split), ns.substring(from: split))
+    }
+
+    /// Remove trailing sentence punctuation so a held sentence continues into
+    /// the next unit rather than reading as already finished.
+    private static func stripTerminator(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: #"[.!?…]+\s*$"#, with: "", options: .regularExpression
+        ).trimmingCharacters(in: .whitespaces)
     }
 
     /// The part of `transcript` not yet emitted as a closed unit. Uses the

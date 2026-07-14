@@ -126,6 +126,50 @@ struct LocalUnitStreamingTests {
         _ = try await high.replay(audio: audio, stepBytes: 640)
         #expect(highRec.sessionCount == 2)
     }
+
+    @Test("a sentence split across a unit boundary is stitched back whole")
+    func carryStitchesSplitSentence() async throws {
+        let recognizer = ScriptRecognizer([
+            "the plan is", "the plan is", "the plan is",
+            "the plan is to ship on friday", "the plan is to ship on friday",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: recognizer,
+            polishChatClient: SentenceFinalizingClient(),
+            unitPolicy: LocalUnitPolicy(
+                minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
+                hardPauseSilenceBytes: 100_000, maximumUnitBytes: 1_000_000),
+            silenceThreshold: 0.01)
+        // Speech, a mid-sentence pause (closes unit 1), then the rest.
+        let audio = speech(200) + silence(100) + speech(200)
+        let result = try await provider.replay(audio: audio, stepBytes: 100)
+
+        #expect(result.lowercased().contains("the plan is to ship on friday"))
+        #expect(!result.contains(". To ship"),
+            "split sentence was not stitched: \(result.debugDescription)")
+        #expect(!result.contains("is. "),
+            "spurious mid-sentence period: \(result.debugDescription)")
+    }
+
+    @Test("a held sentence is committed when dictation ends at a pause")
+    func carryCommittedAtFinish() async throws {
+        let recognizer = ScriptRecognizer([
+            "the plan is ready", "the plan is ready", "the plan is ready",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: recognizer,
+            polishChatClient: SentenceFinalizingClient(),
+            unitPolicy: LocalUnitPolicy(
+                minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
+                hardPauseSilenceBytes: 100_000, maximumUnitBytes: 1_000_000),
+            silenceThreshold: 0.01)
+        // The pause closes the unit; finish has no further audio and must
+        // still commit the held sentence.
+        let audio = speech(200) + silence(100)
+        let result = try await provider.replay(audio: audio, stepBytes: 100)
+
+        #expect(result.lowercased().contains("the plan is ready"))
+    }
 }
 
 /// A recognizer whose session returns a scripted transcript indexed by the
@@ -162,6 +206,21 @@ private final class EchoPolishClient: PolishChatClient, @unchecked Sendable {
     func complete(
         model: String, systemPrompt: String, userPrompt: String
     ) async throws -> String { userPrompt }
+}
+
+/// Finalizes its input as one sentence — capitalize the first letter, end with
+/// a period — the way the real model terminates whatever fragment it is given.
+private final class SentenceFinalizingClient: PolishChatClient, @unchecked Sendable {
+    func complete(
+        model: String, systemPrompt: String, userPrompt: String
+    ) async throws -> String {
+        let trimmed = userPrompt
+            .replacingOccurrences(
+                of: #"[.!?]+\s*$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return trimmed }
+        return first.uppercased() + String(trimmed.dropFirst()) + "."
+    }
 }
 
 /// Hands each fresh session the next scripted transcript, so a test can see
