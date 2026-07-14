@@ -13,6 +13,12 @@ struct LocalUnitStreamingTests {
     private func speech(_ bytes: Int) -> Data { Data(repeating: 0x40, count: bytes) }
     private func silence(_ bytes: Int) -> Data { Data(repeating: 0, count: bytes) }
 
+    /// PCM of constant-amplitude samples; RMS is `abs(value) / 32768`.
+    private func tone(_ value: Int16, bytes: Int) -> Data {
+        let samples = [Int16](repeating: value, count: bytes / 2)
+        return samples.withUnsafeBufferPointer { Data(buffer: $0) }
+    }
+
     private func makeProvider(_ transcripts: [String]) -> LocalStreamingProvider {
         LocalStreamingProvider(
             sttEngine: ScriptRecognizer(transcripts),
@@ -89,6 +95,36 @@ struct LocalUnitStreamingTests {
 
         #expect(recognizer.sessionCount == 1)
         #expect(result.lowercased().contains("charlie"))
+    }
+
+    @Test("setSilenceThreshold makes low-energy audio count as a pause")
+    func silenceThresholdControlsPauseDetection() async throws {
+        func make() -> (LocalStreamingProvider, MultiSessionRecognizer) {
+            let recognizer = MultiSessionRecognizer(["unit one", "unit two"])
+            let provider = LocalStreamingProvider(
+                sttEngine: recognizer,
+                polishChatClient: EchoPolishClient(),
+                unitPolicy: LocalUnitPolicy(
+                    minimumSpeechBytes: 640, softPauseSilenceBytes: 640,
+                    hardPauseSilenceBytes: 640, maximumUnitBytes: 1_000_000),
+                silenceThreshold: 0.0005)
+            return (provider, recognizer)
+        }
+        // Loud speech, then low-energy audio (~0.006 RMS) that reads as a pause
+        // only above a ~0.006 threshold. One 640-byte step is one 20 ms window.
+        let audio = tone(8000, bytes: 1280) + tone(200, bytes: 1280)
+
+        // At the speech floor the low-energy tail is not silence: no pause.
+        let (low, lowRec) = make()
+        _ = try await low.replay(audio: audio, stepBytes: 640)
+        #expect(lowRec.sessionCount == 1)
+
+        // A higher threshold classifies the tail as a pause, which closes a
+        // unit and resets recognition.
+        let (high, highRec) = make()
+        high.setSilenceThreshold(0.02)
+        _ = try await high.replay(audio: audio, stepBytes: 640)
+        #expect(highRec.sessionCount == 2)
     }
 }
 

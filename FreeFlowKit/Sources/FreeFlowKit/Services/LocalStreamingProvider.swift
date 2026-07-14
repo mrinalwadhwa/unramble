@@ -24,7 +24,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private let polishModel: String
     private let cycleInterval: TimeInterval
     private let unitPolicy: LocalUnitPolicy
-    private let silenceThreshold: Float
+    private var silenceThreshold: Float
 
     // MARK: - State (guarded by lock)
 
@@ -129,6 +129,13 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         _ handler: (@Sendable (String) async -> Void)?
     ) {
         lock.withLock { chunkHandler = handler }
+    }
+
+    /// Set the energy threshold below which a 20 ms window counts as silence
+    /// when detecting the pauses that close units. The pipeline supplies its
+    /// ambient-adaptive value per dictation; the default is the speech floor.
+    public func setSilenceThreshold(_ threshold: Float) {
+        lock.withLock { silenceThreshold = threshold }
     }
 
     public func startStreaming(

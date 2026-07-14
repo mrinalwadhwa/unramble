@@ -543,6 +543,14 @@ public actor DictationPipeline: PipelineProviding {
             // injection. The pipeline injects each provider's result once.
             streaming.setChunkHandler(nil)
 
+            // Local pause detection uses the same ambient-adaptive threshold as
+            // the silent-press gate, so real acoustic pauses close units rather
+            // than only the size cap.
+            if localMode {
+                (streaming as? LocalStreamingProvider)?
+                    .setSilenceThreshold(effectiveSilenceThreshold())
+            }
+
             // Timeout the streaming setup to avoid blocking complete()
             // indefinitely. ensureConnected()/sendPing can hang when the
             // WebSocket is in a broken state. On timeout we cancel the
