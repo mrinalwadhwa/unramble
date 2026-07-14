@@ -20,7 +20,12 @@ import {
   resolveHyprlandHudPosition,
   topCenterHudPosition
 } from './hud-position';
-import { sendToWindow, useWindow } from './window-lifecycle';
+import {
+  liveWindow,
+  sendToWindow,
+  useWindow,
+  useWindowOrRecover
+} from './window-lifecycle';
 import type { AppStatus, RecordingState } from '../shared/models';
 import {
   RPC_METHODS,
@@ -36,9 +41,17 @@ let quitting = false;
 let connected = false;
 let currentStatus: AppStatus | null = null;
 let hudHideTimer: NodeJS.Timeout | null = null;
+let hudRecoveryTimer: NodeJS.Timeout | null = null;
+let hudRecoveryResetTimer: NodeJS.Timeout | null = null;
+let hudRecoveryAttempts = 0;
+let hudRecoveryWindowStartedAt = 0;
 let hudUpdateSequence = 0;
 const HUD_WIDTH = 104;
 const HUD_HEIGHT = 46;
+const HUD_RECOVERY_LIMIT = 3;
+const HUD_RECOVERY_WINDOW_MS = 30_000;
+const HUD_RECOVERY_DELAY_MS = 200;
+const HUD_RECOVERY_STABILITY_MS = 5_000;
 
 const allowedMethods = new Set<string>(RPC_METHODS);
 const launchHidden = process.env.FREEFLOW_START_HIDDEN === '1';
@@ -147,7 +160,17 @@ function createWindows(): void {
   settingsWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   void loadRenderer(settingsWindow, 'app');
 
-  hudWindow = new BrowserWindow({
+  createHudWindow(preload);
+}
+
+function createHudWindow(
+  preload = join(__dirname, '../preload/index.js')
+): BrowserWindow | null {
+  if (quitting) return null;
+  const existing = liveWindow(hudWindow);
+  if (existing) return existing;
+
+  const window = new BrowserWindow({
     title: HUD_TITLE,
     width: HUD_WIDTH,
     height: HUD_HEIGHT,
@@ -167,15 +190,93 @@ function createWindows(): void {
       sandbox: true
     }
   });
-  hudWindow.setAlwaysOnTop(true, 'floating');
-  hudWindow.setIgnoreMouseEvents(true);
-  hudWindow.on('closed', () => {
-    hudWindow = null;
+  hudWindow = window;
+  window.setAlwaysOnTop(true, 'floating');
+  window.setIgnoreMouseEvents(true);
+  window.on('closed', () => {
+    if (hudWindow === window) hudWindow = null;
   });
-  hudWindow.on('page-title-updated', (event) => event.preventDefault());
-  void loadRenderer(hudWindow, 'hud').then(() =>
-    useWindow(hudWindow, (window) => window.setTitle(HUD_TITLE))
+  window.on('page-title-updated', (event) => event.preventDefault());
+  window.on('unresponsive', () => recoverHudWindow(window, 'became unresponsive'));
+  window.webContents.on('render-process-gone', (_event, details) => {
+    recoverHudWindow(window, `renderer exited (${details.reason}, code ${details.exitCode})`);
+  });
+  window.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        recoverHudWindow(window, `failed to load (${errorDescription}, code ${errorCode})`);
+      }
+    }
   );
+  void loadRenderer(window, 'hud')
+    .then(() => {
+      if (hudWindow !== window || !liveWindow(window)) return;
+      scheduleHudRecoveryReset(window);
+      window.setTitle(HUD_TITLE);
+      const state = currentStatus?.state;
+      if (state) {
+        sendToWindow(window, 'freeflow:notification', 'status.changed', { state });
+        if (state !== 'idle') updateHud(state);
+      }
+    })
+    .catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      recoverHudWindow(window, `could not load (${detail})`);
+    });
+  return window;
+}
+
+function recoverHudWindow(window: BrowserWindow, reason: string): void {
+  if (quitting || hudWindow !== window) return;
+  console.error(`FreeFlow HUD ${reason}; recreating the widget`);
+  if (hudRecoveryResetTimer) {
+    clearTimeout(hudRecoveryResetTimer);
+    hudRecoveryResetTimer = null;
+  }
+  hudWindow = null;
+  if (!window.isDestroyed()) window.destroy();
+  scheduleHudRecovery();
+}
+
+function scheduleHudRecovery(): void {
+  if (quitting || hudRecoveryTimer) return;
+  const now = Date.now();
+  if (now - hudRecoveryWindowStartedAt > HUD_RECOVERY_WINDOW_MS) {
+    hudRecoveryAttempts = 0;
+    hudRecoveryWindowStartedAt = now;
+  }
+  if (hudRecoveryAttempts >= HUD_RECOVERY_LIMIT) {
+    console.error('FreeFlow HUD stopped restarting after repeated renderer failures');
+    return;
+  }
+  const delay = HUD_RECOVERY_DELAY_MS * 2 ** hudRecoveryAttempts;
+  hudRecoveryAttempts += 1;
+  hudRecoveryTimer = setTimeout(() => {
+    hudRecoveryTimer = null;
+    createHudWindow();
+  }, delay);
+}
+
+function scheduleHudRecoveryReset(window: BrowserWindow): void {
+  if (hudRecoveryResetTimer) clearTimeout(hudRecoveryResetTimer);
+  hudRecoveryResetTimer = setTimeout(() => {
+    hudRecoveryResetTimer = null;
+    if (hudWindow !== window || !liveWindow(window)) return;
+    hudRecoveryAttempts = 0;
+    hudRecoveryWindowStartedAt = 0;
+  }, HUD_RECOVERY_STABILITY_MS);
+}
+
+function ensureHudWindow(): BrowserWindow | null {
+  const window = liveWindow(hudWindow);
+  if (window) return window;
+  if (hudWindow) {
+    recoverHudWindow(hudWindow, 'was no longer available');
+  } else {
+    scheduleHudRecovery();
+  }
+  return null;
 }
 
 async function loadRenderer(window: BrowserWindow, route: string): Promise<void> {
@@ -313,15 +414,23 @@ function updateHud(state: RecordingState): void {
     hudHideTimer = setTimeout(() => useWindow(hudWindow, (window) => window.hide()), 90);
     return;
   }
+  const target = ensureHudWindow();
+  if (!target) return;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const fallback = topCenterHudPosition(display.workArea, HUD_WIDTH);
   void resolveHyprlandHudPosition(fallback, HUD_WIDTH).then((position) => {
-    if (sequence !== hudUpdateSequence) return;
-    useWindow(hudWindow, (window) => {
-      window.setPosition(position.x, position.y, false);
-      window.showInactive();
-      void moveHyprlandHud(position, process.pid, [HUD_WIDTH, HUD_HEIGHT]);
-    });
+    if (sequence !== hudUpdateSequence || hudWindow !== target) return;
+    useWindowOrRecover(
+      target,
+      (window) => {
+        window.setPosition(position.x, position.y, false);
+        window.showInactive();
+        void moveHyprlandHud(position, process.pid, [HUD_WIDTH, HUD_HEIGHT]);
+      },
+      () => {
+        recoverHudWindow(target, 'became unavailable while showing');
+      }
+    );
   });
 }
 
@@ -403,6 +512,14 @@ app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  if (hudRecoveryTimer) {
+    clearTimeout(hudRecoveryTimer);
+    hudRecoveryTimer = null;
+  }
+  if (hudRecoveryResetTimer) {
+    clearTimeout(hudRecoveryResetTimer);
+    hudRecoveryResetTimer = null;
+  }
   if (supervisor) {
     void supervisor.stop().finally(() => app.exit(0));
   } else {

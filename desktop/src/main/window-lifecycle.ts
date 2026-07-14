@@ -43,3 +43,23 @@ export function useWindow<T extends WindowLike>(
     return false;
   }
 }
+
+export function useWindowOrRecover<T extends WindowLike>(
+  window: T | null,
+  action: (target: T) => void,
+  recover: () => void
+): boolean {
+  const target = liveWindow(window);
+  if (!target) {
+    recover();
+    return false;
+  }
+  try {
+    action(target);
+    return true;
+  } catch {
+    // Ask the owner to replace a renderer that disappears during an action.
+    recover();
+    return false;
+  }
+}

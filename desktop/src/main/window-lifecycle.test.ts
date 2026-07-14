@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { liveWindow, sendToWindow, useWindow, type WindowLike } from './window-lifecycle';
+import {
+  liveWindow,
+  sendToWindow,
+  useWindow,
+  useWindowOrRecover,
+  type WindowLike
+} from './window-lifecycle';
 
 function fakeWindow(options: { windowDestroyed?: boolean; contentsDestroyed?: boolean } = {}): {
   target: WindowLike;
@@ -50,5 +56,43 @@ describe('window lifecycle guards', () => {
         throw new Error('Object has been destroyed');
       })
     ).toBe(false);
+  });
+
+  it('requests recovery when a window or its renderer is gone', () => {
+    const destroyedWindow = fakeWindow({ windowDestroyed: true });
+    const destroyedContents = fakeWindow({ contentsDestroyed: true });
+    const recoverWindow = vi.fn();
+    const recoverContents = vi.fn();
+
+    expect(useWindowOrRecover(destroyedWindow.target, vi.fn(), recoverWindow)).toBe(false);
+    expect(useWindowOrRecover(destroyedContents.target, vi.fn(), recoverContents)).toBe(false);
+    expect(recoverWindow).toHaveBeenCalledOnce();
+    expect(recoverContents).toHaveBeenCalledOnce();
+  });
+
+  it('requests recovery after a renderer teardown race', () => {
+    const { target } = fakeWindow();
+    const recover = vi.fn();
+
+    expect(
+      useWindowOrRecover(
+        target,
+        () => {
+          throw new Error('Render frame was disposed');
+        },
+        recover
+      )
+    ).toBe(false);
+    expect(recover).toHaveBeenCalledOnce();
+  });
+
+  it('does not request recovery while the window action succeeds', () => {
+    const { target } = fakeWindow();
+    const action = vi.fn();
+    const recover = vi.fn();
+
+    expect(useWindowOrRecover(target, action, recover)).toBe(true);
+    expect(action).toHaveBeenCalledOnce();
+    expect(recover).not.toHaveBeenCalled();
   });
 });
