@@ -45,6 +45,51 @@ struct LocalUnitStreamingTests {
         #expect(a.lowercased().contains("first part"))
         #expect(a.lowercased().contains("second part"))
     }
+
+    @Test("A hard pause resets recognition and preserves content across resets")
+    func hardPauseResetsAndPreservesContent() async throws {
+        let recognizer = MultiSessionRecognizer([
+            "first unit alpha", "second unit bravo", "unused",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: recognizer,
+            polishChatClient: EchoPolishClient(),
+            unitPolicy: LocalUnitPolicy(
+                minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
+                hardPauseSilenceBytes: 80, maximumUnitBytes: 1_000_000),
+            silenceThreshold: 0.01)
+
+        // speech, hard pause, speech, hard pause: two units, two resets.
+        let audio = speech(200) + silence(100) + speech(200) + silence(100)
+        let result = try await provider.replay(audio: audio, stepBytes: 100)
+
+        // One fresh session per hard pause, plus the initial session. Discarding
+        // the old sessions is what bounds memory on a long dictation.
+        #expect(recognizer.sessionCount == 3)
+        // Content on both sides of the resets survives.
+        #expect(result.lowercased().contains("alpha"))
+        #expect(result.lowercased().contains("bravo"))
+    }
+
+    @Test("A size-cap close does not reset recognition")
+    func sizeCapCloseDoesNotReset() async throws {
+        let recognizer = MultiSessionRecognizer(["only unit charlie"])
+        let provider = LocalStreamingProvider(
+            sttEngine: recognizer,
+            polishChatClient: EchoPolishClient(),
+            unitPolicy: LocalUnitPolicy(
+                minimumSpeechBytes: 2, softPauseSilenceBytes: 2,
+                hardPauseSilenceBytes: 4, maximumUnitBytes: 100),
+            silenceThreshold: 0.01)
+
+        // Continuous speech, no pause: units close at the size cap, which is
+        // not a safe reset point, so the session is never rebuilt.
+        let result = try await provider.replay(
+            audio: speech(400), stepBytes: 100)
+
+        #expect(recognizer.sessionCount == 1)
+        #expect(result.lowercased().contains("charlie"))
+    }
 }
 
 /// A recognizer whose session returns a scripted transcript indexed by the
@@ -81,4 +126,41 @@ private final class EchoPolishClient: PolishChatClient, @unchecked Sendable {
     func complete(
         model: String, systemPrompt: String, userPrompt: String
     ) async throws -> String { userPrompt }
+}
+
+/// Hands each fresh session the next scripted transcript, so a test can see
+/// how many sessions were created and that content continues across resets.
+private final class MultiSessionRecognizer: LocalStreamingRecognizer, @unchecked Sendable {
+    let name = "MultiSessionRecognizer"
+    var isReady = true
+
+    private let lock = NSLock()
+    private let scripts: [String]
+    private var created = 0
+
+    init(_ scripts: [String]) { self.scripts = scripts }
+
+    var sessionCount: Int { lock.withLock { created } }
+
+    func load() async throws {}
+    func makeRecognitionSession() throws -> any LocalRecognitionSession {
+        let script = lock.withLock { () -> String in
+            let index = min(created, scripts.count - 1)
+            created += 1
+            return scripts.isEmpty ? "" : scripts[index]
+        }
+        return FixedSession(transcript: script)
+    }
+}
+
+/// A session that returns one fixed transcript once it has been fed.
+private final class FixedSession: LocalRecognitionSession {
+    private let text: String
+    private var fed = false
+
+    init(transcript: String) { self.text = transcript }
+
+    func feed(_ samples: [Float]) throws { fed = true }
+    func transcript() -> String { fed ? text : "" }
+    func finish() throws -> String { fed ? text : "" }
 }

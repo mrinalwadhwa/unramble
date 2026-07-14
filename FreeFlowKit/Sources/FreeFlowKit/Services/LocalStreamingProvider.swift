@@ -530,7 +530,7 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
         // Update the trailing-silence run and decide whether a unit closes.
         let decision = lock.withLock {
-            () -> (String, String)? in
+            () -> (LocalUnitPolicy.Boundary, String, String)? in
             guard sessionGeneration == generation, !finishing,
                 recognitionError == nil
             else { return nil }
@@ -538,23 +538,31 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 &trailingSilenceBytes, slice: newAudio,
                 threshold: silenceThreshold)
             let unitBytes = fedBytes - unitStartByte
-            guard unitPolicy.boundary(
+            guard let boundary = unitPolicy.boundary(
                 unitByteCount: unitBytes,
-                trailingSilenceByteCount: trailingSilenceBytes) != nil
+                trailingSilenceByteCount: trailingSilenceBytes)
             else { return nil }
             let unit = Self.unitText(
                 from: trimmed, committed: committedTranscript)
                 .trimmingCharacters(in: .whitespaces)
-            return (unit, committedPolished)
+            return (boundary, unit, committedPolished)
         }
-        guard let (unitText, preceding) = decision, !unitText.isEmpty else {
-            return
-        }
+        guard let (boundary, unitText, preceding) = decision,
+            !unitText.isEmpty
+        else { return }
 
         let polishStart = CFAbsoluteTimeGetCurrent()
         let polished = await polishWithPreceding(
             unitText, preceding: preceding, context: context)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
+
+        // A hard pause is a safe point to reset recognition and shed the audio
+        // already recognized, bounding memory across a long dictation. Build
+        // the fresh session outside the lock because it can throw; a size-cap
+        // close is not safe to reset (it can fall mid-word).
+        let fresh: (any LocalRecognitionSession)? =
+            boundary == .hardPause
+            ? try? sttEngine.makeRecognitionSession() : nil
 
         let publication = lock.withLock {
             () -> (Bool, (@Sendable (String) async -> Void)?) in
@@ -562,14 +570,24 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 recognitionError == nil
             else { return (false, nil) }
             committedPolished = Self.joinPolished(committedPolished, polished)
-            committedTranscript = trimmed
-            unitStartByte = fedBytes
+            if boundary == .hardPause, let fresh {
+                recognitionSession = fresh
+                let end = accumulatedAudio.count
+                accumulatedAudio = fedBytes < end
+                    ? accumulatedAudio.subdata(in: fedBytes..<end) : Data()
+                fedBytes = 0
+                unitStartByte = 0
+                committedTranscript = ""
+            } else {
+                committedTranscript = trimmed
+                unitStartByte = fedBytes
+            }
             trailingSilenceBytes = 0
             return (true, chunkHandler)
         }
         guard publication.0 else { return }
 
-        Log.debug("[LocalStreaming] Closed unit (\(unitText.count) chars, stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
+        Log.debug("[LocalStreaming] Closed unit (\(unitText.count) chars, reset=\(boundary == .hardPause), stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
         // A preview handler may mirror the unit; it does not gate the return.
         if let handler = publication.1 {
