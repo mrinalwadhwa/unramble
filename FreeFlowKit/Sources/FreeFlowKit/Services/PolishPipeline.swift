@@ -1095,56 +1095,54 @@ public enum PolishPipeline {
         let noPreceding = precedingText == nil || precedingText!.isEmpty
 
         do {
-            let polished = try await polishThroughModel(
-                stripped, chatClient: chatClient, model: model,
-                tone: tone, precedingText: precedingText)
-            if polished.isEmpty {
-                return normalizeFormatting(stripped, casual: casual)
+            // Greedy on the first attempt; when a guard fires, resample with a
+            // little temperature and try again before falling back to raw.
+            // Fidelity is unchanged either way — the guards bound every
+            // attempt — but a resample often recovers a usable polish.
+            for (attempt, temperature) in [0.0, 0.4, 0.4].enumerated() {
+                let polished = try await polishThroughModel(
+                    stripped, chatClient: chatClient, model: model,
+                    tone: tone, precedingText: precedingText,
+                    temperature: temperature)
+                if polished.isEmpty { continue }
+
+                var cleaned = guardAgainstEcho(
+                    polished: polished, precedingText: precedingText)
+                if stripModelBreaks {
+                    cleaned = stripModelNewlines(cleaned)
+                }
+                if stripped.contains("\u{2026}") {
+                    cleaned = cleaned.replacingOccurrences(
+                        of: "...", with: "\u{2026}")
+                }
+
+                // The batch path keeps the model's edits (so intentional
+                // corrections survive); the streaming path also rejects a
+                // dropped or invented run of content words.
+                let guardFires = guardAgainstHallucination(
+                        polished: cleaned, preprocessed: stripped) != nil
+                    || guardAgainstTruncation(
+                        polished: cleaned, preprocessed: stripped) != nil
+                    || (stripModelBreaks && guardAgainstContentLoss(
+                        polished: cleaned, preprocessed: stripped) != nil)
+                    || (stripModelBreaks && guardAgainstFabrication(
+                        polished: cleaned, preprocessed: stripped) != nil)
+                if !guardFires {
+                    if attempt > 0 {
+                        Log.debug("[POLISH_RESAMPLE_OK] attempt=\(attempt)")
+                    }
+                    return adjustFirstCharCasing(
+                        normalizeFormatting(cleaned, casual: casual),
+                        preprocessed: stripped, casual: casual,
+                        noPreceding: noPreceding)
+                }
             }
-            var cleaned = guardAgainstEcho(
-                polished: polished, precedingText: precedingText)
-            if stripModelBreaks {
-                cleaned = stripModelNewlines(cleaned)
-            }
-            if stripped.contains("\u{2026}") {
-                cleaned = cleaned.replacingOccurrences(
-                    of: "...", with: "\u{2026}")
-            }
-            if let fallback = guardAgainstHallucination(
-                polished: cleaned, preprocessed: stripped) {
-                return adjustFirstCharCasing(
-                    normalizeFormatting(fallback, casual: casual),
-                    preprocessed: stripped, casual: casual,
-                    noPreceding: noPreceding)
-            }
-            if let fallback = guardAgainstTruncation(
-                polished: cleaned, preprocessed: stripped) {
-                return adjustFirstCharCasing(
-                    normalizeFormatting(fallback, casual: casual),
-                    preprocessed: stripped, casual: casual,
-                    noPreceding: noPreceding)
-            }
-            // Streaming units must not lose content. A dropped run of spoken
-            // words falls back to the raw unit. The batch path keeps the
-            // model's edits so intentional corrections are not reverted.
-            if stripModelBreaks,
-                let fallback = guardAgainstContentLoss(
-                    polished: cleaned, preprocessed: stripped) {
-                return adjustFirstCharCasing(
-                    normalizeFormatting(fallback, casual: casual),
-                    preprocessed: stripped, casual: casual,
-                    noPreceding: noPreceding)
-            }
-            if stripModelBreaks,
-                let fallback = guardAgainstFabrication(
-                    polished: cleaned, preprocessed: stripped) {
-                return adjustFirstCharCasing(
-                    normalizeFormatting(fallback, casual: casual),
-                    preprocessed: stripped, casual: casual,
-                    noPreceding: noPreceding)
-            }
+
+            // Every attempt failed a guard or was empty: keep the raw unit, so
+            // nothing is dropped, invented, or truncated.
+            Log.debug("[POLISH_RAW_FALLBACK] all attempts failed guards")
             return adjustFirstCharCasing(
-                normalizeFormatting(cleaned, casual: casual),
+                normalizeFormatting(stripped, casual: casual),
                 preprocessed: stripped, casual: casual,
                 noPreceding: noPreceding)
         } catch {
@@ -1707,7 +1705,7 @@ public enum PolishPipeline {
     /// echo/hallucination/truncation guards.
     private static func polishThroughModel(
         _ stripped: String, chatClient: any PolishChatClient, model: String,
-        tone: String?, precedingText: String?
+        tone: String?, precedingText: String?, temperature: Double = 0
     ) async throws -> String {
         // A long, mostly-unpunctuated run makes the model summarize and
         // drop content — but only when it also has preceding context.
@@ -1718,7 +1716,8 @@ public enum PolishPipeline {
         let prompt = buildPolishPrompt(
             tone: tone, precedingText: longRun ? nil : precedingText)
         return try await chatClient.complete(
-            model: model, systemPrompt: prompt, userPrompt: stripped)
+            model: model, systemPrompt: prompt, userPrompt: stripped,
+            temperature: temperature)
     }
 
     /// Build the model system prompt with optional style and preceding

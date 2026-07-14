@@ -114,6 +114,19 @@ struct PolishContentGuardTests {
         #expect(PolishPipeline.guardAgainstFabrication(
             polished: polished, preprocessed: raw) == nil)
     }
+
+    @Test("a unit that fails the first polish is resampled and recovered")
+    func retryRecoversAfterGuardFailure() async throws {
+        let out = await PolishPipeline.polish(
+            "our plan is basically to ship the cache fix on friday",
+            chatClient: FlakyPolishClient(), breakMode: .commandsOnly)
+        // The loop used the clean second attempt, not the raw fallback: the
+        // filler is gone and the first attempt's fabricated words never appear.
+        #expect(!out.lowercased().contains("basically"),
+            "expected the resampled polish, got raw fallback: \(out.debugDescription)")
+        #expect(!out.lowercased().contains("pizza"))
+        #expect(out.lowercased().contains("cache"))
+    }
 }
 
 /// Echoes the input but deletes a middle clause, simulating a model that
@@ -130,5 +143,23 @@ private final class ClauseDroppingClient: PolishChatClient, @unchecked Sendable 
             return trimmed
         }
         return userPrompt
+    }
+}
+
+/// Fabricates on the first call, then returns a clean, faithful polish — like
+/// a model that only lands a good sample on a retry.
+private final class FlakyPolishClient: PolishChatClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+
+    func complete(
+        model: String, systemPrompt: String, userPrompt: String
+    ) async throws -> String {
+        let n = lock.withLock { calls += 1; return calls }
+        if n == 1 {
+            return "Our plan is basically to ship the cache fix on Friday and "
+                + "then we celebrated with pizza cake and beer."
+        }
+        return "Our plan is to ship the cache fix on Friday."
     }
 }

@@ -155,11 +155,23 @@ public final class MLXLLMEngine: LocalLLMEngine, @unchecked Sendable {
         userPrompt: String,
         maxTokens: Int = 512
     ) async throws -> String {
+        try await complete(
+            systemPrompt: systemPrompt, userPrompt: userPrompt,
+            maxTokens: maxTokens, temperature: 0)
+    }
+
+    public func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int,
+        temperature: Double
+    ) async throws -> String {
         guard let container = lock.withLock({ container }) else {
             throw LocalModelError.modelNotLoaded
         }
 
-        let params = GenerateParameters(maxTokens: maxTokens, temperature: 0)
+        let params = GenerateParameters(
+            maxTokens: maxTokens, temperature: Float(temperature))
         let session = ChatSession(
             container,
             instructions: systemPrompt,

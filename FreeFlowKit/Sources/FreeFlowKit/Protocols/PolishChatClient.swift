@@ -19,4 +19,27 @@ public protocol PolishChatClient: Sendable {
         systemPrompt: String,
         userPrompt: String
     ) async throws -> String
+
+    /// Complete a prompt at a given sampling temperature, used to resample a
+    /// unit that failed a polish guard. The default ignores the temperature
+    /// and reuses the greedy completion, so a client that does not sample
+    /// simply repeats its answer.
+    func complete(
+        model: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double
+    ) async throws -> String
+}
+
+public extension PolishChatClient {
+    func complete(
+        model: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double
+    ) async throws -> String {
+        try await complete(
+            model: model, systemPrompt: systemPrompt, userPrompt: userPrompt)
+    }
 }

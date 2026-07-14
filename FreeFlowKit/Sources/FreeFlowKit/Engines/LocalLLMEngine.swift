@@ -36,4 +36,26 @@ public protocol LocalLLMEngine: Sendable {
         userPrompt: String,
         maxTokens: Int
     ) async throws -> String
+
+    /// Complete at a given sampling temperature. The default ignores the
+    /// temperature and reuses the greedy completion.
+    func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int,
+        temperature: Double
+    ) async throws -> String
+}
+
+public extension LocalLLMEngine {
+    func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int,
+        temperature: Double
+    ) async throws -> String {
+        try await complete(
+            systemPrompt: systemPrompt, userPrompt: userPrompt,
+            maxTokens: maxTokens)
+    }
 }

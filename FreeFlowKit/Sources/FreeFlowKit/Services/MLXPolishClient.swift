@@ -21,6 +21,17 @@ public struct MLXPolishClient: PolishChatClient {
         systemPrompt: String,
         userPrompt: String
     ) async throws -> String {
+        try await complete(
+            model: model, systemPrompt: systemPrompt,
+            userPrompt: userPrompt, temperature: 0)
+    }
+
+    public func complete(
+        model: String,
+        systemPrompt: String,
+        userPrompt: String,
+        temperature: Double
+    ) async throws -> String {
         if !engine.isReady {
             Log.debug("[MLXPolish] Loading LLM engine \(engine.name)...")
             try await engine.load()
@@ -34,7 +45,8 @@ public struct MLXPolishClient: PolishChatClient {
             guard let text = try? await engine.complete(
                 systemPrompt: systemPrompt,
                 userPrompt: effectivePrompt,
-                maxTokens: 512
+                maxTokens: 512,
+                temperature: temperature
             ) else { return "" }
             return Self.stripThinkingTags(
                 text.trimmingCharacters(in: .whitespacesAndNewlines))
