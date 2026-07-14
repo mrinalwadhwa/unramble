@@ -124,21 +124,6 @@ struct LocalStreamingProviderTests {
         #expect(engine.finishCallCount == 0)
     }
 
-    // MARK: - uncommittedAudioDuration
-
-    @Test("Reports uncommitted audio duration based on accumulated bytes")
-    func uncommittedAudioDuration() async throws {
-        let (provider, _, _) = makeProvider()
-
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        // 32,000 bytes = 1 second at 16 kHz, 16-bit mono.
-        try await provider.sendAudio(makePCM(bytes: 32_000))
-
-        let duration = provider.uncommittedAudioDuration
-        #expect(duration >= 0.99 && duration <= 1.01)
-    }
-
     // MARK: - Engine load on first use
 
     @Test("Loads engine on first streaming session")
@@ -250,7 +235,6 @@ struct LocalStreamingProviderTests {
 
         #expect(await collector.all().isEmpty)
         #expect(provider.lastPolishedTranscript.isEmpty)
-        #expect(provider.uncommittedAudioDuration == 0)
         #expect(try await provider.finishStreaming() == "")
     }
 

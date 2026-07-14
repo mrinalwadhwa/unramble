@@ -17,18 +17,20 @@ release the key.
    ~300 ms handshake; later sessions adopt a warm backup connection pre-opened
    in the background and skip the handshake entirely.
 2. Stream 16 kHz PCM chunks resampled to 24 kHz while the user holds
-   the dictation key.
-3. On key release, commit the audio buffer and wait for the transcript.
-4. Send the transcript back over the same Realtime connection and ask the
-   Realtime model for the polished response.
-5. Inject the polished text into the target app via the accessibility
-   API.
+   the dictation key. Commit bounded source ranges after 180 seconds plus 10
+   seconds of trailing silence, or at the 300-second hard boundary. Limit
+   unresolved backend items so the session cannot build an unbounded backlog.
+3. On key release, stop capture, drain every queued PCM chunk, commit the final
+   range, and verify exact ordered source coverage before assembling the raw
+   transcript.
+4. Send that complete transcript over the same Realtime connection for one
+   polish request, then inject exactly one final result through accessibility.
 
 If the Realtime path fails, the pipeline can then use
 `POST /v1/audio/transcriptions` and polish that transcript through the
-chat-completion path. Before any rolling injection, recovery sends the full
-WAV; afterward it sends only the uncommitted tail. This is serial recovery, not
-a request racing the live WebSocket.
+chat-completion path. Cloud delivery is atomic, so recovery always sends the
+exact complete WAV before injecting one final result. This is serial recovery,
+not a request racing the live WebSocket.
 
 ### Historical baseline
 
@@ -93,7 +95,7 @@ leaves the Mac.
 | macOS requirement | 14+ | 14+ on Apple Silicon |
 | Accuracy | Large cloud model | Nemotron 0.6B |
 | Latency | Pending rebenchmark (historical p50: 0.55 s) | Depends on hardware |
-| Long dictation | Chunked at 300 s | Incremental rolling injection |
+| Long dictation | Bounded backend commits; one final injection | Incremental rolling injection |
 | Cost | OpenAI API usage | Free |
 
 ## Running the benchmarks

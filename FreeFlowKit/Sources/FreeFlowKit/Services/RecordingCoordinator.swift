@@ -117,8 +117,23 @@ public actor RecordingCoordinator {
         return true
     }
 
+    /// Make retained dictation available for an explicit retry after the user
+    /// replaces an expired credential. Only valid from `.sessionExpired`.
+    ///
+    /// This transition does not start transcription or injection. The user can
+    /// first restore focus to the intended target, then choose Retry.
+    ///
+    /// - Returns: `true` if the transition succeeded.
+    @discardableResult
+    public func prepareDictationRecovery() -> Bool {
+        guard _state == .sessionExpired else { return false }
+        transition(to: .dictationFailed)
+        return true
+    }
+
     /// Transition back to `.processing` to re-attempt dictation.
-    /// Only valid from `.dictationFailed`.
+    /// Valid after an ordinary failure or after expired credentials have been
+    /// replaced and `prepareDictationRecovery()` has exposed explicit Retry.
     ///
     /// - Returns: `true` if the transition succeeded.
     @discardableResult

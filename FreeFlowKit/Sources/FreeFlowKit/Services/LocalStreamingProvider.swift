@@ -120,11 +120,6 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
     // MARK: - StreamingDictationProviding
 
-    public var uncommittedAudioDuration: TimeInterval {
-        let bytes = lock.withLock { accumulatedAudio.count }
-        return Double(bytes) / 32_000.0
-    }
-
     public func setChunkHandler(
         _ handler: (@Sendable (String) async -> Void)?
     ) {

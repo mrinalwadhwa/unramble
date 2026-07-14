@@ -23,6 +23,30 @@ final class StreamingPipelineTests: XCTestCase {
         return data
     }
 
+    private func makeSparseAudibleBuffer() -> AudioBuffer {
+        let sampleRate = 16_000
+        let sampleCount = sampleRate * 4
+        var pcm = Data(capacity: sampleCount * 2)
+        for index in 0..<sampleCount {
+            let sample: Int16 = index < 160
+                ? (index.isMultiple(of: 2) ? 3_000 : -3_000)
+                : 0
+            withUnsafeBytes(of: sample.littleEndian) {
+                pcm.append(contentsOf: $0)
+            }
+        }
+        return AudioBuffer(
+            data: WAVEncoder.encode(
+                pcmData: pcm,
+                sampleRate: sampleRate,
+                channels: 1,
+                bitsPerSample: 16),
+            duration: 4,
+            sampleRate: sampleRate,
+            channels: 1,
+            bitsPerSample: 16)
+    }
+
     /// Build a batch mock with a delay. Used as the default dictation
     /// provider in test pipelines where batch is not the focus.
     private func makeSlowBatchProvider() -> MockBatchProvider {
@@ -38,7 +62,9 @@ final class StreamingPipelineTests: XCTestCase {
         streamingProvider: MockStreamingProvider = MockStreamingProvider(),
         textInjector: MockTextInjector = MockTextInjector(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
-        transcriptBuffer: TranscriptBuffer? = nil
+        transcriptBuffer: TranscriptBuffer? = nil,
+        localMode: Bool = false,
+        onSessionExpired: (@Sendable () -> Void)? = nil
     ) -> (
         DictationPipeline, MockAudioProvider, MockAppContextProvider,
         MockBatchProvider, MockStreamingProvider,
@@ -53,7 +79,9 @@ final class StreamingPipelineTests: XCTestCase {
             textInjector: textInjector,
             coordinator: coordinator,
             transcriptBuffer: transcriptBuffer,
-            streamingProvider: streamingProvider
+            streamingProvider: streamingProvider,
+            onSessionExpired: onSessionExpired,
+            localMode: localMode
         )
         return (
             pipeline, audio, contextProvider, dictation,
@@ -61,7 +89,17 @@ final class StreamingPipelineTests: XCTestCase {
         )
     }
 
-    /// Emit PCM chunks in the background so the forwarding task has data.
+    private func waitUntil(
+        _ condition: @escaping () -> Bool
+    ) async -> Bool {
+        for _ in 0..<10_000 {
+            if condition() { return true }
+            await Task.yield()
+        }
+        return condition()
+    }
+
+    /// Emit PCM chunks in the background so the forwarding operation has data.
     private func emitChunksInBackground(
         _ audio: MockAudioProvider,
         count: Int = 2,
@@ -154,7 +192,7 @@ final class StreamingPipelineTests: XCTestCase {
 
         await pipeline.activate()
 
-        // Emit chunks and give the forwarding task time to process.
+        // Emit chunks and give the forwarding operation time to process.
         let emitTask = emitChunksInBackground(audio, count: 3)
         try? await Task.sleep(nanoseconds: 150_000_000)
         emitTask.cancel()
@@ -167,6 +205,202 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertGreaterThan(
             streaming.totalAudioBytesReceived, 0,
             "Streaming provider should receive audio data")
+    }
+
+    func testCompleteDrainsQueuedAudioBeforeStreamingFinish() async {
+        let firstChunk = makeNonSilentPCMChunk(sampleCount: 400)
+        let finalChunk = makeNonSilentPCMChunk(sampleCount: 600)
+        let sendGate = PipelineSendGate()
+        let streaming = MockStreamingProvider(stubbedText: "Complete dictation")
+        streaming.sendAudioHook = { data in
+            await sendGate.send(data)
+        }
+        let dictation = MockBatchProvider(stubbedText: "Unexpected fallback")
+        let (pipeline, audio, _, _, _, injector, _) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
+        guard didStart else {
+            await pipeline.cancel()
+            return
+        }
+        audio.emitPCMChunk(firstChunk)
+        await sendGate.waitUntilFirstSendStarts()
+        audio.emitPCMChunk(finalChunk)
+
+        let completeTask = Task { await pipeline.complete() }
+        let captureStopped = await waitUntil { audio.stopCallCount == 1 }
+        XCTAssertTrue(captureStopped)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+
+        await sendGate.releaseFirstSend()
+        await completeTask.value
+
+        let sentChunks = await sendGate.sentChunks
+        XCTAssertEqual(sentChunks, [firstChunk, finalChunk])
+        XCTAssertEqual(streaming.finishCallCount, 1)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Complete dictation")
+    }
+
+    func testCancelClosesAndJoinsBlockedForwardingWithoutPublishing() async {
+        let sendGate = PipelineSendGate()
+        let streaming = MockStreamingProvider(stubbedText: "Untrusted partial text")
+        streaming.sendAudioHook = { data in
+            await sendGate.send(data)
+        }
+        streaming.cancelStreamingHook = {
+            await sendGate.releaseFirstSend()
+        }
+        let dictation = MockBatchProvider(stubbedText: "Unexpected fallback")
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
+        guard didStart else {
+            await pipeline.cancel()
+            return
+        }
+        audio.emitPCMChunk(makeNonSilentPCMChunk())
+        await sendGate.waitUntilFirstSendStarts()
+
+        await pipeline.cancel()
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertGreaterThanOrEqual(streaming.cancelCallCount, 1)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testExplicitCancelDiscardsRecoveryPublishedByCancelledBatch() async {
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("offline")
+        let dictation = MockBatchProvider(stubbedText: "Late result")
+        dictation.stubbedDelay = 60
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        let completeTask = Task { await pipeline.complete() }
+        let batchStarted = await waitUntil { dictation.dictateCallCount == 1 }
+        XCTAssertTrue(batchStarted)
+
+        await pipeline.cancel()
+        await completeTask.value
+        emitTask.cancel()
+
+        let cancelledState = await coordinator.state
+        XCTAssertEqual(cancelledState, .idle)
+        XCTAssertEqual(dictation.dictateCallCount, 1)
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        dictation.stubbedDelay = 0
+        _ = await coordinator.startRecording()
+        _ = await coordinator.stopRecording()
+        _ = await coordinator.expireSession()
+        await pipeline.retryDictation()
+
+        XCTAssertEqual(
+            dictation.dictateCallCount, 1,
+            "Explicit cancel must not leave hidden recovery audio")
+        XCTAssertEqual(injector.injectionCount, 0)
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle)
+    }
+
+    func testExplicitCancelRejectsLateBatchAuthenticationFailure() async {
+        let audio = makeStreamingAudioProvider()
+        let context = MockAppContextProvider()
+        let dictation = CancellationInsensitiveAuthenticationFailureProvider()
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("offline")
+        streaming.cancelStreamingHook = {
+            await dictation.releaseCallIfStarted()
+        }
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let sessionExpired = expectation(description: "late session expiry")
+        sessionExpired.isInverted = true
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: context,
+            batchProvider: dictation,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming,
+            onSessionExpired: { sessionExpired.fulfill() })
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        let completeTask = Task { await pipeline.complete() }
+        await dictation.waitUntilCallStarts()
+
+        await pipeline.cancel()
+        await completeTask.value
+        emitTask.cancel()
+        await fulfillment(of: [sessionExpired], timeout: 0.1)
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testOwnerCancellationRejectsLateBatchResultAndPreservesCompleteWAV() async {
+        let audio = makeStreamingAudioProvider()
+        let context = MockAppContextProvider()
+        let dictation = CancellationInsensitiveBatchProvider(
+            firstResult: "Late plausible result",
+            retryResult: "Recovered complete result")
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("offline")
+        streaming.cancelStreamingHook = {
+            await dictation.releaseFirstCallIfStarted()
+        }
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: context,
+            batchProvider: dictation,
+            textInjector: injector,
+            coordinator: coordinator,
+            streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        let completeTask = Task { await pipeline.complete() }
+        await dictation.waitUntilFirstCallStarts()
+
+        completeTask.cancel()
+        await completeTask.value
+        emitTask.cancel()
+
+        let failedState = await coordinator.state
+        let firstReceivedAudio = await dictation.receivedAudio
+        XCTAssertEqual(failedState, .dictationFailed)
+        XCTAssertEqual(firstReceivedAudio, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        let allReceivedAudio = await dictation.receivedAudio
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(allReceivedAudio, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered complete result")
     }
 
     func testStreamingReadsContext() async {
@@ -334,6 +568,59 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "Batch fallback text")
     }
 
+    func testStreamingStartFailureDoesNotRejectSparseAudibleWAV() async {
+        let audio = MockAudioProvider(stubbedBuffer: makeSparseAudibleBuffer())
+        audio.enablePCMStream = true
+        audio.stubbedPeakRMS = 0.1
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("connection refused")
+        let dictation = MockBatchProvider(stubbedText: "Sparse setup recovery")
+        let (pipeline, _, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            audioProvider: audio,
+            batchProvider: dictation,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [audio.stubbedBuffer.data])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Sparse setup recovery")
+    }
+
+    func testStreamingStartFailureAndEmptyBatchPreserveCompleteWAV() async {
+        let streaming = MockStreamingProvider()
+        streaming.stubbedStartError = DictationError.networkError("connection refused")
+        let dictation = MockBatchProvider(stubbedText: "")
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+
+        let failedState = await coordinator.state
+        XCTAssertEqual(failedState, .dictationFailed)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        dictation.stubbedText = "Recovered setup fallback"
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered setup fallback")
+    }
+
     func testStreamingFinishFailureFallsToBatch() async {
         let streaming = MockStreamingProvider()
         streaming.stubbedFinishError = DictationError.networkError("connection lost")
@@ -352,11 +639,12 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(
             dictation.dictateCallCount, 1,
             "Batch dictation should be called as fallback when streaming finish fails")
+        XCTAssertEqual(dictation.lastReceivedAudio, audio.stubbedBuffer.data)
         XCTAssertEqual(injector.lastInjectedText, "Batch recovery")
     }
 
     func testStreamingEmptyResultUsesBatchFallback() async {
-        // When streaming returns empty, batch result is used (parallel mode).
+        // When streaming returns empty, the serial batch fallback is used.
         let streaming = MockStreamingProvider(stubbedText: "")
         let dictation = MockBatchProvider(stubbedText: "Batch result")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
@@ -372,15 +660,16 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(
             injector.injectionCount, 1,
             "Batch result should be injected when streaming returns empty")
+        XCTAssertEqual(dictation.lastReceivedAudio, audio.stubbedBuffer.data)
         XCTAssertEqual(injector.lastInjectedText, "Batch result")
     }
 
-    func testBothEmptyResultsSkipInjection() async {
-        // When both streaming and batch return empty, skip injection.
+    func testBothEmptyResultsPreserveCompleteWAVForRetry() async {
         let streaming = MockStreamingProvider(stubbedText: "")
         let dictation = MockBatchProvider(stubbedText: "")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -388,18 +677,35 @@ final class StreamingPipelineTests: XCTestCase {
         emitTask.cancel()
 
         let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        await pipeline.retryDictation()
+
+        let stillRecoverableState = await coordinator.state
+        XCTAssertEqual(stillRecoverableState, .dictationFailed)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        dictation.stubbedText = "Recovered after empty results"
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
         XCTAssertEqual(
-            injector.injectionCount, 0,
-            "Empty results from both paths should skip injection")
+            dictation.receivedAudioData,
+            [completeWAV, completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered after empty results")
     }
 
-    func testBothWhitespaceOnlyResultsSkipInjection() async {
-        // When both streaming and batch return whitespace-only, skip injection.
+    func testBothWhitespaceOnlyResultsPreserveCompleteWAVForRetry() async {
         let streaming = MockStreamingProvider(stubbedText: "   \n  ")
         let dictation = MockBatchProvider(stubbedText: "  \t  ")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -407,10 +713,18 @@ final class StreamingPipelineTests: XCTestCase {
         emitTask.cancel()
 
         let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-        XCTAssertEqual(
-            injector.injectionCount, 0,
-            "Whitespace-only results from both paths should skip injection")
+        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        dictation.stubbedText = "Recovered after whitespace results"
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered after whitespace results")
     }
 
     // MARK: - Transcript buffer
@@ -527,6 +841,48 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(
             stored, "preserved streaming text",
             "Transcript should remain in buffer after injection failure in streaming mode")
+    }
+
+    func testRecoveryInjectionFailureDiscardsAcceptedAudio() async {
+        let buffer = TranscriptBuffer()
+        let injector = MockTextInjector()
+        injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
+        let streaming = MockStreamingProvider()
+        streaming.stubbedFinishError = DictationError.networkError("stream failed")
+        let dictation = MockBatchProvider()
+        dictation.stubbedError = DictationError.networkError("batch failed")
+        let (pipeline, audio, _, _, _, _, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming,
+            textInjector: injector,
+            transcriptBuffer: buffer)
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+
+        dictation.stubbedError = nil
+        dictation.stubbedText = "accepted recovery text"
+        await pipeline.retryDictation()
+
+        let failedState = await coordinator.state
+        let stored = await buffer.lastTranscript
+        XCTAssertEqual(failedState, .injectionFailed)
+        XCTAssertEqual(stored, "accepted recovery text")
+        XCTAssertEqual(dictation.dictateCallCount, 2)
+
+        await coordinator.reset()
+        _ = await coordinator.startRecording()
+        _ = await coordinator.stopRecording()
+        _ = await coordinator.failDictation()
+        await pipeline.retryDictation()
+
+        XCTAssertEqual(
+            dictation.dictateCallCount, 2,
+            "Accepted text must replace the WAV as the recovery artifact")
+        let finalState = await coordinator.state
+        XCTAssertEqual(finalState, .idle)
     }
 
     func testStreamingCycleWorksAfterInjectionFailureAndReset() async {
@@ -704,26 +1060,88 @@ final class StreamingPipelineTests: XCTestCase {
 
     // MARK: - Streaming send error during forwarding
 
-    func testStreamingSendErrorDoesNotCrash() async {
-        let streaming = MockStreamingProvider(stubbedText: "Partial result")
-        // Fail on the second sendAudio call.
+    func testStreamingSendErrorRejectsPartialAndBatchesCompleteWAV() async {
+        let streaming = MockStreamingProvider(stubbedText: "Plausible partial result")
         streaming.stubbedSendError = DictationError.networkError("send failed")
+        let dictation = MockBatchProvider(stubbedText: "Complete batch recovery")
 
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
-            streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
-
-        // Emit a chunk to trigger the send error.
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
         audio.emitPCMChunk(makeNonSilentPCMChunk())
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        let didSend = await waitUntil { streaming.sendCallCount == 1 }
+        XCTAssertTrue(didSend)
 
         await pipeline.complete()
 
-        // The pipeline should still complete (finishStreaming returns text).
         let state = await coordinator.state
         XCTAssertEqual(state, .idle)
-        XCTAssertEqual(injector.lastInjectedText, "Partial result")
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertGreaterThanOrEqual(streaming.cancelCallCount, 1)
+        XCTAssertEqual(dictation.dictateCallCount, 1)
+        XCTAssertEqual(dictation.lastReceivedAudio, completeWAV)
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Complete batch recovery")
+    }
+
+    func testStreamingRecoveryDoesNotRejectSparseAudibleWAV() async {
+        let completeBuffer = makeSparseAudibleBuffer()
+        let audio = MockAudioProvider(stubbedBuffer: completeBuffer)
+        audio.enablePCMStream = true
+        audio.stubbedPeakRMS = 0.1
+        let streaming = MockStreamingProvider(stubbedText: "")
+        streaming.stubbedSendError = DictationError.networkError("send failed")
+        let dictation = MockBatchProvider(stubbedText: "Brief complete recovery")
+        let (pipeline, _, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            audioProvider: audio,
+            batchProvider: dictation,
+            streamingProvider: streaming)
+
+        await pipeline.activate()
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
+        audio.emitPCMChunk(makeNonSilentPCMChunk())
+        let didSend = await waitUntil { streaming.sendCallCount == 1 }
+        XCTAssertTrue(didSend)
+
+        await pipeline.complete()
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(dictation.receivedAudioData, [completeBuffer.data])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Brief complete recovery")
+    }
+
+    func testLocalSendErrorDoesNotFinalizeOrInjectPartialText() async {
+        let streaming = MockStreamingProvider(stubbedText: "Incomplete local text")
+        streaming.stubbedSendError = DictationError.networkError("send failed")
+        let dictation = MockBatchProvider(stubbedText: "Unexpected cloud recovery")
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming,
+            localMode: true)
+
+        await pipeline.activate()
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
+        audio.emitPCMChunk(makeNonSilentPCMChunk())
+        let didSend = await waitUntil { streaming.sendCallCount == 1 }
+        XCTAssertTrue(didSend)
+
+        await pipeline.complete()
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertGreaterThanOrEqual(streaming.cancelCallCount, 1)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
     }
 
     // MARK: - Language parameter
@@ -742,28 +1160,44 @@ final class StreamingPipelineTests: XCTestCase {
 
     // MARK: - Chunk handler wiring
 
-    func testPipelineSetsChunkHandlerOnStreamingProvider() async {
-        let streaming = MockStreamingProvider()
-        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
+    func testCloudPipelinePublishesOnlyOneFinalResult() async {
+        let streaming = MockStreamingProvider(stubbedText: "Complete cloud result")
+        let (pipeline, _, _, _, _, injector, _) = makeStreamingPipeline(
             streamingProvider: streaming)
 
         await pipeline.activate()
-        // Let audio setup finish and set the handler.
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
 
-        XCTAssertTrue(
+        XCTAssertFalse(
             streaming.hasChunkHandler,
-            "Pipeline should set a chunk handler on the streaming provider")
+            "Cloud providers must not publish irreversible intermediate text")
+        await streaming.emitChunk("Untrusted intermediate text")
+        XCTAssertEqual(injector.injectionCount, 0)
 
-        let emitTask = emitChunksInBackground(audio)
         await pipeline.complete()
-        emitTask.cancel()
+
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Complete cloud result")
+    }
+
+    func testLocalPipelineSetsChunkHandlerOnStreamingProvider() async {
+        let streaming = MockStreamingProvider()
+        let (pipeline, _, _, _, _, _, _) = makeStreamingPipeline(
+            streamingProvider: streaming,
+            localMode: true)
+
+        await pipeline.activate()
+        let didStart = await waitUntil { streaming.startCallCount == 1 }
+        XCTAssertTrue(didStart)
+        XCTAssertTrue(streaming.hasChunkHandler)
+        await pipeline.cancel()
     }
 
     // MARK: - Chunk handler cleared after complete
 
     func testChunkHandlerClearedAfterComplete() async {
-        let (pipeline, audio, _, _, streaming, _, _) = makeStreamingPipeline()
+        let (pipeline, audio, _, _, streaming, _, _) = makeStreamingPipeline(localMode: true)
 
         await pipeline.activate()
         try? await Task.sleep(nanoseconds: 50_000_000)
@@ -867,14 +1301,14 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "Batch fallback")
     }
 
-    func testBothStreamingAndBatchFailSkipInjection() async {
-        // When both streaming and batch fail, no text should be injected.
+    func testBothStreamingAndBatchFailPreservesCompleteWAVForRetry() async {
         let streaming = MockStreamingProvider()
         streaming.stubbedFinishError = DictationError.networkError("ws died")
         let dictation = MockBatchProvider()
         dictation.stubbedError = DictationError.networkError("http died")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
             batchProvider: dictation, streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
         let emitTask = emitChunksInBackground(audio)
@@ -882,10 +1316,90 @@ final class StreamingPipelineTests: XCTestCase {
         emitTask.cancel()
 
         let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(dictation.lastReceivedAudio, completeWAV)
         XCTAssertEqual(
             injector.injectionCount, 0,
             "No text should be injected when both paths fail")
+
+        dictation.stubbedError = nil
+        dictation.stubbedText = "Recovered complete dictation"
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(dictation.dictateCallCount, 2)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered complete dictation")
+    }
+
+    func testBatch401PreservesCompleteWAVAcrossCredentialRetry() async {
+        let streaming = MockStreamingProvider()
+        streaming.stubbedFinishError = DictationError.networkError("ws died")
+        let dictation = MockBatchProvider()
+        dictation.stubbedError = DictationError.authenticationFailed
+        let callback = expectation(description: "session expired")
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming,
+            onSessionExpired: { callback.fulfill() })
+        let completeWAV = audio.stubbedBuffer.data
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+        await fulfillment(of: [callback], timeout: 2)
+
+        let expiredState = await coordinator.state
+        XCTAssertEqual(expiredState, .sessionExpired)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        dictation.stubbedError = nil
+        dictation.stubbedText = "Recovered after sign in"
+        await pipeline.presentRecoveryAfterAuthentication()
+
+        let readyState = await coordinator.state
+        XCTAssertEqual(readyState, .dictationFailed)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered after sign in")
+    }
+
+    func testRetryAuthenticationFailureReopensSessionRecovery() async {
+        let streaming = MockStreamingProvider()
+        streaming.stubbedFinishError = DictationError.networkError("ws died")
+        let dictation = MockBatchProvider()
+        dictation.stubbedError = DictationError.networkError("http died")
+        let secondExpiry = expectation(description: "replacement key rejected")
+        let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
+            batchProvider: dictation,
+            streamingProvider: streaming,
+            onSessionExpired: { secondExpiry.fulfill() })
+        let completeWAV = audio.stubbedBuffer.data
+
+        await pipeline.activate()
+        let emitTask = emitChunksInBackground(audio)
+        await pipeline.complete()
+        emitTask.cancel()
+
+        dictation.stubbedError = DictationError.authenticationFailed
+        await pipeline.retryDictation()
+        await fulfillment(of: [secondExpiry], timeout: 2)
+
+        let state = await coordinator.state
+        XCTAssertEqual(state, .sessionExpired)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
     }
 
     // MARK: - Audio setup failure during complete
@@ -919,5 +1433,127 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(
             injector.injectionCount, 0,
             "No text should be injected when audio setup fails")
+    }
+}
+
+private actor PipelineSendGate {
+    private var firstSendStarted = false
+    private var firstSendReleased = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var sentChunks: [Data] = []
+
+    func send(_ data: Data) async {
+        sentChunks.append(data)
+        guard sentChunks.count == 1 else { return }
+        firstSendStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+
+        guard !firstSendReleased else { return }
+        await withCheckedContinuation { continuation in
+            releaseWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilFirstSendStarts() async {
+        guard !firstSendStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstSend() {
+        guard !firstSendReleased else { return }
+        firstSendReleased = true
+        let waiters = releaseWaiters
+        releaseWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+}
+
+private actor CancellationInsensitiveBatchProvider: BatchDictationProviding {
+    private let firstResult: String
+    private let retryResult: String
+    private var firstCallStarted = false
+    private var firstCallReleased = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var receivedAudio: [Data] = []
+
+    init(firstResult: String, retryResult: String) {
+        self.firstResult = firstResult
+        self.retryResult = retryResult
+    }
+
+    func dictate(audio: Data, context: AppContext) async throws -> String {
+        receivedAudio.append(audio)
+        guard receivedAudio.count == 1 else { return retryResult }
+
+        firstCallStarted = true
+        let waitingForStart = startWaiters
+        startWaiters.removeAll()
+        waitingForStart.forEach { $0.resume() }
+
+        if !firstCallReleased {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+        return firstResult
+    }
+
+    func waitUntilFirstCallStarts() async {
+        guard !firstCallStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstCallIfStarted() {
+        guard firstCallStarted, !firstCallReleased else { return }
+        firstCallReleased = true
+        let waitingForRelease = releaseWaiters
+        releaseWaiters.removeAll()
+        waitingForRelease.forEach { $0.resume() }
+    }
+}
+
+private actor CancellationInsensitiveAuthenticationFailureProvider:
+    BatchDictationProviding
+{
+    private var callStarted = false
+    private var callReleased = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func dictate(audio: Data, context: AppContext) async throws -> String {
+        callStarted = true
+        let waitingForStart = startWaiters
+        startWaiters.removeAll()
+        waitingForStart.forEach { $0.resume() }
+
+        if !callReleased {
+            await withCheckedContinuation { continuation in
+                releaseWaiters.append(continuation)
+            }
+        }
+        throw DictationError.authenticationFailed
+    }
+
+    func waitUntilCallStarts() async {
+        guard !callStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func releaseCallIfStarted() {
+        guard callStarted, !callReleased else { return }
+        callReleased = true
+        let waitingForRelease = releaseWaiters
+        releaseWaiters.removeAll()
+        waitingForRelease.forEach { $0.resume() }
     }
 }

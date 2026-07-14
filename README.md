@@ -39,9 +39,10 @@ baseline is recorded in [BENCHMARK.md](BENCHMARK.md).
 A warm backup connection is kept pre-opened in the background so later
 dictations can skip the WebSocket handshake.
 
-The same Realtime connection transcribes the audio and returns the polished
-response. If that streaming path fails, FreeFlow can recover through batch
-transcription and chat polish for the full recording or its uncommitted tail.
+The same Realtime connection transcribes the audio and returns one polished
+response after key release. If that streaming path fails before delivery,
+FreeFlow recovers through batch transcription and chat polish using the exact
+complete recording.
 
 See [BENCHMARK.md](BENCHMARK.md) for detailed timing breakdowns.
 

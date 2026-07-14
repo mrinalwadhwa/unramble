@@ -170,6 +170,44 @@ final class RecordingCoordinatorTests: XCTestCase {
         await assertState(coordinator, .idle)
     }
 
+    func testRetryDictationFromSessionExpiredIsRejected() async {
+        let coordinator = RecordingCoordinator()
+        await coordinator.startRecording()
+        await coordinator.stopRecording()
+        await coordinator.expireSession()
+
+        let retried = await coordinator.retryDictation()
+
+        XCTAssertFalse(retried)
+        await assertState(coordinator, .sessionExpired)
+    }
+
+    func testPrepareDictationRecoveryMakesRetryAvailable() async {
+        let coordinator = RecordingCoordinator()
+        await coordinator.startRecording()
+        await coordinator.stopRecording()
+        await coordinator.expireSession()
+
+        let prepared = await coordinator.prepareDictationRecovery()
+
+        XCTAssertTrue(prepared)
+        await assertState(coordinator, .dictationFailed)
+
+        let retried = await coordinator.retryDictation()
+
+        XCTAssertTrue(retried)
+        await assertState(coordinator, .processing)
+    }
+
+    func testPrepareDictationRecoveryFromIdleIsRejected() async {
+        let coordinator = RecordingCoordinator()
+
+        let prepared = await coordinator.prepareDictationRecovery()
+
+        XCTAssertFalse(prepared)
+        await assertState(coordinator, .idle)
+    }
+
     // MARK: - reset
 
     func testResetFromIdleRemainsIdle() async {

@@ -238,8 +238,8 @@ struct DictationPipelineIntegrationTests {
         #expect(injector.injectionCount == 0)
     }
 
-    @Test("Empty dictation result skips injection")
-    func emptyDictationSkipsInjection() async {
+    @Test("Empty dictation result remains recoverable without injection")
+    func emptyDictationRemainsRecoverable() async {
         let dictation = MockBatchProvider(stubbedText: "   ")
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(batchProvider: dictation)
 
@@ -247,7 +247,7 @@ struct DictationPipelineIntegrationTests {
         await pipeline.complete()
 
         let state = await coordinator.state
-        #expect(state == .idle)
+        #expect(state == .dictationFailed)
         #expect(dictation.dictateCallCount == 1)
         #expect(injector.injectionCount == 0)
     }

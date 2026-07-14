@@ -2,7 +2,7 @@ import Foundation
 
 /// Stream audio for real-time transcription and receive polished text.
 ///
-/// Unlike `DictationProviding`, which sends a complete WAV file after
+/// Unlike `BatchDictationProviding`, which sends a complete WAV file after
 /// recording ends, a streaming provider accepts audio chunks during
 /// recording. The server transcribes audio in real time so the result
 /// is available almost immediately after the last chunk is sent.
@@ -10,7 +10,7 @@ import Foundation
 /// Lifecycle:
 ///   1. Optionally `setChunkHandler(_:)` when the provider supports publishing
 ///      intermediate text.
-///   2. `startStreaming(context:language:)` — open a connection.
+///   2. `startStreaming(context:language:micProximity:)` — open a connection.
 ///   3. `sendAudio(_:)` — call repeatedly with PCM chunks.
 ///   4. `finishStreaming()` — signal end of audio and receive the provider's
 ///      final unpublished text.
@@ -27,10 +27,12 @@ import Foundation
 /// `startStreaming` while a session is open is a programming error.
 public protocol StreamingDictationProviding: Sendable {
 
-    /// Duration (in seconds) of audio sent since the last successful backend
-    /// commit. This does not prove that earlier committed audio reached final
-    /// text delivery.
-    var uncommittedAudioDuration: TimeInterval { get }
+    /// Pipeline watchdog for `finishStreaming()`, in seconds.
+    ///
+    /// The provider should include enough time for its own semantic timeout
+    /// and teardown. When this deadline expires, the pipeline closes the
+    /// provider, joins finalization, and recovers from the complete WAV.
+    var finishStreamingWatchdog: TimeInterval { get }
 
     /// Register a handler to receive intermediate published text for the next
     /// session. Call before `startStreaming`. Passing `nil` clears the handler.
@@ -85,7 +87,7 @@ public protocol StreamingDictationProviding: Sendable {
 /// callers that try to set a handler.
 extension StreamingDictationProviding {
 
-    public var uncommittedAudioDuration: TimeInterval { 0 }
+    public var finishStreamingWatchdog: TimeInterval { 30 }
 
     public func setChunkHandler(_ handler: (@Sendable (String) async -> Void)?) {}
 }

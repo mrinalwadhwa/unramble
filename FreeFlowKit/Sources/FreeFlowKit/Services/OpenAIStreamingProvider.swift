@@ -430,6 +430,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         return polished
     }
 
+    public var finishStreamingWatchdog: TimeInterval {
+        let bytesSent = lock.withLock {
+            self.currentTiming?.audioBytesSent ?? 0
+        }
+        // Let the provider's semantic timeout win under normal conditions,
+        // while preserving time for whole-WAV recovery below the pipeline cap.
+        return min(295, Self.transcriptTimeout(forAudioBytes: bytesSent) + 5)
+    }
+
     public func cancelStreaming() async {
         let cancellation = CancellationError()
         let state: (Task<Void, Error>?, OpenAIRealtimeCommitSession?) = lock.withLock {

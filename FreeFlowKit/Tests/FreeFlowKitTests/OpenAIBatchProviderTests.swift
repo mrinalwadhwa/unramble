@@ -45,6 +45,33 @@ private actor BatchPolishSpy: PolishChatClient {
     }
 }
 
+private final class MutableAPIKey: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: String
+
+    init(_ value: String) {
+        storedValue = value
+    }
+
+    var value: String {
+        get { lock.withLock { storedValue } }
+        set { lock.withLock { storedValue = newValue } }
+    }
+}
+
+private final class AuthorizationRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String] = []
+
+    func append(_ value: String) {
+        lock.withLock { values.append(value) }
+    }
+
+    var snapshot: [String] {
+        lock.withLock { values }
+    }
+}
+
 // MARK: - Stubbed tests
 
 @Suite("OpenAIBatchProvider – stubbed")
@@ -91,6 +118,32 @@ struct OpenAIBatchProviderStubbedTests {
 
         let request = try #require(capturedRequest)
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-my-key")
+    }
+
+    @Test("Reads a replacement API key without rebuilding the provider")
+    func refreshedAuthHeader() async throws {
+        let apiKey = MutableAPIKey("sk-expired")
+        let recorder = AuthorizationRecorder()
+        let session = stubbedSession { request in
+            recorder.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
+            let body = #"{"text":"ok"}"#
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, body.data(using: .utf8)!)
+        }
+        let provider = OpenAIBatchProvider(
+            apiKey: apiKey.value,
+            polishChatClient: nil,
+            session: session)
+
+        _ = try await provider.dictate(audio: silentWAV(), context: .empty)
+        apiKey.value = "sk-replacement"
+        _ = try await provider.dictate(audio: silentWAV(), context: .empty)
+
+        #expect(
+            recorder.snapshot
+                == ["Bearer sk-expired", "Bearer sk-replacement"])
     }
 
     @Test("multipart content type with boundary")

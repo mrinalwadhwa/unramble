@@ -28,7 +28,7 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
 
     /// When true, `sendAudio()` hangs indefinitely on the first call,
     /// simulating a stuck `URLSessionWebSocketTask.send()` on a broken
-    /// WebSocket. The forwarding task timeout should unblock this.
+    /// WebSocket. Closing the forwarding operation should unblock this.
     var hangOnSendAudio: Bool = false
 
     /// Fixed delay (in seconds) before `startStreaming()` returns.
@@ -42,6 +42,9 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     /// The text returned by `finishStreaming()` when it doesn't hang.
     var stubbedText: String = "Streamed text"
 
+    /// Pipeline watchdog for a cancellation-insensitive finalization.
+    var finishStreamingWatchdog: TimeInterval = 30
+
     /// An optional error to throw from `finishStreaming()`.
     var stubbedFinishError: (any Error)?
 
@@ -54,6 +57,7 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     private var _startDidHang: Bool = false
     private var _finishDidHang: Bool = false
     private var _sendAudioDidHang: Bool = false
+    private var sessionCancelled = false
 
     var startCallCount: Int { lock.withLock { _startCallCount } }
     var finishCallCount: Int { lock.withLock { _finishCallCount } }
@@ -104,14 +108,24 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     func startStreaming(context: AppContext, language: String?, micProximity: MicProximity)
         async throws
     {
-        lock.withLock { _startCallCount += 1 }
+        lock.withLock {
+            _startCallCount += 1
+            sessionCancelled = false
+        }
 
         if hangOnStart {
-            lock.withLock { _startDidHang = true }
             // Block until cancelled or explicitly released.
             try await withCheckedThrowingContinuation {
                 (cont: CheckedContinuation<Void, any Error>) in
-                lock.withLock { startContinuation = cont }
+                let shouldCancel = lock.withLock {
+                    _startDidHang = true
+                    guard !sessionCancelled else { return true }
+                    startContinuation = cont
+                    return false
+                }
+                if shouldCancel {
+                    cont.resume(throwing: CancellationError())
+                }
             }
         } else if startDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(startDelay * 1_000_000_000))
@@ -123,14 +137,21 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
         lock.withLock { _sendAudioCallCount += 1 }
 
         if hangOnSendAudio {
-            lock.withLock { _sendAudioDidHang = true }
             // Block indefinitely, simulating a stuck WebSocket send().
             // URLSessionWebSocketTask.send() does not respond to Swift
             // structured concurrency cancellation, so this continuation
             // is only resumed by cancelStreaming() or explicit release.
             try await withCheckedThrowingContinuation {
                 (cont: CheckedContinuation<Void, any Error>) in
-                lock.withLock { sendAudioContinuation = cont }
+                let shouldCancel = lock.withLock {
+                    _sendAudioDidHang = true
+                    guard !sessionCancelled else { return true }
+                    sendAudioContinuation = cont
+                    return false
+                }
+                if shouldCancel {
+                    cont.resume(throwing: CancellationError())
+                }
             }
         }
     }
@@ -139,10 +160,17 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
         lock.withLock { _finishCallCount += 1 }
 
         if hangOnFinish {
-            lock.withLock { _finishDidHang = true }
             return try await withCheckedThrowingContinuation {
                 (cont: CheckedContinuation<String, any Error>) in
-                lock.withLock { finishContinuation = cont }
+                let shouldCancel = lock.withLock {
+                    _finishDidHang = true
+                    guard !sessionCancelled else { return true }
+                    finishContinuation = cont
+                    return false
+                }
+                if shouldCancel {
+                    cont.resume(throwing: CancellationError())
+                }
             }
         } else if finishDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(finishDelay * 1_000_000_000))
@@ -156,16 +184,19 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     }
 
     func cancelStreaming() async {
-        lock.withLock {
+        let continuations = lock.withLock {
             _cancelCallCount += 1
-            // Resume any hanging continuations so they don't leak.
-            startContinuation?.resume(throwing: CancellationError())
+            sessionCancelled = true
+            let continuations = (
+                startContinuation, finishContinuation, sendAudioContinuation)
             startContinuation = nil
-            finishContinuation?.resume(throwing: CancellationError())
             finishContinuation = nil
-            sendAudioContinuation?.resume(throwing: CancellationError())
             sendAudioContinuation = nil
+            return continuations
         }
+        continuations.0?.resume(throwing: CancellationError())
+        continuations.1?.resume(throwing: CancellationError())
+        continuations.2?.resume(throwing: CancellationError())
     }
 }
 
@@ -319,25 +350,22 @@ final class PipelineTimeoutTests: XCTestCase {
 
     // MARK: - Finish streaming timeout
 
-    /// When `finishStreaming()` hangs (server never sends transcript_done),
-    /// the 10s transcript timeout should fire and the pipeline should fall
-    /// back to the batch result.
+    /// When `finishStreaming()` hangs, the provider watchdog must close and
+    /// join it before the pipeline recovers from the exact complete WAV.
     func testCompleteReturnsWhenFinishStreamingHangs() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnFinish = true
+        streaming.finishStreamingWatchdog = 0.05
         let dictation = MockBatchProvider(stubbedText: "Batch wins")
         let (pipeline, audio, _, _, injector, coordinator) = makePipeline(
             batchProvider: dictation, streamingProvider: streaming)
+        let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
         try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
 
         let emitTask = emitChunksInBackground(audio, count: 10, delayNanos: 50_000_000)
 
-        // finishStreaming hangs, but batch should complete quickly.
-        // The parallel race means batch wins and complete() returns
-        // without waiting for the full 10s streaming timeout.
-        // Allow 5s for batch to complete (it doesn't depend on streaming).
         await assertCompletesWithin(5.0) {
             await pipeline.complete()
         }
@@ -345,9 +373,16 @@ final class PipelineTimeoutTests: XCTestCase {
 
         let state = await coordinator.state
         XCTAssertEqual(state, .idle)
-        XCTAssertEqual(
-            injector.lastInjectedText, "Batch wins",
-            "Batch result should be used when streaming hangs")
+        XCTAssertEqual(streaming.finishCallCount, 1)
+        XCTAssertGreaterThanOrEqual(streaming.cancelCallCount, 1)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Batch wins")
+
+        streaming.releaseFinish(text: "Late plausible text")
+        await Task.yield()
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Batch wins")
     }
 
     // MARK: - Cancellation propagation
@@ -570,7 +605,7 @@ final class PipelineTimeoutTests: XCTestCase {
         XCTAssertEqual(state, .idle)
     }
 
-    // MARK: - Audio forwarding task timeout
+    // MARK: - Audio forwarding operation timeout
 
     /// Reproduce the exact production hang: streaming setup succeeds,
     /// audio forwarding starts, then sendAudio() hangs on a broken
@@ -581,10 +616,6 @@ final class PipelineTimeoutTests: XCTestCase {
         streaming.hangOnSendAudio = true
         let dictation = MockBatchProvider(stubbedText: "Batch fallback")
         let audio = makeStreamingAudioProvider()
-        // Stub a non-silent audio buffer so batch mode has valid audio.
-        audio.stubbedBuffer = AudioBuffer(
-            data: makeNonSilentPCMChunk(sampleCount: 16000),
-            duration: 1.0, sampleRate: 16000, channels: 1, bitsPerSample: 16)
         let coordinator = RecordingCoordinator()
         let (pipeline, _, _, _, injector, _) = makePipeline(
             audioProvider: audio,
@@ -600,7 +631,7 @@ final class PipelineTimeoutTests: XCTestCase {
         // Emit a chunk — this triggers sendAudio() which hangs.
         audio.emitPCMChunk(makeNonSilentPCMChunk())
 
-        // Give the forwarding task time to enter the hanging sendAudio.
+        // Give the forwarding operation time to enter the hanging sendAudio.
         try? await Task.sleep(nanoseconds: 200_000_000)
         XCTAssertTrue(
             streaming.sendAudioDidHang,
@@ -616,83 +647,97 @@ final class PipelineTimeoutTests: XCTestCase {
         let state = await coordinator.state
         XCTAssertEqual(
             state, .idle,
-            "Pipeline should be back to idle after forwarding task timeout")
+            "Pipeline should be back to idle after forwarding timeout")
+        XCTAssertEqual(streaming.finishCallCount, 0)
+        XCTAssertEqual(dictation.receivedAudioData, [audio.stubbedBuffer.data])
+        XCTAssertEqual(injector.lastInjectedText, "Batch fallback")
     }
 
-    /// Same as above but sendAudio hangs AND finishStreaming hangs,
-    /// forcing the pipeline to recover purely from the forwarding
-    /// timeout + batch fallback.
-    func testCompleteReturnsWhenSendAudioAndFinishStreamingBothHang() async {
+    // MARK: - Overall pipeline timeout
+
+    /// A forwarding timeout followed by a stuck batch request must hit the
+    /// pipeline deadline and preserve the exact WAV for an explicit retry.
+    func testOverallPipelineTimeoutPreservesCompleteWAVForRetry() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.hangOnSendAudio = true
-        streaming.hangOnFinish = true
-        let dictation = MockBatchProvider(stubbedText: "Batch wins")
+        // Make batch also hang by using a provider that blocks.
+        let hangingDictation = MockBatchProvider()
+        hangingDictation.stubbedDelay = 60
         let audio = makeStreamingAudioProvider()
-        audio.stubbedBuffer = AudioBuffer(
-            data: makeNonSilentPCMChunk(sampleCount: 16000),
-            duration: 1.0, sampleRate: 16000, channels: 1, bitsPerSample: 16)
+        let coordinator = RecordingCoordinator()
+        let (pipeline, _, _, _, injector, _) = makePipeline(
+            audioProvider: audio,
+            batchProvider: hangingDictation,
+            streamingProvider: streaming,
+            coordinator: coordinator)
+        let completeWAV = audio.stubbedBuffer.data
+
+        await pipeline.activate()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        audio.emitPCMChunk(makeNonSilentPCMChunk())
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        // Allow scheduling margin beyond the 45-second baseline deadline.
+        await assertCompletesWithin(55.0) {
+            await pipeline.complete()
+        }
+
+        let state = await coordinator.state
+        XCTAssertEqual(
+            state, .dictationFailed,
+            "A timed-out batch fallback must remain recoverable")
+        XCTAssertEqual(hangingDictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
+
+        hangingDictation.stubbedDelay = 0
+        hangingDictation.stubbedText = "Recovered after deadline"
+        await pipeline.retryDictation()
+
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(hangingDictation.receivedAudioData, [completeWAV, completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered after deadline")
+    }
+
+    /// A finish operation whose own watchdog exceeds the pipeline deadline must
+    /// still preserve the exact WAV when the outer owner cancels finalization.
+    func testOverallDeadlineDuringFinishPreservesCompleteWAVForRetry() async {
+        let streaming = HangingStreamingDictationProvider()
+        streaming.hangOnFinish = true
+        streaming.finishStreamingWatchdog = 60
+        let dictation = MockBatchProvider(stubbedText: "Recovered finish timeout")
+        let audio = makeStreamingAudioProvider()
         let coordinator = RecordingCoordinator()
         let (pipeline, _, _, _, injector, _) = makePipeline(
             audioProvider: audio,
             batchProvider: dictation,
             streamingProvider: streaming,
             coordinator: coordinator)
+        let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        audio.emitPCMChunk(makeNonSilentPCMChunk())
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let emitTask = emitChunksInBackground(audio)
 
-        // Both sendAudio and finishStreaming hang. Batch should win
-        // the race after the forwarding task timeout.
-        await assertCompletesWithin(10.0) {
+        await assertCompletesWithin(55.0) {
             await pipeline.complete()
         }
+        emitTask.cancel()
 
-        let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-        // Batch should have produced the result.
-        XCTAssertEqual(injector.lastInjectedText, "Batch wins")
-    }
+        let timedOutState = await coordinator.state
+        XCTAssertEqual(timedOutState, .dictationFailed)
+        XCTAssertEqual(streaming.finishCallCount, 1)
+        XCTAssertGreaterThanOrEqual(streaming.cancelCallCount, 1)
+        XCTAssertEqual(dictation.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
 
-    // MARK: - Overall pipeline timeout
+        await pipeline.retryDictation()
 
-    /// If everything hangs (sendAudio, finishStreaming, and batch),
-    /// the 15s overall pipeline timeout in complete() must force-reset
-    /// the pipeline to idle.
-    func testOverallPipelineTimeoutForcesReset() async {
-        let streaming = HangingStreamingDictationProvider()
-        streaming.hangOnSendAudio = true
-        streaming.hangOnFinish = true
-        // Make batch also hang by using a provider that blocks.
-        let hangingDictation = MockBatchProvider()
-        hangingDictation.stubbedDelay = 30.0  // 30s — longer than pipeline timeout
-        let audio = makeStreamingAudioProvider()
-        audio.stubbedBuffer = AudioBuffer(
-            data: makeNonSilentPCMChunk(sampleCount: 16000),
-            duration: 1.0, sampleRate: 16000, channels: 1, bitsPerSample: 16)
-        let coordinator = RecordingCoordinator()
-        let (pipeline, _, _, _, _, _) = makePipeline(
-            audioProvider: audio,
-            batchProvider: hangingDictation,
-            streamingProvider: streaming,
-            coordinator: coordinator)
-
-        await pipeline.activate()
-        try? await Task.sleep(nanoseconds: 200_000_000)
-        audio.emitPCMChunk(makeNonSilentPCMChunk())
-        try? await Task.sleep(nanoseconds: 200_000_000)
-
-        // Everything hangs. The 15s overall timeout must fire and
-        // force-reset to idle. Allow 30s total (15s timeout + generous
-        // margin for loaded CI machines).
-        await assertCompletesWithin(30.0) {
-            await pipeline.complete()
-        }
-
-        let state = await coordinator.state
-        XCTAssertEqual(
-            state, .idle,
-            "Pipeline must force-reset to idle after overall timeout")
+        let recoveredState = await coordinator.state
+        XCTAssertEqual(recoveredState, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Recovered finish timeout")
     }
 }

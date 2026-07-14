@@ -30,13 +30,19 @@ public final class MockStreamingProvider: StreamingDictationProviding, @unchecke
     /// When non-nil, `sendAudio()` throws this error.
     public var stubbedSendError: (any Error)?
 
+    /// Optional test hook invoked for each recorded audio chunk.
+    public var sendAudioHook: (@Sendable (Data) async throws -> Void)?
+
+    /// Optional test hook invoked when the streaming session is cancelled.
+    public var cancelStreamingHook: (@Sendable () async -> Void)?
+
     /// An optional error to throw from `finishStreaming()`.
     /// When non-nil, `finishStreaming()` throws this error instead of
     /// returning `stubbedText`.
     public var stubbedFinishError: (any Error)?
 
-    /// The value returned by `uncommittedAudioDuration`. Defaults to 0.
-    public var stubbedUncommittedAudioDuration: TimeInterval = 0
+    /// Pipeline watchdog for `finishStreaming()`.
+    public var finishStreamingWatchdog: TimeInterval = 30
 
     /// Number of times `startStreaming()` has been called.
     public var startCallCount: Int {
@@ -89,10 +95,6 @@ public final class MockStreamingProvider: StreamingDictationProviding, @unchecke
 
     // MARK: - StreamingDictationProviding
 
-    public var uncommittedAudioDuration: TimeInterval {
-        lock.withLock { stubbedUncommittedAudioDuration }
-    }
-
     public func startStreaming(context: AppContext, language: String?, micProximity: MicProximity)
         async throws
     {
@@ -107,13 +109,14 @@ public final class MockStreamingProvider: StreamingDictationProviding, @unchecke
     }
 
     public func sendAudio(_ pcmData: Data) async throws {
-        let error: (any Error)? = lock.withLock {
+        let (error, hook): ((any Error)?, (@Sendable (Data) async throws -> Void)?) = lock.withLock {
             _sendCallCount += 1
             _receivedAudioChunks.append(pcmData)
-            return stubbedSendError
+            return (stubbedSendError, sendAudioHook)
         }
 
         if let error { throw error }
+        try await hook?(pcmData)
     }
 
     public func finishStreaming() async throws -> String {
@@ -127,9 +130,11 @@ public final class MockStreamingProvider: StreamingDictationProviding, @unchecke
     }
 
     public func cancelStreaming() async {
-        lock.withLock {
+        let hook = lock.withLock {
             _cancelCallCount += 1
+            return cancelStreamingHook
         }
+        await hook?()
     }
 
     // MARK: - Chunk handler recording
@@ -164,6 +169,8 @@ public final class MockStreamingProvider: StreamingDictationProviding, @unchecke
             _receivedLanguages.removeAll()
             _receivedAudioChunks.removeAll()
             _chunkHandler = nil
+            sendAudioHook = nil
+            cancelStreamingHook = nil
         }
     }
 }

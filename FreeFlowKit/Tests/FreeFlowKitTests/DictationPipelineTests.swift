@@ -598,6 +598,7 @@ final class DictationPipelineTests: XCTestCase {
         )
 
         let audio = MockAudioProvider(stubbedBuffer: silentBuffer)
+        audio.stubbedPeakRMS = 0
         let dictation = MockBatchProvider()
         let (pipeline, _, _, _, injector, coordinator) = makePipeline(
             audioProvider: audio, batchProvider: dictation)
@@ -645,6 +646,7 @@ final class DictationPipelineTests: XCTestCase {
         )
 
         let audio = MockAudioProvider(stubbedBuffer: quietBuffer)
+        audio.stubbedPeakRMS = 0.003
         let dictation = MockBatchProvider()
         let coordinator = RecordingCoordinator()
 
@@ -684,6 +686,7 @@ final class DictationPipelineTests: XCTestCase {
         )
 
         let audio = MockAudioProvider(stubbedBuffer: quietBuffer)
+        audio.stubbedPeakRMS = 0.003
         let dictation = MockBatchProvider(stubbedText: "whisper")
         let coordinator = RecordingCoordinator()
 
@@ -1356,44 +1359,6 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertFalse(expired, "expireSession should fail from idle")
         let state = await coordinator.state
         XCTAssertEqual(state, .idle)
-    }
-
-    // MARK: - extractRecoveryWAV stereo bug
-
-    func testExtractRecoveryWAVStereoAccountsForChannels() {
-        // 16 kHz, 16-bit, STEREO = 64,000 bytes/sec.
-        // Create 2 seconds of stereo PCM (128,000 bytes) + 44 byte header.
-        let pcmByteCount = 128_000
-        let pcm = Data(repeating: 0x42, count: pcmByteCount)
-        let wav = WAVEncoder.encode(
-            pcmData: pcm,
-            sampleRate: 16_000,
-            channels: 2,
-            bitsPerSample: 16)
-
-        let buffer = AudioBuffer(
-            data: wav,
-            duration: 2.0,
-            sampleRate: 16_000,
-            channels: 2,
-            bitsPerSample: 16)
-
-        // Extract the last 1 second (should be 64,000 bytes of PCM).
-        let recovery = DictationPipeline.extractRecoveryWAV(
-            from: buffer, uncommittedDuration: 1.0)
-        XCTAssertNotNil(recovery)
-
-        // The recovered WAV should contain ~64,000 bytes of PCM data
-        // (plus 44-byte header = ~64,044 total).
-        // If the bug exists (channels not accounted for), it would only
-        // extract 32,000 bytes instead of 64,000.
-        if let data = recovery {
-            let expectedPCMBytes = 64_000
-            let expectedTotal = expectedPCMBytes + 44
-            XCTAssertEqual(
-                data.count, expectedTotal,
-                "Recovery WAV should contain 1 second of stereo audio (64,000 PCM bytes)")
-        }
     }
 
     // MARK: - peakRMS == 0 pre-recording silence gate

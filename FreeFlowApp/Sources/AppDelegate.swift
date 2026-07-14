@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let audioDeviceProvider = CoreAudioDeviceProvider()
     private let soundFeedbackProvider = SoundFeedbackProvider()
     private var pipeline: DictationPipeline?
+    private var pendingSessionRecoveryPipeline: DictationPipeline?
     private var localModelRuntime: LocalModelRuntime?
     private var localModelPreloadTask: Task<Void, Never>?
     private let pipelineRebuildQueue = AsyncLatestOperationQueue()
@@ -174,6 +175,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.onboardingController = nil
             self.menuBarController?.setOnboardingMode(false)
             self.menuBarController?.onReopenOnboarding = nil
+
+            if let recoveryPipeline = self.pendingSessionRecoveryPipeline {
+                self.pendingSessionRecoveryPipeline = nil
+                Task { [weak self, recoveryPipeline] in
+                    await recoveryPipeline.presentRecoveryAfterAuthentication()
+                    await MainActor.run {
+                        guard let self,
+                            self.pipeline === recoveryPipeline,
+                            self.pendingSessionRecoveryPipeline == nil
+                        else { return }
+                        self.registerHotkey()
+                    }
+                }
+                return
+            }
+
             self.rebuildPipeline()
             self.checkPermissions()
         }
@@ -374,7 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             streamingProvider = OpenAIStreamingProvider(
                 apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
             onSessionExpired = { [weak self] in
-                Task { @MainActor in self?.resetAPIKey() }
+                Task { @MainActor in self?.beginSessionRecovery() }
             }
         }
 
@@ -435,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             messageService: inAppMessageService
         )
         controller.onSessionExpired = { [weak self] in
-            self?.resetAPIKey()
+            self?.beginSessionRecovery()
         }
         controller.viewModel.isPrivateMode = Settings.shared.dictationMode == .local
         hudController = controller
@@ -551,6 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         Log.debug("[AppDelegate] Reset API key requested (force=\(force))")
+        pendingSessionRecoveryPipeline = nil
 
         // Dismiss any existing onboarding window.
         onboardingController?.dismissWindow()
@@ -568,6 +586,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         keychain.deleteOpenAIAPIKey()
         showOnboarding()
+    }
+
+    /// Replace an expired cloud credential without retiring the pipeline that
+    /// owns the complete recovery WAV. API clients read the new key lazily.
+    private func beginSessionRecovery() {
+        guard pendingSessionRecoveryPipeline == nil else { return }
+        guard let pipeline else {
+            resetAPIKey()
+            return
+        }
+
+        Log.debug("[AppDelegate] Beginning API key recovery")
+        pendingSessionRecoveryPipeline = pipeline
+        hotkeyProvider.unregister()
+        menuBarController?.setHotkeyRegistered(false)
+        keychain.deleteOpenAIAPIKey()
+
+        menuBarController?.setOnboardingMode(true)
+        menuBarController?.onReopenOnboarding = { [weak self] in
+            self?.onboardingController?.showAPIKeyEntry()
+        }
+        let onboarding = ensureOnboardingController()
+        onboarding.dismissWindow()
+        onboarding.showAPIKeyEntry()
     }
 
     // MARK: - Settings
@@ -604,6 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Rebuild the pipeline after dictation mode changes.
     private func rebuildPipeline() {
         Log.debug("[AppDelegate] Rebuilding pipeline for mode: \(Settings.shared.dictationMode.rawValue)")
+        pendingSessionRecoveryPipeline = nil
 
         let oldGeneration = detachPipelineGeneration()
         pipelineRebuildTask = pipelineRebuildQueue.submit(

@@ -31,8 +31,8 @@ final class HUDController {
     private var localHandsfreeMonitor: Any?
     private var globalHandsfreeMonitor: Any?
 
-    /// Called when the user dismisses a session-expired HUD to trigger
-    /// API key reset and re-onboarding.
+    /// Called when the user dismisses a session-expired HUD to replace the
+    /// credential while retaining the failed dictation's recovery audio.
     var onSessionExpired: (() -> Void)?
 
     // MARK: - Init
@@ -198,7 +198,7 @@ final class HUDController {
         }
     }
 
-    /// Re-attempt batch transcription of the saved tail audio.
+    /// Re-attempt batch transcription of the saved complete recording.
     func retryDictation() {
         guard let pipeline else { return }
         Task {
@@ -206,7 +206,7 @@ final class HUDController {
         }
     }
 
-    /// Discard the saved tail audio and return to minimized.
+    /// Discard the saved complete recording and return to minimized.
     func dismissDictationFailure() {
         viewModel.dismissDictationFailure()
         guard let pipeline else { return }
@@ -502,7 +502,6 @@ final class HUDController {
             dismissNoTarget()
             return true
         case .sessionExpired:
-            dismissNoTarget()
             onSessionExpired?()
             return true
         case .dictationFailed:

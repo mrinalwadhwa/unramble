@@ -12,9 +12,10 @@ import Foundation
 ///      is configured, open the streaming session and start forwarding
 ///      PCM chunks in the background.
 ///   2. `complete()` — transition to `.processing`, stop audio capture,
-///      await context, send audio + context to the dictation service,
-///      inject text, return to `.idle`. In streaming mode, call
-///      `finishStreaming()` instead of the batch dictation endpoint.
+///      await context, and produce a final result. Streaming mode drains all
+///      queued PCM before finalization. In cloud mode, any uncertain streaming
+///      candidate is discarded and recovered from the exact complete WAV
+///      through batch. Only the accepted final candidate is injected.
 ///   3. `cancel()` — abort any in-progress pipeline run and reset to `.idle`.
 ///
 /// The pipeline holds captured context from the `activate()` call so it is
@@ -37,11 +38,8 @@ public actor DictationPipeline: PipelineProviding {
 
     /// Called when a dictation request fails with a 401 authentication
     /// error. The app should clear stored credentials and enter the
-    /// session recovery flow. Invoked at most once per pipeline run.
+    /// session recovery flow. The app deduplicates an active recovery flow.
     private let onSessionExpired: (@Sendable () -> Void)?
-
-    /// Minimum audio duration (in seconds) worth sending to the server.
-    private let minimumAudioDuration: TimeInterval = 0.1
 
     /// Fixed RMS silence threshold, used as a fallback when ambient
     /// calibration has not completed (recording shorter than 0.5s).
@@ -91,8 +89,8 @@ public actor DictationPipeline: PipelineProviding {
     /// The in-flight pipeline task, used for cancellation.
     private var pipelineTask: Task<Void, Never>?
 
-    /// Background task that forwards PCM chunks to the streaming provider.
-    private var audioForwardingTask: Task<Void, Never>?
+    /// Owns PCM forwarding until natural drain or explicit teardown.
+    private var audioForwardingOperation: AudioForwardingOperation?
 
     /// Task that performs audio setup after activate() returns.
     /// complete() awaits this to ensure audio is ready before stopping.
@@ -112,33 +110,6 @@ public actor DictationPipeline: PipelineProviding {
     /// Set by performAudioSetup when startRecording fails. Checked by
     /// complete() to skip dictation and reset immediately.
     private var audioSetupFailed: Bool = false
-
-    /// Thread-safe flag set by the chunk handler when at least one
-    /// intermediate chunk has been injected. Read in `complete()` to
-    /// decide whether the backup/batch race is safe.
-    private var chunkInjectedFlag: ChunkInjectedFlag?
-
-    /// Thread-safe flag that the `@Sendable` chunk handler can set
-    /// from outside the actor.
-    private final class ChunkInjectedFlag: @unchecked Sendable {
-        private let lock = NSLock()
-        private var _value = false
-        func set() { lock.withLock { _value = true } }
-        var isSet: Bool { lock.withLock { _value } }
-    }
-
-    /// Thread-safe box to pass recovery data from inside the pipeline
-    /// task closure back to the actor after the task ends.
-    private final class RecoveryBox: @unchecked Sendable {
-        private let lock = NSLock()
-        private var _audio: Data?
-        private var _context: AppContext?
-        func set(audio: Data, context: AppContext) {
-            lock.withLock { _audio = audio; _context = context }
-        }
-        var audio: Data? { lock.withLock { _audio } }
-        var context: AppContext? { lock.withLock { _context } }
-    }
 
     /// Audio saved for recovery when dictation fails. Held until the
     /// user retries or dismisses via the HUD.
@@ -407,7 +378,6 @@ public actor DictationPipeline: PipelineProviding {
 
             guard !Task.isCancelled else {
                 isStreamingSession = false
-                chunkInjectedFlag = nil
                 _ = try? await audioProvider.stopRecording()
                 return
             }
@@ -416,29 +386,26 @@ public actor DictationPipeline: PipelineProviding {
             let micProximity = audioProvider.micProximity
             let language = self.language
 
-            // Providers that support rolling publication deliver intermediate
-            // chunks here; atomic providers use the protocol's no-op handler.
-            // Each published chunk is injected at the current cursor position.
-            let injector = textInjector
-            let chunkFlag = ChunkInjectedFlag()
-            self.chunkInjectedFlag = chunkFlag
-            streaming.setChunkHandler { text in
-                // Trim only horizontal whitespace so a leading or trailing
-                // paragraph/line break at a chunk boundary survives. The
-                // injector suppresses its leading space when the text
-                // begins with a newline.
-                let horizontal = CharacterSet(charactersIn: " \t")
-                let toInject = text.trimmingCharacters(in: horizontal)
-                guard !toInject.trimmingCharacters(
-                    in: .whitespacesAndNewlines).isEmpty else { return }
-                chunkFlag.set()
-                let ctx = await AXAppContextProvider().readContext()
-                do {
-                    try await injector.inject(text: toInject, into: ctx)
-                    Log.debug("[Pipeline] Injected chunk (\(toInject.count) chars)")
-                } catch {
-                    Log.debug("[Pipeline] Chunk injection failed: \(error)")
+            if localMode {
+                // The local provider still publishes rolling chunks. Cloud
+                // output remains atomic because arbitrary target applications
+                // cannot safely revise text after injection.
+                let injector = textInjector
+                streaming.setChunkHandler { text in
+                    let horizontal = CharacterSet(charactersIn: " \t")
+                    let toInject = text.trimmingCharacters(in: horizontal)
+                    guard !toInject.trimmingCharacters(
+                        in: .whitespacesAndNewlines).isEmpty else { return }
+                    let ctx = await AXAppContextProvider().readContext()
+                    do {
+                        try await injector.inject(text: toInject, into: ctx)
+                        Log.debug("[Pipeline] Injected chunk (\(toInject.count) chars)")
+                    } catch {
+                        Log.debug("[Pipeline] Chunk injection failed: \(error)")
+                    }
                 }
+            } else {
+                streaming.setChunkHandler(nil)
             }
 
             // Timeout the streaming setup to avoid blocking complete()
@@ -495,7 +462,6 @@ public actor DictationPipeline: PipelineProviding {
                 streaming.setChunkHandler(nil)
                 await streaming.cancelStreaming()
                 isStreamingSession = false
-                chunkInjectedFlag = nil
                 if audioProvider.isRecording {
                     _ = try? await audioProvider.stopRecording()
                 }
@@ -511,6 +477,7 @@ public actor DictationPipeline: PipelineProviding {
 
             guard streamingStarted else {
                 Log.debug("[Pipeline] Streaming setup timed out or failed, falling back to batch")
+                streaming.setChunkHandler(nil)
                 isStreamingSession = false
                 return
             }
@@ -519,18 +486,9 @@ public actor DictationPipeline: PipelineProviding {
                 "[Pipeline] performAudioSetup() streaming.startStreaming: \(String(format: "%.3f", t6 - t5))s, total: \(String(format: "%.3f", t6 - t0))s"
             )
 
-            // Start a background task that reads PCM chunks and sends them.
-            audioForwardingTask = Task {
-                for await chunk in pcmStream {
-                    guard !Task.isCancelled else { break }
-                    do {
-                        try await streaming.sendAudio(chunk)
-                    } catch {
-                        Log.debug("[Pipeline] Error sending audio chunk: \(error)")
-                        break
-                    }
-                }
-            }
+            audioForwardingOperation = AudioForwardingOperation(
+                stream: pcmStream,
+                send: { chunk in try await streaming.sendAudio(chunk) })
         } else {
             isStreamingSession = false
         }
@@ -581,14 +539,18 @@ public actor DictationPipeline: PipelineProviding {
         if audioProvider.peakRMS > 0, audioProvider.peakRMS <= earlyThreshold {
             if let setupTask = audioSetupTask {
                 setupTask.cancel()
-                if let streaming = streamingProvider {
-                    await streaming.cancelStreaming()
-                }
                 audioSetupTask = nil
             }
             isStreamingSession = false
-            audioForwardingTask?.cancel()
-            audioForwardingTask = nil
+            let forwardingOperation = audioForwardingOperation
+            audioForwardingOperation = nil
+            if let forwardingOperation {
+                await forwardingOperation.cancel { [streamingProvider] in
+                    await streamingProvider?.cancelStreaming()
+                }
+            } else if let streaming = streamingProvider {
+                await streaming.cancelStreaming()
+            }
 
             Log.debug(
                 "[Pipeline] Early silence short-circuit: peak RMS \(audioProvider.peakRMS) <= \(earlyThreshold) (ambient: \(audioProvider.ambientRMS)), skipping setup wait"
@@ -703,8 +665,8 @@ public actor DictationPipeline: PipelineProviding {
 
         guard !isRetired else { return }
         let useStreaming = isStreamingSession
-        let forwardingTask = audioForwardingTask
-        audioForwardingTask = nil
+        let forwardingOperation = audioForwardingOperation
+        audioForwardingOperation = nil
         isStreamingSession = false
 
         // Clear the chunk handler before entering the pipeline task so
@@ -713,15 +675,25 @@ public actor DictationPipeline: PipelineProviding {
             streamingProvider?.setChunkHandler(nil)
         }
 
-        let recoveryBox = RecoveryBox()
-
+        let (pipelineCompletion, pipelineCompletionContinuation) =
+            AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let task = Task {
             [
                 pendingContext, audioProvider, batchProvider, streamingProvider,
-                textInjector, coordinator, minimumAudioDuration, transcriptBuffer,
-                earlyThreshold, micDiagnosticStore, recoveryBox,
+                textInjector, coordinator, transcriptBuffer,
+                micDiagnosticStore,
                 completeEnteredAt
             ] in
+            var cancellationRecovery: (audio: Data, context: AppContext)?
+            defer {
+                if Task.isCancelled, !localMode, let cancellationRecovery {
+                    retainRecovery(
+                        audio: cancellationRecovery.audio,
+                        context: cancellationRecovery.context)
+                }
+                pipelineCompletionContinuation.yield(())
+                pipelineCompletionContinuation.finish()
+            }
             let t0 = CFAbsoluteTimeGetCurrent()
 
             // Stop audio capture and retrieve the buffer.
@@ -731,9 +703,12 @@ public actor DictationPipeline: PipelineProviding {
                 audioBuffer = try await audioProvider.stopRecording()
             } catch {
                 Log.debug("[Pipeline] Failed to stop recording: \(error)")
-                if useStreaming, let streaming = streamingProvider {
-                    forwardingTask?.cancel()
-                    await streaming.cancelStreaming()
+                if let forwardingOperation {
+                    await forwardingOperation.cancel {
+                        await streamingProvider?.cancelStreaming()
+                    }
+                } else if useStreaming {
+                    await streamingProvider?.cancelStreaming()
                 }
                 await coordinator.reset()
                 return
@@ -746,7 +721,7 @@ public actor DictationPipeline: PipelineProviding {
 
             // Early silence check: use the peak RMS tracked during
             // recording to reject silent presses immediately, before
-            // waiting on the streaming forwarding task or any network
+            // waiting on the streaming forwarding operation or any network
             // calls. This avoids the 5-7s delay users see when they
             // tap the hotkey without speaking.
             // Recompute the threshold now that ambient calibration may
@@ -774,36 +749,50 @@ public actor DictationPipeline: PipelineProviding {
                             result: "silent"
                         ))
                 }
-                forwardingTask?.cancel()
-                if useStreaming, let streaming = streamingProvider {
-                    await streaming.cancelStreaming()
+                if let forwardingOperation {
+                    await forwardingOperation.cancel {
+                        await streamingProvider?.cancelStreaming()
+                    }
+                } else if useStreaming {
+                    await streamingProvider?.cancelStreaming()
                 }
                 await coordinator.reset()
                 return
             }
 
-            // Wait for the audio forwarding task to finish. The PCM stream
-            // ends when stopRecording() calls pcmContinuation.finish(), so
-            // normally this returns immediately. However, if the forwarding
-            // task is stuck in sendAudio() on a broken WebSocket,
-            // URLSessionWebSocketTask.send() ignores cancellation. Use a
-            // detached-task timeout to bound the wait. If it hangs, cancel
-            // the streaming session (which cancels the WebSocket task and
-            // forces send() to throw) and proceed with batch mode.
-            if let ft = forwardingTask {
-                ft.cancel()
-                let forwardingDone = await detachedWithTimeout(seconds: 2.0) {
-                    await ft.value
-                    return true
-                } ?? false
-                if !forwardingDone {
-                    Log.debug(
-                        "[Pipeline] audio forwarding task timed out (2s), cancelling streaming")
-                    if useStreaming, let streaming = streamingProvider {
-                        await streaming.cancelStreaming()
+            if !localMode, !audioBuffer.data.isEmpty {
+                cancellationRecovery = (audioBuffer.data, .empty)
+            }
+
+            var streamingCandidateIsValid = false
+            if useStreaming {
+                if let streaming = streamingProvider, let forwardingOperation {
+                    let forwardingOutcome = await forwardingOperation.drain(
+                        timeout: .seconds(2),
+                        cancelStreaming: { await streaming.cancelStreaming() })
+                    streamingCandidateIsValid = forwardingOutcome == .drained
+                    if !streamingCandidateIsValid {
+                        Log.debug(
+                            "[Pipeline] audio forwarding invalidated streaming: "
+                                + "\(forwardingOutcome)")
                     }
+                } else {
+                    if let forwardingOperation {
+                        await forwardingOperation.cancel {
+                            await streamingProvider?.cancelStreaming()
+                        }
+                    } else {
+                        await streamingProvider?.cancelStreaming()
+                    }
+                    Log.debug("[Pipeline] streaming session has no forwarding owner")
+                }
+            } else if let forwardingOperation {
+                await forwardingOperation.cancel {
+                    await streamingProvider?.cancelStreaming()
                 }
             }
+
+            guard !Task.isCancelled else { return }
 
             // Resolve context once. The pendingContext task caches its
             // result, so awaiting it again (streaming already awaited it
@@ -817,30 +806,30 @@ public actor DictationPipeline: PipelineProviding {
             } else {
                 context = .empty
             }
+            if cancellationRecovery != nil {
+                cancellationRecovery = (audioBuffer.data, context)
+            }
 
             // Resolve the transcript from the appropriate provider.
             let dictatedText: String?
             if useStreaming, let streaming = streamingProvider {
-                let chunksInjected = chunkInjectedFlag?.isSet ?? false
-                chunkInjectedFlag = nil
                 if localMode {
                     dictatedText = await finishLocalDictation(
                         streaming: streaming,
+                        streamingCandidateIsValid: streamingCandidateIsValid,
                         audioBuffer: audioBuffer,
                         context: context,
-                        coordinator: coordinator,
-                        recoveryBox: recoveryBox)
+                        coordinator: coordinator)
                 } else if let batchProvider {
                     dictatedText = await finishCloudDictation(
                         streaming: streaming,
-                        chunksAlreadyInjected: chunksInjected,
+                        streamingCandidateIsValid: streamingCandidateIsValid,
                         audioBuffer: audioBuffer,
                         context: context,
                         batchProvider: batchProvider,
-                        minimumAudioDuration: minimumAudioDuration,
-                        silenceThreshold: postRecordThreshold,
                         coordinator: coordinator,
-                        recoveryBox: recoveryBox)
+                        diagnosticStartedAt: t0,
+                        silenceThreshold: postRecordThreshold)
                 } else {
                     Log.debug("[Pipeline] No batch provider, cannot finish cloud dictation")
                     await coordinator.reset()
@@ -852,10 +841,9 @@ public actor DictationPipeline: PipelineProviding {
                     audioBuffer: audioBuffer,
                     context: context,
                     batchProvider: batchProvider,
-                    minimumAudioDuration: minimumAudioDuration,
-                    silenceThreshold: postRecordThreshold,
                     coordinator: coordinator,
-                    recoveryBox: recoveryBox)
+                    diagnosticStartedAt: t0,
+                    silenceThreshold: postRecordThreshold)
             } else {
                 Log.debug("[Pipeline] No dictation provider available")
                 await coordinator.reset()
@@ -891,7 +879,7 @@ public actor DictationPipeline: PipelineProviding {
         // activate()/complete() calls.
         //
         // The budget scales with the recording duration: short
-        // dictations get the 30 s floor; long dictations get enough
+        // dictations get the 45 s baseline; long dictations get enough
         // time for transcription tail + polish + injection. Without
         // scaling, a 130 s monologue blows past a fixed 15 s deadline
         // and the force-reset races the batch HTTP fallback, dropping
@@ -900,28 +888,43 @@ public actor DictationPipeline: PipelineProviding {
             recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
         let deadline = Self.pipelineDeadline(
             forRecordingDuration: recordingDuration)
-        let pipelineDone = await detachedWithTimeout(seconds: deadline) {
-            await task.value
-            return true
-        } ?? false
-        if !pipelineDone { task.cancel() }
+        let pipelineDone = await Self.waitForCompletion(
+            pipelineCompletion,
+            timeout: .seconds(deadline))
         if !pipelineDone {
             Log.debug(
-                "[Pipeline] complete() pipeline task timed out (\(Int(deadline))s), force-resetting to idle"
+                "[Pipeline] complete() ending before pipeline task (\(Int(deadline))s deadline), cancelling"
             )
+            task.cancel()
             if let streaming = streamingProvider {
                 await streaming.cancelStreaming()
             }
-            await coordinator.reset()
+            await task.value
+            let stateAfterCancellation = await coordinator.state
+            switch stateAfterCancellation {
+            case .processing:
+                if recoveryAudio != nil {
+                    _ = await coordinator.failDictation()
+                } else {
+                    await coordinator.reset()
+                }
+            case .injecting:
+                recoveryAudio = nil
+                recoveryContext = nil
+                _ = await coordinator.failInjection()
+            case .idle, .injectionFailed:
+                // Injection either completed or the final transcript is already
+                // buffered for manual paste. A second WAV recovery could duplicate it.
+                recoveryAudio = nil
+                recoveryContext = nil
+            case .dictationFailed, .sessionExpired:
+                break
+            case .recording:
+                recoveryAudio = nil
+                recoveryContext = nil
+                await coordinator.reset()
+            }
         }
-        // If the pipeline task stored recovery data (tail batch failed
-        // after chunks were injected), save it on the actor so the user
-        // can retry via the HUD.
-        if let audio = recoveryBox.audio, let ctx = recoveryBox.context {
-            self.recoveryAudio = audio
-            self.recoveryContext = ctx
-        }
-
         self.pipelineTask = nil
         self.recordingStartedAt = nil
     }
@@ -929,13 +932,42 @@ public actor DictationPipeline: PipelineProviding {
     /// Compute the hard deadline for a pipeline task given how long the
     /// user held the hotkey. The budget is
     /// `max(30, recordingDuration + 45)` capped at 300 s. Short dictations
-    /// fast-fail on hangs within 30 s; long ones get a proportional
+    /// fast-fail on hangs within 45 s; long ones get a proportional
     /// post-audio window for transcription tail, polish, and injection.
     static func pipelineDeadline(
         forRecordingDuration duration: TimeInterval
     ) -> TimeInterval {
         let budget = duration + 45.0
         return min(300.0, max(30.0, budget))
+    }
+
+    private static func waitForCompletion(
+        _ completion: AsyncStream<Void>,
+        timeout: Duration
+    ) async -> Bool {
+        let completed = await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                for await _ in completion {
+                    guard !Task.isCancelled else { return false }
+                    return true
+                }
+                return false
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(for: timeout)
+                    try Task.checkCancellation()
+                    return false
+                } catch {
+                    return false
+                }
+            }
+
+            let first = await group.next() ?? false
+            group.cancelAll()
+            return first
+        }
+        return !Task.isCancelled && completed
     }
 
     public func cancel() async {
@@ -972,16 +1004,14 @@ public actor DictationPipeline: PipelineProviding {
         pendingContext = nil
         let runningSetupTask = audioSetupTask
         audioSetupTask = nil
-        let runningForwardingTask = audioForwardingTask
-        audioForwardingTask = nil
+        let runningForwardingOperation = audioForwardingOperation
+        audioForwardingOperation = nil
 
         runningPipelineTask?.cancel()
         runningContextTask?.cancel()
         runningSetupTask?.cancel()
-        runningForwardingTask?.cancel()
 
         recordingStartedAt = nil
-        chunkInjectedFlag = nil
         recoveryAudio = nil
         recoveryContext = nil
 
@@ -1000,26 +1030,29 @@ public actor DictationPipeline: PipelineProviding {
             _ = try? await audioProvider.stopRecording()
         }
 
+        if let runningForwardingOperation {
+            await runningForwardingOperation.cancel(cancelStreaming: {})
+        }
+
         // Drain every task that can still use the provider or local models.
         // Core ML loading does not stop cooperatively, so dropping these task
         // handles would allow a retired generation to publish model state
         // after its replacement starts.
         await runningSetupTask?.value
-        await runningForwardingTask?.value
         await runningPipelineTask?.value
         _ = await runningContextTask?.value
 
-        // Setup can publish a forwarding task after cancellation if it was
-        // inside a non-cancellable engine load. Capture and drain that task,
+        // Setup can publish a forwarding operation after cancellation if it was
+        // inside a non-cancellable engine load. Capture and drain that operation,
         // then cancel the provider once more to remove any late session state.
-        let lateForwardingTask = audioForwardingTask
-        audioForwardingTask = nil
-        if let lateForwardingTask {
-            lateForwardingTask.cancel()
-            await lateForwardingTask.value
-            if let streaming = streamingProvider {
-                streaming.setChunkHandler(nil)
-                await streaming.cancelStreaming()
+        let lateForwardingOperation = audioForwardingOperation
+        audioForwardingOperation = nil
+        if let lateForwardingOperation {
+            await lateForwardingOperation.cancel { [streamingProvider] in
+                if let streaming = streamingProvider {
+                    streaming.setChunkHandler(nil)
+                    await streaming.cancelStreaming()
+                }
             }
         }
 
@@ -1027,7 +1060,8 @@ public actor DictationPipeline: PipelineProviding {
         // field it can publish before allowing a subsequent activation.
         isStreamingSession = false
         audioSetupFailed = false
-        chunkInjectedFlag = nil
+        recoveryAudio = nil
+        recoveryContext = nil
 
         await coordinator.reset()
     }
@@ -1058,11 +1092,18 @@ public actor DictationPipeline: PipelineProviding {
     /// text, or nil on failure (coordinator already updated).
     private func finishLocalDictation(
         streaming: StreamingDictationProviding,
+        streamingCandidateIsValid: Bool,
         audioBuffer: AudioBuffer,
         context: AppContext,
-        coordinator: RecordingCoordinator,
-        recoveryBox: RecoveryBox
+        coordinator: RecordingCoordinator
     ) async -> String? {
+        guard streamingCandidateIsValid else {
+            Log.debug("[Pipeline] Local streaming candidate is incomplete")
+            retainRecovery(audio: audioBuffer.data, context: context)
+            await coordinator.failDictation()
+            return nil
+        }
+
         Log.debug("[Pipeline] finishing streaming session (local)")
         do {
             let text = try await streaming.finishStreaming()
@@ -1075,7 +1116,7 @@ public actor DictationPipeline: PipelineProviding {
         } catch {
             Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
             await streaming.cancelStreaming()
-            recoveryBox.set(audio: audioBuffer.data, context: context)
+            retainRecovery(audio: audioBuffer.data, context: context)
             await coordinator.failDictation()
             return nil
         }
@@ -1136,110 +1177,65 @@ public actor DictationPipeline: PipelineProviding {
 
     /// Finish a cloud streaming session.
     ///
-    /// Handle three cases: chunks already injected (tail-only finish),
-    /// no chunks yet (finish with batch fallback), or streaming failure
-    /// (batch recovery). Return the final text, or nil on failure.
+    /// Finalize one complete streaming candidate, or recover the exact captured
+    /// WAV through the batch provider. Return the final text, or nil on failure.
     private func finishCloudDictation(
         streaming: StreamingDictationProviding,
-        chunksAlreadyInjected: Bool,
+        streamingCandidateIsValid: Bool,
         audioBuffer: AudioBuffer,
         context: AppContext,
         batchProvider: BatchDictationProviding,
-        minimumAudioDuration: TimeInterval,
-        silenceThreshold: Float,
         coordinator: RecordingCoordinator,
-        recoveryBox: RecoveryBox
+        diagnosticStartedAt: CFAbsoluteTime,
+        silenceThreshold: Float
     ) async -> String? {
-        if chunksAlreadyInjected {
-            return await finishCloudWithChunks(
-                streaming: streaming,
-                audioBuffer: audioBuffer,
-                context: context,
-                batchProvider: batchProvider,
-                coordinator: coordinator,
-                recoveryBox: recoveryBox)
-        }
-
-        // No chunks fired yet (short session). Finish streaming; fall
-        // back to batch HTTP on failure.
-        Log.debug("[Pipeline] finishing streaming session (cloud)")
         var text: String?
-        do {
-            let result = try await streaming.finishStreaming()
-            let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                text = result
-                Log.debug("[Pipeline] Streaming completed")
+        if streamingCandidateIsValid {
+            Log.debug("[Pipeline] finishing streaming session (cloud)")
+            let finishOperation = StreamingFinishOperation {
+                try await streaming.finishStreaming()
             }
-        } catch {
-            Log.debug("[Pipeline] Streaming failed: \(error)")
+            let watchdogSeconds = streaming.finishStreamingWatchdog
+            let timeout = watchdogSeconds.isFinite && watchdogSeconds >= 0
+                ? watchdogSeconds : 30
+            let outcome = await finishOperation.resolve(
+                timeout: .seconds(timeout),
+                cancelStreaming: { await streaming.cancelStreaming() })
+            switch outcome {
+            case .completed(let result):
+                let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    text = result
+                    Log.debug("[Pipeline] Streaming completed")
+                }
+            case .failed(let error):
+                Log.debug("[Pipeline] Streaming failed: \(error)")
+            case .timedOut:
+                Log.debug("[Pipeline] Streaming finalization timed out")
+            case .cancelled:
+                guard !Task.isCancelled else { return nil }
+                Log.debug("[Pipeline] Streaming finalization was cancelled")
+            }
+        } else {
+            Log.debug("[Pipeline] Skipping incomplete streaming candidate")
         }
-
-        await streaming.cancelStreaming()
 
         if text == nil {
+            guard !Task.isCancelled else { return nil }
             Log.debug("[Pipeline] Falling back to batch HTTP")
             text = await batchDictate(
                 audioBuffer: audioBuffer,
                 context: context,
                 batchProvider: batchProvider,
-                minimumAudioDuration: minimumAudioDuration,
-                silenceThreshold: silenceThreshold,
                 coordinator: coordinator,
-                recoveryBox: recoveryBox)
+                diagnosticStartedAt: diagnosticStartedAt,
+                silenceThreshold: silenceThreshold)
         }
 
         if text == nil {
             Log.debug("[Pipeline] Both streaming and batch failed")
-            await coordinator.reset()
         }
         return text
-    }
-
-    /// Finish a cloud session where intermediate chunks were already
-    /// injected. Only the tail (uncommitted audio) needs transcription.
-    /// On failure, attempt batch recovery of the tail audio.
-    private func finishCloudWithChunks(
-        streaming: StreamingDictationProviding,
-        audioBuffer: AudioBuffer,
-        context: AppContext,
-        batchProvider: BatchDictationProviding,
-        coordinator: RecordingCoordinator,
-        recoveryBox: RecoveryBox
-    ) async -> String? {
-        Log.debug("[Pipeline] finishing streaming session (chunks injected)")
-        do {
-            return try await streaming.finishStreaming()
-        } catch {
-            Log.debug("[Pipeline] finishStreaming failed: \(error), attempting tail recovery")
-            let tailWAV = Self.extractRecoveryWAV(
-                from: audioBuffer,
-                uncommittedDuration: streaming.uncommittedAudioDuration)
-
-            guard let tailWAV else {
-                await coordinator.reset()
-                return nil
-            }
-
-            for attempt in 1...3 {
-                if attempt > 1 {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                }
-                guard !Task.isCancelled else { break }
-                do {
-                    let text = try await batchProvider.dictate(
-                        audio: tailWAV, context: context)
-                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty { return trimmed }
-                } catch {
-                    Log.debug("[Pipeline] Tail recovery attempt \(attempt) failed: \(error)")
-                }
-            }
-
-            recoveryBox.set(audio: tailWAV, context: context)
-            await coordinator.reset()
-            return nil
-        }
     }
 
     // MARK: - Result Injection
@@ -1285,16 +1281,23 @@ public actor DictationPipeline: PipelineProviding {
             return
         }
 
-        guard !Task.isCancelled else {
-            await coordinator.reset()
-            return
-        }
+        guard !Task.isCancelled else { return }
 
         await transcriptBuffer?.store(finalText)
 
         let injecting = await coordinator.startInjecting()
         guard injecting else {
-            await coordinator.reset()
+            if !Task.isCancelled {
+                await coordinator.reset()
+            }
+            return
+        }
+
+        // Yield once after publishing `.injecting` so cancellation observers can
+        // run, then fence the last point before irreversible target publication.
+        await Task.yield()
+        guard !Task.isCancelled else {
+            _ = await coordinator.failInjection()
             return
         }
 
@@ -1340,62 +1343,68 @@ public actor DictationPipeline: PipelineProviding {
 
     // MARK: - Batch Dictation
 
-    /// Run the batch dictation path: silence gate, then POST to /dictate.
+    /// Send a complete WAV through the batch provider.
     ///
-    /// Return the dictated text on success, or nil if the pipeline should
-    /// abort (audio too short, silent, cancelled, or dictation failed).
-    /// On nil return, the coordinator has already been reset.
+    /// Capture has already passed the session peak gate. Do not classify the
+    /// complete WAV again by average RMS: brief speech followed by silence is
+    /// still a valid dictation and must reach recovery unchanged.
     private func batchDictate(
         audioBuffer: AudioBuffer,
         context: AppContext,
         batchProvider: BatchDictationProviding,
-        minimumAudioDuration: TimeInterval,
-        silenceThreshold: Float,
         coordinator: RecordingCoordinator,
-        recoveryBox: RecoveryBox? = nil
+        diagnosticStartedAt: CFAbsoluteTime,
+        silenceThreshold: Float
     ) async -> String? {
-        // Skip empty or very short audio.
-        guard !audioBuffer.data.isEmpty, audioBuffer.duration >= minimumAudioDuration else {
-            Log.debug(
-                "[Pipeline] Audio too short (\(audioBuffer.duration)s), skipping dictation")
+        guard !audioBuffer.data.isEmpty else {
+            Log.debug("[Pipeline] Empty audio buffer, skipping dictation")
             await coordinator.reset()
             return nil
         }
 
-        // Reject silent or noise-only audio before sending to the server.
-        if AudioLevelAnalyzer.isSilent(audioBuffer, threshold: silenceThreshold) {
-            let rms = AudioLevelAnalyzer.rmsLevel(of: audioBuffer)
-            Log.debug(
-                "[Pipeline] Audio below silence threshold "
-                    + "(rms: \(rms), threshold: \(silenceThreshold)), skipping dictation")
-            await coordinator.reset()
-            return nil
-        }
-
-        guard !Task.isCancelled else {
-            await coordinator.reset()
-            return nil
-        }
+        guard !Task.isCancelled else { return nil }
 
         // Send audio + context to the dictation service.
         do {
             let text = try await batchProvider.dictate(
                 audio: audioBuffer.data, context: context)
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                Log.debug("[Pipeline] Batch returned no text; retaining complete WAV")
+                if let store = micDiagnosticStore {
+                    await store.record(
+                        MicDiagnosticEntry(
+                            deviceName: audioProvider.deviceName,
+                            proximity: audioProvider.micProximity.rawValue,
+                            ambientRMS: audioProvider.ambientRMS,
+                            peakRMS: audioProvider.peakRMS,
+                            gain: audioProvider.gainFactor,
+                            threshold: silenceThreshold,
+                            duration: audioBuffer.duration,
+                            latency: CFAbsoluteTimeGetCurrent() - diagnosticStartedAt,
+                            result: "empty"
+                        ))
+                }
+                retainRecovery(audio: audioBuffer.data, context: context)
+                await coordinator.failDictation()
+                return nil
+            }
             return text
         } catch let error as DictationError where error == .authenticationFailed {
             Log.debug("[Pipeline] Dictation returned 401, session expired")
+            retainRecovery(audio: audioBuffer.data, context: context)
             await notifySessionExpired()
             return nil
         } catch {
             Log.debug("[Pipeline] Dictation failed: \(error)")
-            if let recoveryBox {
-                recoveryBox.set(audio: audioBuffer.data, context: context)
-                await coordinator.failDictation()
-            } else {
-                await coordinator.reset()
-            }
+            retainRecovery(audio: audioBuffer.data, context: context)
+            await coordinator.failDictation()
             return nil
         }
+    }
+
+    private func retainRecovery(audio: Data, context: AppContext) {
+        recoveryAudio = audio
+        recoveryContext = context
     }
 
     // MARK: - Session expiry
@@ -1403,41 +1412,28 @@ public actor DictationPipeline: PipelineProviding {
     /// Transition the coordinator to `.sessionExpired` and invoke the
     /// callback so the app can clear credentials and start recovery.
     private func notifySessionExpired() async {
-        await coordinator.expireSession()
+        guard !Task.isCancelled else { return }
+        let expired = await coordinator.expireSession()
+        guard expired, !Task.isCancelled else { return }
         onSessionExpired?()
     }
 
     // MARK: - Dictation recovery
 
-    /// Extract recovery audio from a full WAV buffer.
+    /// Expose retained audio for an explicit Retry after authentication.
     ///
-    /// When `uncommittedDuration` is positive, only the uncommitted
-    /// tail is extracted (long session with chunks already injected).
-    /// When zero, returns nil — the caller should use the full buffer.
-    ///
-    /// Returns nil if the duration is zero or the tail is empty.
-    static func extractRecoveryWAV(
-        from buffer: AudioBuffer,
-        uncommittedDuration: TimeInterval
-    ) -> Data? {
-        guard uncommittedDuration > 0 else { return nil }
-        let headerSize = WAVEncoder.headerSize
-        guard buffer.data.count > headerSize else { return nil }
+    /// Replacing a key can activate FreeFlow's onboarding window, so automatic
+    /// injection would use an untrusted accessibility target. Keep the exact WAV
+    /// and wait for the user to restore focus before retrying.
+    public func presentRecoveryAfterAuthentication() async {
+        guard beginOperation() else { return }
+        defer { endOperation() }
+        guard recoveryAudio != nil, recoveryContext != nil, batchProvider != nil else {
+            await coordinator.reset()
+            return
+        }
 
-        // 16 kHz 16-bit mono = 32,000 bytes/sec.
-        let bytesPerSecond = buffer.sampleRate * buffer.channels * (buffer.bitsPerSample / 8)
-        let tailByteCount = min(
-            Int(uncommittedDuration * Double(bytesPerSecond)),
-            buffer.data.count - headerSize)
-        guard tailByteCount > 0 else { return nil }
-
-        let pcmStart = buffer.data.count - tailByteCount
-        let tailPCM = buffer.data.subdata(in: pcmStart..<buffer.data.count)
-        return WAVEncoder.encode(
-            pcmData: tailPCM,
-            sampleRate: buffer.sampleRate,
-            channels: buffer.channels,
-            bitsPerSample: buffer.bitsPerSample)
+        _ = await coordinator.prepareDictationRecovery()
     }
 
     /// Re-attempt batch transcription of the saved recovery audio.
@@ -1466,13 +1462,14 @@ public actor DictationPipeline: PipelineProviding {
             guard !isRetired else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
-                recoveryAudio = nil
-                recoveryContext = nil
-                await coordinator.reset()
+                Log.debug("[Pipeline] Retry returned no text; keeping recovery audio")
+                _ = await coordinator.failDictation()
                 return
             }
 
             await transcriptBuffer?.store(trimmed)
+            recoveryAudio = nil
+            recoveryContext = nil
             guard !isRetired else { return }
             let injecting = await coordinator.startInjecting()
             guard injecting else {
@@ -1484,15 +1481,16 @@ public actor DictationPipeline: PipelineProviding {
             guard !isRetired else { return }
             do {
                 try await textInjector.inject(text: trimmed, into: freshContext)
-                recoveryAudio = nil
-                recoveryContext = nil
                 await coordinator.finishInjecting()
             } catch {
-                Log.debug("[Pipeline] Tail recovery injection failed: \(error)")
+                Log.debug("[Pipeline] Recovery injection failed: \(error)")
                 await coordinator.failInjection()
             }
+        } catch let error as DictationError where error == .authenticationFailed {
+            Log.debug("[Pipeline] Retry returned 401, session expired")
+            await notifySessionExpired()
         } catch {
-            Log.debug("[Pipeline] Retry tail recovery failed: \(error)")
+            Log.debug("[Pipeline] Retry dictation failed: \(error)")
             _ = await coordinator.failDictation()
         }
     }
