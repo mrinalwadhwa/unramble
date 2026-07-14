@@ -646,7 +646,15 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
     private static func joinPolished(_ acc: String, _ piece: String) -> String {
         if acc.isEmpty { return piece }
         if piece.isEmpty { return acc }
-        return piece.hasPrefix("\n") ? acc + piece : acc + " " + piece
+        // A break already at the seam is the separator; drop any leading spaces
+        // the next piece carries so a paragraph does not start indented.
+        if piece.hasPrefix("\n") { return acc + piece }
+        if acc.hasSuffix("\n") {
+            return acc + String(piece.drop(while: { $0 == " " }))
+        }
+        // Otherwise separate with a single space, unless one side already has one.
+        if acc.hasSuffix(" ") || piece.hasPrefix(" ") { return acc + piece }
+        return acc + " " + piece
     }
 
     private static let sentenceBoundary = try! NSRegularExpression(
