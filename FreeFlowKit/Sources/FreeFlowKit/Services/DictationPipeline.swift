@@ -416,11 +416,9 @@ public actor DictationPipeline: PipelineProviding {
             let micProximity = audioProvider.micProximity
             let language = self.language
 
-            // Tell the provider to deliver intermediate chunks. Each
-            // chunk is injected at the current cursor position as soon
-            // as it is transcribed and polished. This gives rolling
-            // text injection during long dictations without waiting
-            // for finishStreaming.
+            // Providers that support rolling publication deliver intermediate
+            // chunks here; atomic providers use the protocol's no-op handler.
+            // Each published chunk is injected at the current cursor position.
             let injector = textInjector
             let chunkFlag = ChunkInjectedFlag()
             self.chunkInjectedFlag = chunkFlag

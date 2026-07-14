@@ -20,11 +20,13 @@ import Foundation
 ///      transcription, and manual commit configuration.
 ///   2. Forward audio chunks as `input_audio_buffer.append` with
 ///      base64-encoded 24 kHz PCM (resampled from the 16 kHz capture).
-///   3. On finish, send `input_audio_buffer.commit` and read events
-///      until `conversation.item.input_audio_transcription.completed`.
-///   4. Send the transcript as a text item, request a text response, and
-///      read the polished result on the same connection.
-///   5. Tear down the connection and pre-open a new backup.
+///   3. Commit bounded source-audio ranges and correlate every transcription
+///      terminal by its committed item ID.
+///   4. On finish, seal exact source coverage and assemble all item transcripts
+///      in commit order.
+///   5. Send the complete raw transcript as one text item, request one text
+///      response, and read the polished result on the same connection.
+///   6. Tear down the connection and pre-open a new backup.
 public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchecked Sendable {
 
     // MARK: - Configuration
@@ -35,13 +37,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     private let apiKeyProvider: @Sendable () -> String
     private let realtimeModel: String
     private let sttModel: String
-    private let chunkingStrategy: ChunkingStrategy
-
-    /// How long after the last detected speech to keep reporting the
-    /// speaker as "still speaking". Set high (10 s) so only a genuine
-    /// extended silence triggers a chunk commit — not thinking pauses
-    /// or natural breaks between sentences.
-    private let speechDebounceSeconds: TimeInterval = 10.0
+    private let commitPolicy: RealtimeCommitPolicy
+    private let maxUnresolvedItems: Int
+    private let serverEventTimeout: TimeInterval = 60
 
     // MARK: - State (guarded by lock)
 
@@ -98,33 +96,14 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         }
     }
 
-    // MARK: - Chunking (rolling commits during a streaming session)
+    // MARK: - Multi-commit session
 
-    /// Called with each intermediate chunk's polished text. When nil,
-    /// no mid-session commits fire and the session behaves like a
-    /// single-commit run.
-    private var chunkHandler: (@Sendable (String) async -> Void)?
-
-    /// When the current chunk started accumulating audio. Reset on
-    /// each commit (intermediate or final) and at session start.
-    private var currentChunkStartedAt: Date?
-
-    /// Bytes appended to the Realtime buffer since the last commit.
-    /// Only fire a commit when this is > 0 to avoid the server-side
-    /// "empty buffer" error.
-    private var audioBytesSinceLastCommit: Int = 0
-
-    /// Last time speech (RMS above the default silence threshold) was
-    /// detected in an incoming audio chunk.
-    private var lastSpeechAt: Date?
+    /// Serialized source coverage and item-correlation state for the active
+    /// connection. The background reader and audio sender share this owner.
+    private var commitSession: OpenAIRealtimeCommitSession?
 
     /// Reader task that receives the transcription and polished response.
     private var chunkReaderTask: Task<Void, Never>?
-
-    /// One-shot stream used by the reader to deliver the final
-    /// chunk's polished text to `finishStreaming`.
-    private var finalChunkStream: AsyncThrowingStream<String, Error>?
-    private var finalChunkContinuation: AsyncThrowingStream<String, Error>.Continuation?
 
     // MARK: - Backup connection (warm standby)
 
@@ -147,12 +126,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         apiKey: @autoclosure @escaping @Sendable () -> String,
         realtimeModel: String = OpenAIStreamingProvider.defaultRealtimeModel,
         sttModel: String = "gpt-4o-mini-transcribe",
-        chunkingStrategy: ChunkingStrategy = TimeAndSilenceChunkingStrategy()
+        commitPolicy: RealtimeCommitPolicy = RealtimeCommitPolicy(),
+        maxUnresolvedItems: Int = 2
     ) {
+        precondition(maxUnresolvedItems > 0)
         self.apiKeyProvider = apiKey
         self.realtimeModel = realtimeModel
         self.sttModel = sttModel
-        self.chunkingStrategy = chunkingStrategy
+        self.commitPolicy = commitPolicy
+        self.maxUnresolvedItems = maxUnresolvedItems
     }
 
     deinit {
@@ -171,17 +153,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     // MARK: - StreamingDictationProviding
 
-    public var uncommittedAudioDuration: TimeInterval {
-        // audioBytesSinceLastCommit is 24 kHz 16-bit mono = 48,000 bytes/sec.
-        lock.withLock { TimeInterval(self.audioBytesSinceLastCommit) / 48_000.0 }
-    }
-
-    /// A non-nil handler currently enables rolling audio commits. This
-    /// provider produces only a final response and does not invoke it.
-    public func setChunkHandler(_ handler: (@Sendable (String) async -> Void)?) {
-        lock.withLock { self.chunkHandler = handler }
-    }
-
     public func startStreaming(
         context: AppContext, language: String?, micProximity _: MicProximity
     ) async throws {
@@ -194,23 +165,17 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             assertionFailure("startStreaming called while a session is active")
         }
 
-        // Install a fresh timing record and reset chunking state.
+        let commitSession = OpenAIRealtimeCommitSession(
+            policy: commitPolicy,
+            maxUnresolvedItems: maxUnresolvedItems)
+
+        // Install a fresh timing record and source-coverage owner.
         let sessionID: Int = lock.withLock {
             let id = self.nextSessionID
             self.nextSessionID += 1
             self.currentTiming = SessionTiming(id: id, startedAt: Date())
-            self.currentChunkStartedAt = Date()
-            self.audioBytesSinceLastCommit = 0
-            self.lastSpeechAt = nil
+            self.commitSession = commitSession
             return id
-        }
-
-        // Set up the one-shot stream used by the reader to deliver the
-        // final chunk to finishStreaming.
-        let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
-        lock.withLock {
-            self.finalChunkStream = stream
-            self.finalChunkContinuation = continuation
         }
 
         // Try to adopt a fresh backup connection. If the backup is missing
@@ -281,27 +246,27 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         }
         lock.withLock { self.setupTask = setup }
 
-        // Receive the raw transcript, send it back for polishing, and
-        // deliver the text response to finishStreaming.
+        // Keep one receive owner for acknowledgement, transcription, and
+        // response events throughout the session.
         let reader = Task { [weak self] in
             guard let self else { return }
             do {
                 try await self.awaitSetup()
             } catch {
-                continuation.finish(throwing: error)
+                await commitSession.fail(error)
                 return
             }
             let task: URLSessionWebSocketTask? = self.lock.withLock { self.webSocketTask }
             guard let task else {
-                continuation.finish(
-                    throwing: DictationError.networkError("No active WebSocket"))
+                await commitSession.fail(
+                    DictationError.networkError("No active WebSocket"))
                 return
             }
 
             do {
-                let polished = try await Self.runRealtimeResponse(
+                try await Self.readRealtimeSessionEvents(
+                    session: commitSession,
                     receive: { try await Self.receiveText(on: task) },
-                    send: { try await task.send(.string($0)) },
                     onTranscriptCompleted: { [weak self] transcript in
                         Log.debug(
                             "[RealtimeResponse] transcript:"
@@ -316,12 +281,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                                 self?.currentTiming?.firstDeltaAt = Date()
                             }
                         }
-                    }
-                )
-                continuation.yield(polished)
-                continuation.finish()
+                    })
             } catch {
-                continuation.finish(throwing: error)
+                await commitSession.fail(error)
             }
         }
         lock.withLock { self.chunkReaderTask = reader }
@@ -329,34 +291,39 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     public func sendAudio(_ pcmData: Data) async throws {
         guard !pcmData.isEmpty else { return }
-
-        // Track speech for the chunking strategy's silence trigger.
-        let rms = AudioLevelAnalyzer.rmsLevel(pcm16: pcmData)
-        if rms > 0.005 {
-            lock.withLock { self.lastSpeechAt = Date() }
-        }
-
-        // Resample from 16 kHz capture rate to 24 kHz required by the
-        // Realtime API.
-        let pcm24k = AudioResampler.resample16kTo24k(pcmData)
-
-        // Await the setup future. If setup failed, drop the chunk —
-        // the caller will see the error and stop sending.
         try await awaitSetup()
 
-        let task: URLSessionWebSocketTask? = lock.withLock { self.webSocketTask }
-        guard let task else {
+        let state = lock.withLock { (self.webSocketTask, self.commitSession) }
+        guard let task = state.0, let commitSession = state.1 else {
             throw DictationError.networkError("No active WebSocket")
         }
 
         do {
-            try await sendChunk(pcm24k, to: task)
+            try await Self.withRealtimeSessionTimeout(
+                seconds: serverEventTimeout,
+                waitingFor: "Realtime commit state",
+                session: commitSession,
+                onTimeout: {
+                    task.cancel(with: .abnormalClosure, reason: nil)
+                },
+                operation: { [self] in
+                    try await Self.sendRealtimeAudio(
+                        pcmData,
+                        session: commitSession,
+                        send: { try await task.send(.string($0)) },
+                        onAppendSent: { [self] _, submittedBytes in
+                            lock.withLock {
+                                currentTiming?.audioBytesSent += submittedBytes
+                                currentTiming?.audioChunksSent += 1
+                            }
+                        },
+                        onCommitSent: { [self] in
+                            lock.withLock {
+                                currentTiming?.commitSentAt = Date()
+                            }
+                        })
+                })
         } catch {
-            // A send failure almost always means the WebSocket is dead.
-            // Record the error on the current session so it appears in
-            // the summary when `finishStreaming` (or `cancelStreaming`)
-            // eventually emits it, rather than leaving the timing
-            // record orphaned.
             lock.withLock {
                 if self.currentTiming?.error == nil {
                     self.currentTiming?.error = error.localizedDescription
@@ -364,45 +331,12 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             }
             throw error
         }
-
-        // Check whether the chunking strategy wants to commit now.
-        let shouldCommit: Bool = lock.withLock {
-            guard self.chunkHandler != nil,
-                self.audioBytesSinceLastCommit > 0,
-                let chunkStart = self.currentChunkStartedAt
-            else { return false }
-            let sinceLastCommit = Date().timeIntervalSince(chunkStart)
-            let lastSpeech = self.lastSpeechAt ?? Date.distantPast
-            let isSpeaking =
-                Date().timeIntervalSince(lastSpeech) < self.speechDebounceSeconds
-            return self.chunkingStrategy.shouldCommitNow(
-                sinceLastCommitSeconds: sinceLastCommit,
-                isSpeaking: isSpeaking)
-        }
-
-        if shouldCommit {
-            do {
-                try await task.send(.string(Self.buildCommit()))
-                lock.withLock {
-                    self.audioBytesSinceLastCommit = 0
-                    self.currentChunkStartedAt = Date()
-                }
-            } catch {
-                lock.withLock {
-                    if self.currentTiming?.error == nil {
-                        self.currentTiming?.error = error.localizedDescription
-                    }
-                }
-                throw error
-            }
-        }
     }
 
     public func finishStreaming() async throws -> String {
-        // Emit the session summary on every error path so a dropped
-        // primary session is always visible in the log. Collects the
-        // error on the timing record before tearing down.
         func fail(_ error: Error) async -> Error {
+            let commitSession = lock.withLock { self.commitSession }
+            await commitSession?.fail(error)
             lock.withLock {
                 if self.currentTiming?.error == nil {
                     self.currentTiming?.error = error.localizedDescription
@@ -410,13 +344,13 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 self.currentTiming?.endedAt = Date()
             }
             emitSessionSummary()
+            await tearDown()
             let reader = lock.withLock { () -> Task<Void, Never>? in
                 let r = self.chunkReaderTask
                 self.chunkReaderTask = nil
                 return r
             }
             reader?.cancel()
-            await tearDown()
             return error
         }
 
@@ -426,65 +360,41 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             throw await fail(error)
         }
 
-        let task: URLSessionWebSocketTask? = lock.withLock { self.webSocketTask }
-        guard let task else {
+        let state = lock.withLock { (self.webSocketTask, self.commitSession) }
+        guard let task = state.0, let commitSession = state.1 else {
             throw await fail(
                 DictationError.networkError("No active WebSocket"))
         }
 
-        // Send the final commit if there is audio to commit.
-        let hasAudio: Bool = lock.withLock { self.audioBytesSinceLastCommit > 0 }
-        if hasAudio {
-            do {
-                try await task.send(.string(Self.buildCommit()))
-                lock.withLock {
-                    self.audioBytesSinceLastCommit = 0
-                    self.currentTiming?.commitSentAt = Date()
-                }
-            } catch {
-                throw await fail(error)
-            }
-        } else {
-            // No new audio since the last chunk commit. Tell the reader
-            // to stop and return empty.
-            let cont = lock.withLock { self.finalChunkContinuation }
-            cont?.yield("")
-            cont?.finish()
-        }
-
-        // Wait for the reader to deliver the final chunk through the
-        // one-shot stream, with a scaled timeout.
         let bytesSent: Int = lock.withLock {
             self.currentTiming?.audioBytesSent ?? 0
         }
         let transcriptTimeout = Self.transcriptTimeout(forAudioBytes: bytesSent)
         let responseText: String
         do {
-            responseText = try await withThrowingTaskGroup(of: String.self) { [weak self] group in
-                group.addTask {
-                    guard let stream = self?.lock.withLock({ self?.finalChunkStream }) else {
-                        throw DictationError.networkError("No final chunk stream")
-                    }
-                    for try await text in stream {
-                        return text
-                    }
-                    return ""
-                }
-                group.addTask {
-                    try await Task.sleep(
-                        nanoseconds: UInt64(transcriptTimeout * 1_000_000_000))
+            responseText = try await Self.withRealtimeSessionTimeout(
+                seconds: transcriptTimeout,
+                waitingFor: "complete Realtime transcript and polish",
+                session: commitSession,
+                onTimeout: {
                     task.cancel(with: .abnormalClosure, reason: nil)
-                    throw DictationError.networkError(
-                        "Timed out waiting for transcript after \(Int(transcriptTimeout))s")
-                }
-                guard let result = try await group.next() else {
-                    group.cancelAll()
-                    throw DictationError.networkError(
-                        "No result from transcript race")
-                }
-                group.cancelAll()
-                return result
-            }
+                },
+                operation: { [self] in
+                    try await Self.finishRealtimeSession(
+                        session: commitSession,
+                        send: { try await task.send(.string($0)) },
+                        onAppendSent: { [self] _, submittedBytes in
+                            lock.withLock {
+                                currentTiming?.audioBytesSent += submittedBytes
+                                currentTiming?.audioChunksSent += 1
+                            }
+                        },
+                        onCommitSent: { [self] in
+                            lock.withLock {
+                                currentTiming?.commitSentAt = Date()
+                            }
+                        })
+                })
         } catch {
             throw await fail(error)
         }
@@ -496,8 +406,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             self.chunkReaderTask = nil
             return r
         }
-        doneReader?.cancel()
         await tearDown()
+        doneReader?.cancel()
         warmBackup()
 
         let polished = responseText.trimmingCharacters(
@@ -521,16 +431,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     }
 
     public func cancelStreaming() async {
-        let cancelSetup: Task<Void, Error>? = lock.withLock {
+        let cancellation = CancellationError()
+        let state: (Task<Void, Error>?, OpenAIRealtimeCommitSession?) = lock.withLock {
             let s = self.setupTask
             self.setupTask = nil
-            return s
+            return (s, self.commitSession)
         }
-        cancelSetup?.cancel()
+        state.0?.cancel()
+        await state.1?.fail(cancellation)
         lock.withLock {
-            self.finalChunkContinuation?.finish()
-            self.finalChunkContinuation = nil
-            self.finalChunkStream = nil
             if self.currentTiming != nil {
                 self.currentTiming?.endedAt = Date()
                 if self.currentTiming?.error == nil {
@@ -555,7 +464,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     /// Disconnect and release all connections. Call at app shutdown.
     public func disconnect() async {
-        lock.withLock { self.setupTask }?.cancel()
+        let state = lock.withLock { (self.setupTask, self.commitSession) }
+        state.0?.cancel()
+        await state.1?.fail(CancellationError())
         backupOpenTask?.cancel()
         await tearDown()
         await discardBackup()
@@ -789,25 +700,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         session?.invalidateAndCancel()
     }
 
-    // MARK: - Audio send helpers
-
-    /// Encode a PCM chunk as an audio-append message, send it on the
-    /// WebSocket, and update the timing/byte counters.
-    private func sendChunk(_ pcm24k: Data, to task: URLSessionWebSocketTask) async throws {
-        let msg = Self.buildAudioAppend(pcm24k: pcm24k)
-        try await task.send(.string(msg))
-        recordChunkSent(byteCount: pcm24k.count)
-    }
-
-    /// Update timing and byte counters after a chunk is sent.
-    private func recordChunkSent(byteCount: Int) {
-        lock.withLock {
-            self.currentTiming?.audioBytesSent += byteCount
-            self.currentTiming?.audioChunksSent += 1
-            self.audioBytesSinceLastCommit += byteCount
-        }
-    }
-
     // MARK: - Connection lifecycle
 
     /// Compute the hard timeout for waiting on a transcription result
@@ -855,9 +747,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             self.webSocketTask = nil
             self.urlSession = nil
             self.setupTask = nil
-            self.finalChunkContinuation?.finish()
-            self.finalChunkContinuation = nil
-            self.finalChunkStream = nil
+            self.commitSession = nil
             return (t, s)
         }
         task?.cancel(with: .goingAway, reason: nil)
@@ -913,19 +803,24 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     }
 
     /// Build the `response.create` message to trigger a text response.
-    static func buildResponseCreate() -> String {
-        jsonString([
+    static func buildResponseCreate(eventID: String? = nil) -> String {
+        var event: [String: Any] = [
             "type": "response.create",
             "response": [
                 "output_modalities": ["text"],
             ],
-        ])
+        ]
+        if let eventID { event["event_id"] = eventID }
+        return jsonString(event)
     }
 
     /// Build a `conversation.item.create` message to add a user text
     /// message containing the raw transcript for polishing.
-    static func buildPolishRequest(transcript: String) -> String {
-        jsonString([
+    static func buildPolishRequest(
+        transcript: String,
+        eventID: String? = nil
+    ) -> String {
+        var event: [String: Any] = [
             "type": "conversation.item.create",
             "item": [
                 "type": "message",
@@ -937,20 +832,29 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     ],
                 ],
             ],
-        ])
+        ]
+        if let eventID { event["event_id"] = eventID }
+        return jsonString(event)
     }
 
     /// Build an `input_audio_buffer.append` message wrapping base64 PCM.
-    static func buildAudioAppend(pcm24k: Data) -> String {
-        jsonString([
+    static func buildAudioAppend(
+        pcm24k: Data,
+        eventID: String? = nil
+    ) -> String {
+        var event: [String: Any] = [
             "type": "input_audio_buffer.append",
             "audio": pcm24k.base64EncodedString(),
-        ])
+        ]
+        if let eventID { event["event_id"] = eventID }
+        return jsonString(event)
     }
 
     /// Build the `input_audio_buffer.commit` message.
-    static func buildCommit() -> String {
-        jsonString(["type": "input_audio_buffer.commit"])
+    static func buildCommit(eventID: String? = nil) -> String {
+        var event: [String: Any] = ["type": "input_audio_buffer.commit"]
+        if let eventID { event["event_id"] = eventID }
+        return jsonString(event)
     }
 
     // MARK: - Event parsing (testable pure function)
@@ -989,7 +893,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     in: obj,
                     field: "item_id",
                     eventType: type)
-                let previousItemID = try optionalNonemptyString(
+                let predecessor = try itemPredecessor(
                     in: obj,
                     field: "previous_item_id",
                     eventType: type)
@@ -997,7 +901,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     .commitAcknowledged(
                         serverEventID: serverEventID,
                         itemID: itemID,
-                        previousItemID: previousItemID))
+                        predecessor: predecessor))
             } catch let failure as EventFieldFailure {
                 return .protocolError(failure.message)
             } catch {
@@ -1075,11 +979,29 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 return .protocolError("Malformed \(type) event")
             }
         case "response.text.delta", "response.output_text.delta":
-            let delta = obj["delta"] as? String ?? ""
-            return .responseTextDelta(delta)
+            do {
+                return .responseTextDelta(
+                    try requiredString(
+                        in: obj,
+                        field: "delta",
+                        eventType: type))
+            } catch let failure as EventFieldFailure {
+                return .protocolError(failure.message)
+            } catch {
+                return .protocolError("Malformed \(type) event")
+            }
         case "response.text.done", "response.output_text.done":
-            let text = obj["text"] as? String ?? ""
-            return .responseTextDone(text)
+            do {
+                return .responseTextDone(
+                    try requiredString(
+                        in: obj,
+                        field: "text",
+                        eventType: type))
+            } catch let failure as EventFieldFailure {
+                return .protocolError(failure.message)
+            } catch {
+                return .protocolError("Malformed \(type) event")
+            }
         case "response.done":
             Log.debug("[RealtimeResponse] raw response.done: \(text.prefix(1000))")
             guard let response = obj["response"] as? [String: Any] else {
@@ -1213,18 +1135,18 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         return value
     }
 
-    private static func optionalNonemptyString(
+    private static func itemPredecessor(
         in object: [String: Any],
         field: String,
         eventType: String
-    ) throws -> String? {
-        guard let raw = object[field] else { return nil }
-        if raw is NSNull { return nil }
+    ) throws -> RealtimeItemPredecessor {
+        guard let raw = object[field] else { return .unspecified }
+        if raw is NSNull { return .root }
         guard let value = raw as? String, !value.isEmpty else {
             throw EventFieldFailure(
                 message: "\(eventType) requires \(field) to be null or a nonempty string")
         }
-        return value
+        return .item(value)
     }
 
     private static func errorMessage(in object: [String: Any]) -> String? {
@@ -1239,29 +1161,231 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         return nil
     }
 
-    // MARK: - WebSocket receive
+    // MARK: - Multi-commit session orchestration
 
-    /// Run the supported Realtime transaction over injectable I/O so the
-    /// message ordering and terminal result are deterministic in tests.
-    static func runRealtimeResponse(
-        receive: () async throws -> String,
-        send: (String) async throws -> Void,
+    static func sendRealtimeAudio(
+        _ pcm16k: Data,
+        session: OpenAIRealtimeCommitSession,
+        send: @escaping @Sendable (String) async throws -> Void,
+        eventID: @escaping @Sendable () -> String = { UUID().uuidString },
+        onAppendSent: (@Sendable (Int, Int) -> Void)? = nil,
+        onCommitSent: (@Sendable () -> Void)? = nil
+    ) async throws {
+        guard !pcm16k.isEmpty else { return }
+        var ownsTransportTurn = false
+        do {
+            guard pcm16k.count.isMultiple(of: MemoryLayout<Int16>.size) else {
+                _ = try await session.appendSucceeded(
+                    byteCount: pcm16k.count,
+                    containsSpeech: false)
+                return
+            }
+            try await session.acquireTransportTurn()
+            ownsTransportTurn = true
+            try Task.checkCancellation()
+
+            var offset = 0
+            while offset < pcm16k.count {
+                let requested = pcm16k.count - offset
+                let appendCount = try await session.maximumAppendByteCount(
+                    requested: requested)
+                if appendCount == 0 {
+                    try await submitBufferedAudio(
+                        session: session,
+                        force: false,
+                        send: send,
+                        eventID: eventID,
+                        onAppendSent: onAppendSent,
+                        onCommitSent: onCommitSent)
+                    continue
+                }
+
+                let source = pcm16k.subdata(
+                    in: offset..<(offset + appendCount))
+                let pcm24k = try await session.resampleForAppend(source)
+                try await send(
+                    buildAudioAppend(
+                        pcm24k: pcm24k,
+                        eventID: eventID()))
+                try Task.checkCancellation()
+                onAppendSent?(appendCount, pcm24k.count)
+                let containsSpeech = AudioLevelAnalyzer.rmsLevel(pcm16: source)
+                    > 0.005
+                let shouldCommit = try await session.appendSucceeded(
+                    byteCount: appendCount,
+                    containsSpeech: containsSpeech)
+                offset += appendCount
+
+                if shouldCommit {
+                    try await submitBufferedAudio(
+                        session: session,
+                        force: false,
+                        send: send,
+                        eventID: eventID,
+                        onAppendSent: onAppendSent,
+                        onCommitSent: onCommitSent)
+                }
+            }
+            await session.releaseTransportTurn()
+        } catch {
+            await session.fail(error)
+            if ownsTransportTurn {
+                await session.releaseTransportTurn()
+            }
+            throw error
+        }
+    }
+
+    static func finishRealtimeSession(
+        session: OpenAIRealtimeCommitSession,
+        send: @escaping @Sendable (String) async throws -> Void,
+        eventID: @escaping @Sendable () -> String = { UUID().uuidString },
+        onAppendSent: (@Sendable (Int, Int) -> Void)? = nil,
+        onCommitSent: (@Sendable () -> Void)? = nil
+    ) async throws -> String {
+        var ownsTransportTurn = false
+        do {
+            try await session.acquireTransportTurn()
+            ownsTransportTurn = true
+            try Task.checkCancellation()
+            try await submitBufferedAudio(
+                session: session,
+                force: true,
+                send: send,
+                eventID: eventID,
+                onAppendSent: onAppendSent,
+                onCommitSent: onCommitSent)
+            try await session.sealCapture()
+            let transcript = try await session.waitForRawTranscript()
+            if transcript.isEmpty {
+                await session.releaseTransportTurn()
+                return ""
+            }
+
+            try await session.beginPolish()
+            try await send(
+                buildPolishRequest(
+                    transcript: transcript,
+                    eventID: eventID()))
+            try await send(buildResponseCreate(eventID: eventID()))
+            let response = try await session.waitForPolishedResponse()
+            await session.releaseTransportTurn()
+            return response
+        } catch {
+            await session.fail(error)
+            if ownsTransportTurn {
+                await session.releaseTransportTurn()
+            }
+            throw error
+        }
+    }
+
+    static func readRealtimeSessionEvents(
+        session: OpenAIRealtimeCommitSession,
+        receive: @escaping @Sendable () async throws -> String,
         onTranscriptCompleted: (@Sendable (String) -> Void)? = nil,
         onFirstResponseDelta: (@Sendable () -> Void)? = nil
-    ) async throws -> String {
-        let transcript = try await readTranscriptUntilCompleted(
-            receive: receive)
-        onTranscriptCompleted?(transcript)
-        guard !transcript.isEmpty else { return "" }
-
-        try await send(buildPolishRequest(transcript: transcript))
-        try await send(buildResponseCreate())
-        Log.debug("[RealtimeResponse] sent polish request + response.create")
-
-        return try await readResponseUntilDone(
-            receive: receive,
-            onFirstDelta: onFirstResponseDelta)
+    ) async throws {
+        do {
+            while true {
+                try Task.checkCancellation()
+                switch parseEvent(try await receive()) {
+                case .transcription(let event):
+                    try await session.apply(event)
+                    if case .completed(_, _, _, let transcript) = event {
+                        onTranscriptCompleted?(transcript)
+                    }
+                case .responseTextDelta(let delta):
+                    if try await session.appendResponseDelta(delta) {
+                        onFirstResponseDelta?()
+                    }
+                case .responseTextDone(let text):
+                    try await session.completeResponseText(text)
+                case .responseDone:
+                    try await session.completeResponse()
+                    return
+                case .error(let message):
+                    throw DictationError.networkError(
+                        "Realtime API error: \(message)")
+                case .serverError(let error):
+                    throw DictationError.networkError(
+                        "Realtime API error: \(error.diagnosticMessage)")
+                case .protocolError(let message):
+                    throw DictationError.networkError(
+                        "Realtime protocol error: \(message)")
+                case .transcriptionDelta, .other:
+                    continue
+                }
+            }
+        } catch {
+            await session.fail(error)
+            throw error
+        }
     }
+
+    static func withRealtimeSessionTimeout<Value: Sendable>(
+        seconds: TimeInterval,
+        waitingFor description: String,
+        session: OpenAIRealtimeCommitSession,
+        onTimeout: @escaping @Sendable () async -> Void,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        precondition(seconds > 0 && seconds.isFinite)
+        return try await withThrowingTaskGroup(of: Value.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(
+                    nanoseconds: UInt64(seconds * 1_000_000_000))
+                let error = DictationError.networkError(
+                    "Timed out waiting for \(description)"
+                        + " after \(Int(seconds))s")
+                await session.fail(error)
+                await onTimeout()
+                throw error
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw DictationError.networkError(
+                    "No result while waiting for \(description)")
+            }
+            return result
+        }
+    }
+
+    private static func submitBufferedAudio(
+        session: OpenAIRealtimeCommitSession,
+        force: Bool,
+        send: @escaping @Sendable (String) async throws -> Void,
+        eventID: @escaping @Sendable () -> String,
+        onAppendSent: (@Sendable (Int, Int) -> Void)?,
+        onCommitSent: (@Sendable () -> Void)?
+    ) async throws {
+        while true {
+            switch try await session.prepareCommit(force: force) {
+            case .noAudio:
+                return
+            case .blocked:
+                try await session.waitForCommitCapacity()
+            case .ready(let commit):
+                let tail = try await session.finishResamplingForCommit()
+                if !tail.isEmpty {
+                    try await send(
+                        buildAudioAppend(
+                            pcm24k: tail,
+                            eventID: eventID()))
+                    onAppendSent?(0, tail.count)
+                }
+                try await send(buildCommit(eventID: eventID()))
+                onCommitSent?()
+                try await session.waitForAcknowledgement(
+                    sequence: commit.sequence)
+                try Task.checkCancellation()
+                return
+            }
+        }
+    }
+
+    // MARK: - WebSocket receive
 
     private static func receiveText(
         on task: URLSessionWebSocketTask
@@ -1284,125 +1408,13 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         }
     }
 
-    /// Read events until the first completed transcription arrives.
-    static func readTranscriptUntilCompleted(
-        receive: () async throws -> String
-    ) async throws -> String {
-        while true {
-            try Task.checkCancellation()
-            switch parseEvent(try await receive()) {
-            case .transcription(
-                .completed(_, let itemID, let contentIndex, let transcript)):
-                try requirePrimaryAudioContent(
-                    itemID: itemID,
-                    contentIndex: contentIndex)
-                return transcript
-            case .transcription(
-                .failed(_, let itemID, let contentIndex, let error)):
-                try requirePrimaryAudioContent(
-                    itemID: itemID,
-                    contentIndex: contentIndex)
-                throw DictationError.networkError(
-                    "Realtime API error: \(error.ledgerMessage)")
-            case .transcription(.commitAcknowledged):
-                continue
-            case .error(let message):
-                throw DictationError.networkError(
-                    "Realtime API error: \(message)")
-            case .serverError(let error):
-                throw DictationError.networkError(
-                    "Realtime API error: \(error.diagnosticMessage)")
-            case .protocolError(let message):
-                throw DictationError.networkError(
-                    "Realtime protocol error: \(message)")
-            case .transcriptionDelta, .responseTextDelta, .responseTextDone,
-                 .responseDone, .other:
-                continue
-            }
-        }
-    }
-
-    /// Read response text, retaining deltas in case `response.done`
-    /// arrives without a preceding text-done event.
-    static func readResponseUntilDone(
-        receive: () async throws -> String,
-        onFirstDelta: (@Sendable () -> Void)? = nil
-    ) async throws -> String {
-        var firstDeltaReported = false
-        var accumulated = ""
-        var completedText: String?
-        while true {
-            try Task.checkCancellation()
-            let event = parseEvent(try await receive())
-            switch event {
-            case .transcription(.commitAcknowledged):
-                continue
-            case .transcription(
-                .failed(_, let itemID, let contentIndex, let error)):
-                try requirePrimaryAudioContent(
-                    itemID: itemID,
-                    contentIndex: contentIndex)
-                throw DictationError.networkError(
-                    "Realtime API error: \(error.ledgerMessage)")
-            case .responseTextDone(let polished):
-                Log.debug("[RealtimeResponse] text.done: \"\(polished.prefix(200))\"")
-                completedText = polished.isEmpty ? accumulated : polished
-                continue
-            case .responseDone:
-                Log.debug(
-                    "[RealtimeResponse] response.done"
-                        + " accumulated=\(accumulated.count)")
-                return completedText ?? accumulated
-            case .error(let message):
-                Log.debug("[RealtimeResponse] error: \(message)")
-                throw DictationError.networkError(
-                    "Realtime API error: \(message)")
-            case .serverError(let error):
-                Log.debug(
-                    "[RealtimeResponse] error: \(error.diagnosticMessage)")
-                throw DictationError.networkError(
-                    "Realtime API error: \(error.diagnosticMessage)")
-            case .protocolError(let message):
-                Log.debug("[RealtimeResponse] protocol error: \(message)")
-                throw DictationError.networkError(
-                    "Realtime protocol error: \(message)")
-            case .responseTextDelta(let delta):
-                accumulated += delta
-                if !firstDeltaReported {
-                    firstDeltaReported = true
-                    onFirstDelta?()
-                }
-                continue
-            case .transcription(
-                .completed(_, let itemID, let contentIndex, let t)):
-                try requirePrimaryAudioContent(
-                    itemID: itemID,
-                    contentIndex: contentIndex)
-                Log.debug("[RealtimeResponse] ignoring transcription: \"\(t.prefix(80))\"")
-                continue
-            case .transcriptionDelta, .other:
-                continue
-            }
-        }
-    }
-
-    private static func requirePrimaryAudioContent(
-        itemID: String,
-        contentIndex: Int
-    ) throws {
-        guard contentIndex == 0 else {
-            throw DictationError.networkError(
-                "Realtime protocol error: item \(itemID) has unsupported"
-                    + " content_index \(contentIndex)")
-        }
-    }
-
     // MARK: - JSON helper
 
     private static func jsonString(_ object: [String: Any]) -> String {
         guard
             let data = try? JSONSerialization.data(
-                withJSONObject: object, options: [.sortedKeys]),
+                withJSONObject: object,
+                options: [.sortedKeys, .withoutEscapingSlashes]),
             let text = String(data: data, encoding: .utf8)
         else {
             return "{}"

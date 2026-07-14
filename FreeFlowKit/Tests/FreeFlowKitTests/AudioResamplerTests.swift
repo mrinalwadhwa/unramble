@@ -159,4 +159,24 @@ struct AudioResamplerTests {
         let result = AudioResampler.resample16kTo24k(input)
         #expect(result.count == 2400 * 2)
     }
+
+    @Test("streaming output is invariant to callback fragmentation")
+    func streamingFragmentation() {
+        let fragments: [[Int16]] = [
+            [0],
+            [300, 600, 900],
+            [1_200, 1_500],
+            [1_800, 2_100, 2_400, 2_700],
+        ]
+        var stream = AudioResampler.Stream16kTo24k()
+        var streamed = Data()
+        for fragment in fragments {
+            streamed.append(stream.append(pack(fragment)))
+        }
+        streamed.append(stream.finish())
+
+        let complete = fragments.flatMap { $0 }
+        #expect(streamed == AudioResampler.resample16kTo24k(pack(complete)))
+        #expect(stream.finish().isEmpty)
+    }
 }

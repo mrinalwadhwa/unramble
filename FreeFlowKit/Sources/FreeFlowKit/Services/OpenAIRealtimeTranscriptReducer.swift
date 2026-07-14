@@ -9,6 +9,12 @@ struct OpenAIRealtimeTranscriptReducer: Sendable {
         case conflictingServerEventID(String)
     }
 
+    enum Application: Equatable, Sendable {
+        case acknowledged(RealtimeTranscriptLedger.Commit)
+        case terminal(itemID: String)
+        case replay
+    }
+
     private var ledger = RealtimeTranscriptLedger()
     private var appliedEventsByID: [String: OpenAIRealtimeTranscriptionEvent] = [:]
 
@@ -22,9 +28,10 @@ struct OpenAIRealtimeTranscriptReducer: Sendable {
             submittedRange: submittedRange)
     }
 
+    @discardableResult
     mutating func apply(
         _ event: OpenAIRealtimeTranscriptionEvent
-    ) throws {
+    ) throws -> Application {
         switch event {
         case .commitAcknowledged:
             break
@@ -42,25 +49,30 @@ struct OpenAIRealtimeTranscriptReducer: Sendable {
             guard applied == event else {
                 throw Failure.conflictingServerEventID(serverEventID)
             }
-            return
+            return .replay
         }
 
+        let application: Application
         switch event {
-        case .commitAcknowledged(_, let itemID, let previousItemID):
-            try ledger.acknowledgeCommit(
-                itemID: itemID,
-                previousItemID: previousItemID)
+        case .commitAcknowledged(_, let itemID, let predecessor):
+            application = .acknowledged(
+                try ledger.acknowledgeCommit(
+                    itemID: itemID,
+                    predecessor: predecessor))
         case .completed(_, let itemID, _, let transcript):
             try ledger.completeTranscription(
                 itemID: itemID,
                 transcript: transcript)
+            application = .terminal(itemID: itemID)
         case .failed(_, let itemID, _, let error):
             try ledger.failTranscription(
                 itemID: itemID,
                 message: error.ledgerMessage)
+            application = .terminal(itemID: itemID)
         }
 
         appliedEventsByID[serverEventID] = event
+        return application
     }
 
     mutating func seal(expectedCoverageEnd: Int) throws {

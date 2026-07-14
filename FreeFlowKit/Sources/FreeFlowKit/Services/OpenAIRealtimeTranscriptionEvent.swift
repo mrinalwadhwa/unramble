@@ -39,6 +39,21 @@ struct OpenAIRealtimeServerError: Equatable, Sendable {
     }
 }
 
+/// The committed event may omit `previous_item_id`, explicitly report no
+/// predecessor, or identify one. Keeping those states distinct lets the ledger
+/// validate information the server supplied without rejecting an omitted
+/// optional field.
+enum RealtimeItemPredecessor: Equatable, Sendable {
+    case unspecified
+    case root
+    case item(String)
+
+    var itemID: String? {
+        guard case .item(let itemID) = self else { return nil }
+        return itemID
+    }
+}
+
 /// Correlation-focused projection of Realtime transcription server events.
 /// The parser validates fields that identify and resolve committed audio, while
 /// intentionally ignoring unrelated metadata such as usage and log probabilities.
@@ -46,7 +61,7 @@ enum OpenAIRealtimeTranscriptionEvent: Equatable, Sendable {
     case commitAcknowledged(
         serverEventID: String,
         itemID: String,
-        previousItemID: String?)
+        predecessor: RealtimeItemPredecessor)
     case completed(
         serverEventID: String,
         itemID: String,

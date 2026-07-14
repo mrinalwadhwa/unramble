@@ -53,7 +53,7 @@ struct RealtimeTranscriptLedger: Sendable {
     private struct Entry: Sendable {
         let commit: Commit
         var itemID: String?
-        var previousItemID: String?
+        var predecessor: RealtimeItemPredecessor?
         var terminal: Terminal?
     }
 
@@ -105,7 +105,7 @@ struct RealtimeTranscriptLedger: Sendable {
             Entry(
                 commit: commit,
                 itemID: nil,
-                previousItemID: nil,
+                predecessor: nil,
                 terminal: nil))
         pendingAcknowledgement = commit.sequence
         return commit
@@ -116,10 +116,21 @@ struct RealtimeTranscriptLedger: Sendable {
         itemID: String,
         previousItemID: String?
     ) throws -> Commit {
+        try acknowledgeCommit(
+            itemID: itemID,
+            predecessor: previousItemID.map(RealtimeItemPredecessor.item)
+                ?? .root)
+    }
+
+    @discardableResult
+    mutating func acknowledgeCommit(
+        itemID: String,
+        predecessor: RealtimeItemPredecessor
+    ) throws -> Commit {
         guard !itemID.isEmpty else { throw Failure.invalidItemID }
 
         if let existingIndex = entries.firstIndex(where: { $0.itemID == itemID }) {
-            guard entries[existingIndex].previousItemID == previousItemID
+            guard entries[existingIndex].predecessor == predecessor
             else {
                 throw Failure.conflictingAcknowledgement(itemID)
             }
@@ -136,15 +147,24 @@ struct RealtimeTranscriptLedger: Sendable {
         let expectedPreviousItemID = sequence == 0
             ? nil
             : entries[sequence - 1].itemID
-        guard previousItemID == expectedPreviousItemID else {
+        let predecessorMatches: Bool
+        switch predecessor {
+        case .unspecified:
+            predecessorMatches = true
+        case .root:
+            predecessorMatches = expectedPreviousItemID == nil
+        case .item(let actualPreviousItemID):
+            predecessorMatches = actualPreviousItemID == expectedPreviousItemID
+        }
+        guard predecessorMatches else {
             throw Failure.invalidItemChain(
                 sequence: sequence,
                 expectedPreviousItemID: expectedPreviousItemID,
-                actualPreviousItemID: previousItemID)
+                actualPreviousItemID: predecessor.itemID)
         }
 
         entries[sequence].itemID = itemID
-        entries[sequence].previousItemID = previousItemID
+        entries[sequence].predecessor = predecessor
         if let pendingTerminal {
             entries[sequence].terminal = pendingTerminal.terminal
             self.pendingTerminal = nil
@@ -220,7 +240,7 @@ struct RealtimeTranscriptLedger: Sendable {
             return ResolvedItem(
                 commit: entry.commit,
                 itemID: itemID,
-                previousItemID: entry.previousItemID,
+                previousItemID: entry.predecessor?.itemID,
                 transcript: transcript)
         }
     }
