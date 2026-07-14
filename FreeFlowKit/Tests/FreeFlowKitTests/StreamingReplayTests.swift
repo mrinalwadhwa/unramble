@@ -18,7 +18,9 @@ import Testing
 //        -only-testing:FreeFlowKitTests/StreamingReplay \
 //        SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) FREEFLOW_MLX_TESTS'
 //
-// Options (flag files — xcodebuild does not forward shell env to xctest):
+// Inputs (flag files — xcodebuild does not forward shell env to xctest):
+//   /tmp/freeflow-replay-dir      contents: directory of sample WAVs (required;
+//                                 the recordings are not in the repository)
 //   /tmp/freeflow-replay-only     contents: a WAV basename to replay alone
 //   /tmp/freeflow-replay-step-ms  contents: audio fed per cycle (default 3000)
 //
@@ -36,16 +38,22 @@ struct StreamingReplay {
             atPath: "/tmp/freeflow-test-streaming-replay")
         else { return }
 
-        guard let dir = samplesDir() else {
-            Issue.record("samples dir not found under .scratch")
-            return
-        }
         let readFlag = { (path: String) -> String? in
             guard let s = try? String(contentsOfFile: path, encoding: .utf8)
             else { return nil }
             let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
             return t.isEmpty ? nil : t
         }
+
+        // Sample recordings are not in the repository; the caller supplies the
+        // directory that holds them. There is no default path.
+        guard let dirPath = readFlag("/tmp/freeflow-replay-dir") else {
+            Issue.record(
+                "set /tmp/freeflow-replay-dir to a directory of sample WAVs")
+            return
+        }
+        let dir = URL(fileURLWithPath: dirPath, isDirectory: true)
+
         let only = readFlag("/tmp/freeflow-replay-only")
         let stepMS = Int(readFlag("/tmp/freeflow-replay-step-ms") ?? "") ?? 3000
         let stepBytes = max(1, stepMS * 32)  // 16 kHz mono 16-bit = 32 bytes/ms
@@ -58,7 +66,11 @@ struct StreamingReplay {
             return
         }
 
-        let modelManager = LocalModelManager()
+        guard let modelsDir = modelsDir() else {
+            Issue.record("model pack not found under FreeFlowApp/Resources")
+            return
+        }
+        let modelManager = LocalModelManager(modelsDirectory: modelsDir)
         let nemotron = NemotronEngine(modelManager: modelManager)
         try await nemotron.load()
 
@@ -70,7 +82,7 @@ struct StreamingReplay {
                 "adapters.safetensors").path)
         let engine = MLXLLMEngine(
             name: "Qwen3 0.6B Polish",
-            modelDirectory: try LocalModelTestSupport.directory(),
+            modelDirectory: modelManager.modelPath(for: "qwen3-0.6b-4bit"),
             adapterDirectory: hasAdapter ? adapterDir : nil)
         let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
@@ -145,12 +157,17 @@ struct StreamingReplay {
 
     // MARK: - Helpers
 
-    private func samplesDir() -> URL? {
+    /// The app's pinned model pack, so the replay uses the same Nemotron and
+    /// Qwen models the app ships rather than an Application Support override.
+    private func modelsDir() -> URL? {
+        findUpwards("FreeFlowApp/Resources/models")
+    }
+
+    private func findUpwards(_ relative: String) -> URL? {
         var dir = URL(fileURLWithPath: #file)
         for _ in 0..<10 {
             dir = dir.deletingLastPathComponent()
-            let candidate = dir.appendingPathComponent(
-                ".scratch/nemotron-eval/samples")
+            let candidate = dir.appendingPathComponent(relative)
             if FileManager.default.fileExists(atPath: candidate.path) {
                 return candidate
             }
