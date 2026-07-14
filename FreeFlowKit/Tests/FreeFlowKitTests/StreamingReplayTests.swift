@@ -3,13 +3,12 @@ import Testing
 
 @testable import FreeFlowKit
 
-// Replay a saved WAV through the REAL streaming path — Nemotron incremental
-// STT + CommitTracker commits + per-chunk Qwen polish + rolling injection —
-// and reconstruct the text that would land in the editor, using the exact
-// spacing rules of AppTextInjector. This reproduces offline what a live
-// dictation actually injects, which batch replay (PipelineReplayTests)
-// does not: batch polishes the whole transcript at once, while production
-// polishes each committed sentence separately.
+// Replay a saved WAV through the REAL on-device streaming path — Nemotron
+// incremental STT, pause/size units, per-unit Qwen polish accumulated
+// internally — and reconstruct the text that would land in the editor from
+// the single injection at release, using AppTextInjector's spacing rules.
+// This reproduces offline what a live dictation produces, which batch replay
+// (PipelineReplayTests) does not: batch polishes the whole transcript at once.
 //
 // Needs Metal for Qwen, so run via xcodebuild:
 //
@@ -85,24 +84,21 @@ struct StreamingReplay {
 
             let provider = LocalStreamingProvider(
                 sttEngine: nemotron, polishChatClient: client)
-            let chunks = ChunkCollector()
-            provider.setChunkHandler { text in chunks.append(text) }
+            let previews = ChunkCollector()
+            provider.setChunkHandler { text in previews.append(text) }
 
-            let tail = try await provider.replay(audio: pcm, stepBytes: stepBytes)
+            let result = try await provider.replay(
+                audio: pcm, stepBytes: stepBytes)
 
-            // Reconstruct what the editor would contain: every committed
-            // chunk injected live, then the final tail.
+            // Production injects the whole result once at release. Reconstruct
+            // what the editor would contain from that single injection. The
+            // per-unit previews are logged for insight only.
             var editor = ""
-            var chunkIdx = 0
+            Self.appendChunk(result, to: &editor)
+
             log.log("[\(name)]")
-            for chunk in chunks.all {
-                chunkIdx += 1
-                log.log("  chunk \(chunkIdx): \"\(visible(chunk))\"")
-                Self.appendChunk(chunk, to: &editor)
-            }
-            if !tail.isEmpty {
-                log.log("  tail: \"\(visible(tail))\"")
-                Self.appendChunk(tail, to: &editor)
+            for (i, preview) in previews.all.enumerated() {
+                log.log("  unit \(i + 1): \"\(visible(preview))\"")
             }
 
             let editorText = editor.trimmingCharacters(in: .whitespaces)
@@ -118,11 +114,11 @@ struct StreamingReplay {
 
     // MARK: - Editor reconstruction (mirrors AppTextInjector spacing)
 
-    /// Append `raw` chunk to `editor` the way DictationPipeline's chunk
-    /// handler + AppTextInjector.inject would: trim only horizontal
-    /// whitespace, append a trailing space unless the chunk ends with a
-    /// break, and add a leading space unless the chunk starts with a break
-    /// or punctuation or the previous character already suppresses it.
+    /// Append `raw` text to `editor` the way DictationPipeline injects the
+    /// final result through AppTextInjector.inject: trim only horizontal
+    /// whitespace, append a trailing space unless it ends with a break, and
+    /// add a leading space unless it starts with a break or punctuation or
+    /// the previous character already suppresses it.
     static func appendChunk(_ raw: String, to editor: inout String) {
         let horizontal = CharacterSet(charactersIn: " \t")
         let toInject = raw.trimmingCharacters(in: horizontal)

@@ -434,13 +434,12 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
     // MARK: - Offline Replay
 
-    /// Drive the real commit + polish pipeline deterministically, without
-    /// the wall-clock background timer, to reproduce offline exactly what a
-    /// live dictation would inject. Feed `audio` in `stepBytes` increments,
-    /// running one cycle per step (each cycle feeds only the new audio,
-    /// commits stabilized sentences, polishes them, and emits them through
-    /// the chunk handler), then finish and return the tail. Set a chunk
-    /// handler with `setChunkHandler` first to collect the injected chunks.
+    /// Drive the real unit + polish pipeline deterministically, without the
+    /// wall-clock background timer, to reproduce offline exactly what a live
+    /// dictation produces. Feed `audio` in `stepBytes` increments, running one
+    /// cycle per step (each cycle feeds the new audio, closes a unit when the
+    /// policy fires, polishes it, and appends it internally), then finish and
+    /// return the whole polished transcript.
     ///
     /// `stepBytes` mimics how much audio arrives per cycle in production
     /// (default 96 000 = ~3 s at 16 kHz mono 16-bit, matching the 3 s

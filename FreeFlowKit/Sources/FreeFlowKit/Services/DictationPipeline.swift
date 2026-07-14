@@ -1346,9 +1346,9 @@ public actor DictationPipeline: PipelineProviding {
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true)
 
-        // Prefer the provider's full polished transcript. With rolling
-        // injection, the returned `polished` holds only the final tail,
-        // so the provider exposes the committed text plus tail.
+        // The returned text is already the full polished transcript; the
+        // local provider also exposes it as lastPolishedTranscript next to
+        // the raw STT for the collected sample.
         let rawSTT: String
         var polishedFull = polished
         if let local = streaming as? LocalStreamingProvider {
