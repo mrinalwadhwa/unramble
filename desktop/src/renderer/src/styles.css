@@ -204,13 +204,18 @@ kbd { margin: 0 4px; padding: 5px 7px; border: 1px solid var(--line-strong); bor
 @keyframes boot-pulse { 50% { transform: translateY(-3px); box-shadow: 0 10px 35px rgba(216,255,114,.2); } }
 
 body.hud-host { display: grid; place-items: center; background: transparent; }
-.hud { position: relative; width: 100px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(230,234,223,.25); border-radius: 15px; background: rgba(13,17,14,.94); box-shadow: 0 9px 25px rgba(0,0,0,.46), inset 0 0 0 1px rgba(216,255,114,.035); backdrop-filter: blur(16px); overflow: hidden; }
+.hud { position: relative; width: 100px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(230,234,223,.25); border-radius: 15px; background: rgba(13,17,14,.94); box-shadow: 0 9px 25px rgba(0,0,0,.46), inset 0 0 0 1px rgba(216,255,114,.035); backdrop-filter: blur(16px); overflow: hidden; transition: width .16s ease, height .16s ease, border-radius .16s ease, background .16s ease, box-shadow .16s ease; }
 .hud::before { content: ''; position: absolute; inset: 0; border-radius: inherit; background: radial-gradient(circle at 36% 50%, rgba(216,255,114,.09), transparent 58%); pointer-events: none; }
 .hud__signal { height: 32px; display: flex; align-items: center; justify-content: center; gap: 2px; }
 .hud__signal i { width: 3px; min-height: 3px; height: calc(3px + 24px * var(--bar)); border-radius: 4px; background: color-mix(in srgb, var(--acid) calc(var(--bar) * 100%), #536052); box-shadow: 0 0 calc(5px * var(--bar)) rgba(216,255,114,.2); transition: height .08s linear, background .18s ease; }
-.hud--preparing .hud__signal i, .hud--finalizing .hud__signal i, .hud--transcribing .hud__signal i, .hud--polishing .hud__signal i, .hud--injecting .hud__signal i { animation: hud-scan .72s ease-in-out infinite alternate; animation-delay: calc(var(--bar) * -.35s); }
+.hud--processing { width: 48px; height: 22px; border-radius: 11px; background: rgba(13,17,14,.88); box-shadow: 0 6px 18px rgba(0,0,0,.38), inset 0 0 0 1px rgba(216,255,114,.025); }
+.hud__loader { position: relative; z-index: 1; height: 12px; display: flex; align-items: center; gap: 3px; }
+.hud__loader i { width: 2px; height: 4px; border-radius: 2px; background: var(--acid); opacity: .38; animation: hud-handoff .68s cubic-bezier(.45,0,.2,1) infinite; animation-delay: calc(var(--step) * -.09s); }
+.hud--polishing .hud__loader i { background: var(--warning); }
+.hud--injecting .hud__loader i { animation-duration: .44s; }
 .hud--failed .hud__signal i, .hud--injectionFailed .hud__signal i { background: var(--signal); box-shadow: 0 0 7px rgba(255,118,93,.34); }
-@keyframes hud-scan { to { height: 27px; background: var(--warning); } }
+.hud--error { width: 58px; height: 26px; border-color: rgba(255,118,93,.38); }
+@keyframes hud-handoff { 0%, 100% { height: 4px; opacity: .28; } 46% { height: 12px; opacity: 1; box-shadow: 0 0 7px rgba(216,255,114,.28); } }
 
 @media (max-width: 940px) {
   .shell { grid-template-columns: 190px minmax(0, 1fr); }

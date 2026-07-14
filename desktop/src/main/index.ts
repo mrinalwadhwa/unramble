@@ -285,7 +285,7 @@ function receiveNotification(method: RpcNotificationMethod, params: unknown): vo
     if (hudHideTimer) clearTimeout(hudHideTimer);
     hudHideTimer = setTimeout(
       () => useWindow(hudWindow, (window) => window.hide()),
-      method === 'injection.failed' ? 2_400 : 750
+      method === 'injection.failed' ? 2_400 : 90
     );
   }
   broadcastNotification(method, params);
@@ -310,7 +310,7 @@ function updateHud(state: RecordingState): void {
   const sequence = ++hudUpdateSequence;
   if (state === 'idle') {
     if (hudHideTimer) clearTimeout(hudHideTimer);
-    hudHideTimer = setTimeout(() => useWindow(hudWindow, (window) => window.hide()), 600);
+    hudHideTimer = setTimeout(() => useWindow(hudWindow, (window) => window.hide()), 90);
     return;
   }
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());

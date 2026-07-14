@@ -13,7 +13,9 @@ The complete native-Wayland path was exercised on Hyprland 0.55.2 with a
 kernel-level Ctrl+Win press/release, deterministic PCM delivered through a
 temporary PipeWire/PulseAudio microphone, the live OpenAI service, and an
 isolated native-Wayland Chromium textarea. The generated transcript appeared in
-the textarea automatically and remained on the clipboard for recovery.
+the textarea automatically. A separate deterministic native-Wayland injection
+test confirmed that FreeFlow restores the clipboard value that preceded the
+transcript after the target consumes the paste.
 
 The current user's persistent microphone is `Gaming Webcam [Kiyo] Analog
 Stereo`. It is stored by stable PulseAudio ID. FreeFlow pre-opens the stream at
@@ -25,7 +27,8 @@ The configured cloud path is OpenAI throughout: `gpt-realtime-whisper` handles
 speech, `gpt-4o-mini-transcribe` provides batch fallback, and `gpt-5.4-nano`
 optionally cleans text. The current build requests low transcription delay,
 uses no reasoning and low verbosity for `gpt-5.4` cleanup, and reduces fixed
-post-processing paste waits from 230 ms to 50 ms.
+pre-paste waits from 230 ms to 50 ms. Clipboard restoration runs 160 ms after a
+successful paste without delaying when the target receives the transcript.
 
 ## What Works End-to-End
 
@@ -47,14 +50,19 @@ post-processing paste waits from 230 ms to 50 ms.
 - The pipeline retains every successful transcript before polish or delivery.
   Failed polish uses deterministic cleanup; failed delivery keeps copy and
   retry actions available.
+- Automatic paste snapshots the prior clipboard, stages the transcript, and
+  restores bounded text, HTML, image, or file-list content after consumption.
+  Restoration happens only if the transcript is still current, so text copied
+  by the user during delivery is never overwritten.
 - X11 supports passive global grabs and XTest paste. Hyprland supports the XDG
   Global Shortcuts portal, modifier-only Ctrl+Win in either key order, target
   restoration, and compositor-assisted clipboard paste. Other Wayland
   compositors retain tray controls and explicit failure recovery.
-- The waveform-only HUD fits in a transparent 104×46 window and shows microphone
-  level or processing motion without accepting pointer input. It appears at the
-  top center, accounts for compositor-reserved panels before it maps, and leaves
-  the active workspace and focused application unchanged.
+- The waveform-only HUD fits in a transparent 104×46 window without accepting
+  pointer input. It shows microphone level while the shortcut is held, collapses
+  to a text-free 48×22 loading pill after release, and disappears 90 ms after
+  idle or successful delivery. It appears at the top center, accounts for
+  compositor-reserved panels, and leaves the focused application unchanged.
 - The user-local installer creates an AppImage installation, desktop entry,
   icon, `freeflow` command, and enabled XDG autostart entry without root access.
 
@@ -103,7 +111,7 @@ The live API test used the opt-in `FREEFLOW_TEST_OPENAI` and
 
 ## Tests Passing
 
-- 61 Rust tests pass across core, OpenAI, settings, Linux platform, and RPC
+- 64 Rust tests pass across core, OpenAI, settings, Linux platform, and RPC
   crates. One hardware/desktop interaction test remains ignored by default.
 - Clippy passes across every Rust workspace target with warnings denied.
 - Rust formatting passes for the complete workspace.
@@ -139,6 +147,9 @@ The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
   delivery race.
 - Verified direct clipboard paste in native-Wayland Chrome and terminal-aware
   shortcut selection in unit tests.
+- Ran the ignored native-Wayland injection test against an isolated Chromium
+  textarea. The fixed probe appeared in the field, the test observed the prior
+  clipboard again after delivery, and no clipboard contents were printed.
 - Selected the Razer Kiyo by stable PulseAudio ID, persisted it to the private
   settings file, and captured real RMS data. After startup warm-up, preview
   became ready in roughly 200 ms and a 400 ms preview retained 440 ms of audio.
@@ -159,10 +170,10 @@ The preserved Swift suite requires macOS and cannot run on this Arch Linux host.
 
 ## Packaging Output
 
-- `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 137,642,788 bytes,
-  SHA-256 `37983c2080c086688392efd1221513a57e4d910635575ca80c57952bbc316ed3`
-- `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 106,615,028 bytes,
-  SHA-256 `384e18063f91e622c76fec23e7dd5efe508c16a5295839c1c76b9f687d10daf6`
+- `desktop/dist/FreeFlow-Linux-0.2.0-x86_64.AppImage` — 137,877,030 bytes,
+  SHA-256 `9e24e2740d232a2484a9f5a577d53d006ad2ced40c7cdc7ebaa98ae1d79ac34b`
+- `desktop/dist/FreeFlow-Linux-0.2.0-amd64.deb` — 106,818,684 bytes,
+  SHA-256 `73923c2ed23fd872596c31ce83153693264a21c791d39d819cf2dc6512626a36`
 - `rust/target/release/freeflow-daemon`, bundled into both artifacts
 - `~/.local/share/freeflow/FreeFlow.AppImage`, installed for the current user
 - `~/.local/share/applications/com.freeflow.FreeFlow.Linux.desktop`
@@ -177,8 +188,10 @@ Build outputs remain ignored and are not committed.
 - Protected/password fields and applications that deliberately reject synthetic
   paste cannot be guaranteed. FreeFlow keeps the transcript in the clipboard
   and exposes retry/copy recovery for those cases.
-- Direct AT-SPI insertion and paste-consumption-aware clipboard restoration are
-  not implemented.
+- Direct AT-SPI insertion is not implemented. Clipboard restoration uses a
+  bounded 160 ms consumption window because Linux toolkits do not expose a
+  universal paste acknowledgement. Oversized or uncommon custom MIME payloads
+  leave the transcript available instead of risking an unsafe restoration.
 - X11 implementation tests pass, but the full VS Code, Firefox, terminal,
   GTK, and Qt manual matrix was not repeated in this session.
 - The deterministic GUI smoke path is manual; standard CI does not create a
@@ -195,6 +208,8 @@ owned by its process, expands Ctrl+Win into bindings that work regardless of
 which modifier is pressed first, receives separate activation/deactivation
 events, captures the original window before showing the HUD, and restores that
 window before paste. Clipboard readiness is confirmed before synthetic input.
+After successful paste, FreeFlow restores the previous bounded clipboard
+payload only if the staged transcript still owns the clipboard.
 
 On other compositors, portal registration is attempted first and `wtype` is used
 when the virtual-keyboard protocol is available. The tray and Flow button remain
@@ -211,6 +226,8 @@ usable when either capability is denied, and the UI reports the limitation.
 - Configuration directories use mode 0700 and settings files use mode 0600.
 - Logs and diagnostics exclude credentials, authorization headers, raw audio,
   full transcripts, clipboard contents, and focused application text.
+- Clipboard snapshots remain in bounded process memory only for the duration of
+  delivery. They never enter logs, diagnostics, settings, or files.
 - Audio, transcript, notification, retry, timeout, daemon restart, and RPC
   queues are bounded. Successful text is never discarded after delivery failure.
 - The application sends audio and optional polish requests directly to the
@@ -240,7 +257,7 @@ and CI are independent additions.
 ## Deferred Work
 
 - Validate portals and automatic paste on GNOME and KDE.
-- Add AT-SPI editable-field insertion and safe clipboard restoration.
+- Add AT-SPI editable-field insertion.
 - Automate the portal/uinput/virtual-microphone GUI smoke path without paid API
   calls.
 - Add signed packages, update delivery, Flatpak, RPM, and Arch packaging.
@@ -253,7 +270,7 @@ and CI are independent additions.
 2. Turn the manual virtual-microphone test into an offline CI smoke test backed
    by the deterministic OpenAI service.
 3. Validate and adapt the portal session on current GNOME and KDE releases.
-4. Add AT-SPI direct insertion, then restore the prior clipboard only after
-   confirmed consumption.
+4. Add AT-SPI direct insertion and application-specific paste acknowledgements
+   where toolkits expose them.
 5. Overlap safe polish work with partial transcripts, then add crash-restart and
    package-install smoke jobs for the AppImage and Debian artifacts.

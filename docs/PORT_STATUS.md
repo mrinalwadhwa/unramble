@@ -35,8 +35,9 @@ The native implementation establishes these concrete rules:
   symbols, reject aggressively truncated polish output, and fall back to the
   deterministic result when polish fails.
 - Prefer direct editable-field insertion where it is dependable. Prefer
-  clipboard paste for terminals, browsers, and Electron applications. Do not
-  restore the prior clipboard before the application has consumed the paste.
+  clipboard paste for terminals, browsers, and Electron applications. Snapshot
+  the previous clipboard before staging a transcript, then restore it after the
+  target has had time to consume the paste.
 - Read active-application context within a 200 ms total budget and limit an
   individual accessibility field read to 50 ms.
 
@@ -46,7 +47,7 @@ The native implementation establishes these concrete rules:
 | --- | --- | --- |
 | AVFoundation microphone capture | CPAL with PulseAudio and ALSA/PipeWire bridges | Implemented |
 | Carbon event hotkey | X11 passive grabs and the XDG Global Shortcuts portal | Implemented on X11 and verified on Hyprland |
-| Accessibility and paste injection | Clipboard, XTest, Hyprland dispatch, and `wtype` | Implemented with retained-clipboard recovery |
+| Accessibility and paste injection | Clipboard, XTest, Hyprland dispatch, and `wtype` | Implemented with prior-clipboard restoration and retained-transcript recovery |
 | NSWorkspace application context | X11 and Hyprland active-window metadata | Implemented for X11 and Hyprland targets |
 | Keychain credential storage | Secret Service | Implemented with session-only fallback |
 | SwiftUI menu bar and overlay | Electron tray, settings, and non-focusable HUD | Implemented |
@@ -62,15 +63,15 @@ The native implementation establishes these concrete rules:
 | Audio capture | Complete | CPAL enumerates and persists devices, pre-opens and pauses the selected stream, resumes that cached device before any new enumeration, requests low-latency buffers, publishes levels, and falls back when a device genuinely disappears. A real Kiyo preview starts in about 200 ms after warm-up. |
 | X11 shortcut | Partial | XGrabKey registers modifier chords and ordinary combinations, handles either Ctrl+Win key order and lock modifiers, distinguishes press/release, filters auto-repeat, and unregisters cleanly. A real X11/XWayland Ctrl+Win press and release drove live microphone capture successfully. Xvfb CI remains. |
 | Wayland shortcut | Partial | XDG portal registration and press/release work end to end on Hyprland 0.55 with the default modifier-only Ctrl+Win chord. GNOME, KDE, and other portal backends remain unverified. |
-| X11 injection | Partial | Clipboard plus XTest selects Ctrl+V or terminal-safe Ctrl+Shift+V and retains the transcript on fallback. The broad X11 target matrix remains. |
-| Wayland injection | Partial | Hyprland restores the captured target and dispatches paste; `wtype` covers virtual-keyboard-capable compositors. Paste and focus settling add 50 ms after processing instead of the previous 230 ms. A native-Wayland Chromium field passed the physical-shortcut cloud test. Other compositors remain unverified. |
+| X11 injection | Partial | Clipboard plus XTest selects Ctrl+V or terminal-safe Ctrl+Shift+V. Successful paste restores bounded text, HTML, image, or file-list clipboard content after 160 ms; failed paste retains the transcript. The broad X11 target matrix remains. |
+| Wayland injection | Partial | Hyprland restores the captured target and dispatches paste; `wtype` covers virtual-keyboard-capable compositors. Successful paste restores the previous clipboard only while the staged transcript remains current, so a newer user copy wins. A native-Wayland Chromium field passed both the physical-shortcut cloud test and the deterministic clipboard-restoration test. Other compositors remain unverified. |
 | AT-SPI injection | Deferred | Clipboard delivery has priority. |
 | Application context | Partial | Active window, PID, process, class, title, desktop, and terminal hints are collected over X11 and Hyprland. Toolkit editability remains deferred. |
 | Credential storage | Complete | Secret Service holds persistent keys; environment and explicit session-only keys remain in memory. Ordinary JSON settings contain no credential fields and use mode 0600. |
 | Local RPC | Complete | JSON-RPC WebSockets bind to an ephemeral loopback port, authenticate a random launch token, admit one shell, carry notifications, and pass auth/request/error tests. |
 | Rust daemon | Complete | The daemon supervises the pipeline, hotkey, previews, settings, diagnostics, signals, and authenticated RPC; its ready record is machine-readable. |
 | Electron tray | Complete | The tray exposes recording, cancellation, transcript recovery, microphone status, settings, diagnostics, and quit actions. It supervises the daemon with bounded restarts. |
-| HUD | Complete | The compact 100×42 waveform-only HUD uses a transparent 104×46 window, ignores pointer input, and displays live audio and processing motion without text. It resolves Hyprland's reserved top-panel inset before mapping and was verified at top-center coordinates `[908, 56]` without changing the active workspace or focused application. |
+| HUD | Complete | The compact 100×42 waveform-only HUD uses a transparent 104×46 window and ignores pointer input. Releasing the shortcut collapses the visual into a text-free 48×22 processing pill while the API, polish, and paste complete; idle and successful delivery hide it after 90 ms. It resolves Hyprland's reserved top-panel inset before mapping and was verified at top-center coordinates `[908, 56]` without changing the active workspace or focused application. |
 | Settings and onboarding | Complete | The renderer configures credentials, microphone preview, language, models, shortcut, polish, context sharing, and XDG start-on-login through typed RPC. Fresh installs enable hidden tray startup and Ctrl+Win by default. |
 | Diagnostics | Complete | The UI displays environment and backend status; private JSON exports contain only a fixed sanitized diagnostics model. |
 | Transcript polish | Complete | The deterministic cleanup, clean-input bypass, restrained prompt, safe-output check, and API failure fallback have coverage. OpenAI `gpt-5.4` models use no reasoning and low verbosity; other OpenAI-compatible models retain the portable request shape. |
@@ -99,7 +100,9 @@ The native implementation establishes these concrete rules:
 
 ## Unclear Behavior
 
-- Clipboard restoration stays disabled until paste consumption can be detected
-  without risking transcript loss.
+- Linux toolkits do not provide a universal paste-consumption acknowledgement.
+  FreeFlow uses a 160 ms consumption window and restores only if the staged
+  transcript still owns the clipboard. Applications that defer clipboard reads
+  beyond that window may need a longer application-specific delay.
 - X11 does not expose toolkit-neutral editable-field contents, so smart spacing
   requires AT-SPI and is deferred from the first clipboard implementation.

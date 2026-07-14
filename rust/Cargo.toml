@@ -20,7 +20,7 @@ rust-version = "1.88"
 [workspace.dependencies]
 async-trait = "0.1.89"
 axum = { version = "0.8.9", features = ["multipart", "ws"] }
-arboard = { version = "3.6.1", default-features = false, features = ["wayland-data-control"] }
+arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
 ashpd = { version = "0.13.12", default-features = false, features = ["global_shortcuts", "tokio"] }
 base64 = "0.22.1"
 cpal = { version = "0.18.1", features = ["pulseaudio"] }

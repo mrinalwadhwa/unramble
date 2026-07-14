@@ -40,14 +40,30 @@ export function Hud(): React.JSX.Element {
       }),
     [level]
   );
+  const processing = ['preparing', 'finalizing', 'transcribing', 'polishing', 'injecting'].includes(
+    state
+  );
+  const failed = state === 'failed' || state === 'injectionFailed';
 
   return (
-    <div className={`hud hud--${state}`} role="status" aria-label={stateLabel[state]}>
-      <div className="hud__signal" aria-hidden="true">
-        {bars.map((height, index) => (
-          <i key={index} style={{ '--bar': height } as React.CSSProperties} />
-        ))}
-      </div>
+    <div
+      className={`hud hud--${state}${processing ? ' hud--processing' : ''}${failed ? ' hud--error' : ''}`}
+      role="status"
+      aria-label={stateLabel[state]}
+    >
+      {processing ? (
+        <div className="hud__loader" aria-hidden="true">
+          {Array.from({ length: 5 }, (_, index) => (
+            <i key={index} style={{ '--step': index } as React.CSSProperties} />
+          ))}
+        </div>
+      ) : (
+        <div className="hud__signal" aria-hidden="true">
+          {bars.map((height, index) => (
+            <i key={index} style={{ '--bar': height } as React.CSSProperties} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

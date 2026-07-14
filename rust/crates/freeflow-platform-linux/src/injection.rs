@@ -1,10 +1,14 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
-use arboard::Clipboard;
+use arboard::{Clipboard, ImageData};
 use async_trait::async_trait;
 use freeflow_core::{
     AppContext, FreeFlowError, InjectionResult, Result, SessionType, TextInjector,
 };
+use tracing::warn;
 use x11rb::{
     connection::Connection,
     protocol::{
@@ -17,7 +21,129 @@ use crate::{detect_session_type, x11};
 
 const PASTE_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
 const FOCUS_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(25);
+const CLIPBOARD_RESTORE_DELAY: std::time::Duration = std::time::Duration::from_millis(160);
 const CLIPBOARD_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(800);
+const MAX_CLIPBOARD_TEXT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CLIPBOARD_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_CLIPBOARD_FILES: usize = 1_024;
+
+#[derive(Debug, Clone)]
+enum ClipboardSnapshot {
+    Files(Vec<PathBuf>),
+    Image(ImageData<'static>),
+    Html {
+        html: String,
+        alt_text: Option<String>,
+    },
+    Text(String),
+}
+
+trait ClipboardBackend {
+    fn get_text(&mut self) -> std::result::Result<String, arboard::Error>;
+    fn get_html(&mut self) -> std::result::Result<String, arboard::Error>;
+    fn get_file_list(&mut self) -> std::result::Result<Vec<PathBuf>, arboard::Error>;
+    fn get_image(&mut self) -> std::result::Result<ImageData<'static>, arboard::Error>;
+    fn set_text(&mut self, text: String) -> std::result::Result<(), arboard::Error>;
+    fn set_html(
+        &mut self,
+        html: String,
+        alt_text: Option<String>,
+    ) -> std::result::Result<(), arboard::Error>;
+    fn set_file_list(&mut self, files: &[PathBuf]) -> std::result::Result<(), arboard::Error>;
+    fn set_image(&mut self, image: ImageData<'static>) -> std::result::Result<(), arboard::Error>;
+}
+
+impl ClipboardBackend for Clipboard {
+    fn get_text(&mut self) -> std::result::Result<String, arboard::Error> {
+        Clipboard::get_text(self)
+    }
+
+    fn get_html(&mut self) -> std::result::Result<String, arboard::Error> {
+        self.get().html()
+    }
+
+    fn get_file_list(&mut self) -> std::result::Result<Vec<PathBuf>, arboard::Error> {
+        self.get().file_list()
+    }
+
+    fn get_image(&mut self) -> std::result::Result<ImageData<'static>, arboard::Error> {
+        Clipboard::get_image(self)
+    }
+
+    fn set_text(&mut self, text: String) -> std::result::Result<(), arboard::Error> {
+        Clipboard::set_text(self, text)
+    }
+
+    fn set_html(
+        &mut self,
+        html: String,
+        alt_text: Option<String>,
+    ) -> std::result::Result<(), arboard::Error> {
+        Clipboard::set_html(self, html, alt_text)
+    }
+
+    fn set_file_list(&mut self, files: &[PathBuf]) -> std::result::Result<(), arboard::Error> {
+        self.set().file_list(files)
+    }
+
+    fn set_image(&mut self, image: ImageData<'static>) -> std::result::Result<(), arboard::Error> {
+        Clipboard::set_image(self, image)
+    }
+}
+
+impl ClipboardSnapshot {
+    fn capture(clipboard: &mut impl ClipboardBackend) -> Option<Self> {
+        if let Ok(files) = clipboard.get_file_list()
+            && !files.is_empty()
+            && files.len() <= MAX_CLIPBOARD_FILES
+        {
+            return Some(Self::Files(files));
+        }
+        if let Ok(image) = clipboard.get_image()
+            && image.bytes.len() <= MAX_CLIPBOARD_IMAGE_BYTES
+        {
+            return Some(Self::Image(image));
+        }
+        if let Ok(html) = clipboard.get_html()
+            && html.len() <= MAX_CLIPBOARD_TEXT_BYTES
+        {
+            let alt_text = clipboard
+                .get_text()
+                .ok()
+                .filter(|text| text.len() <= MAX_CLIPBOARD_TEXT_BYTES);
+            return Some(Self::Html { html, alt_text });
+        }
+        clipboard
+            .get_text()
+            .ok()
+            .filter(|text| text.len() <= MAX_CLIPBOARD_TEXT_BYTES)
+            .map(Self::Text)
+    }
+
+    fn restore(
+        self,
+        clipboard: &mut impl ClipboardBackend,
+    ) -> std::result::Result<(), arboard::Error> {
+        match self {
+            Self::Files(files) => clipboard.set_file_list(&files),
+            Self::Image(image) => clipboard.set_image(image),
+            Self::Html { html, alt_text } => clipboard.set_html(html, alt_text),
+            Self::Text(text) => clipboard.set_text(text),
+        }
+    }
+}
+
+fn restore_if_unchanged(
+    clipboard: &mut impl ClipboardBackend,
+    transcript: &str,
+    snapshot: ClipboardSnapshot,
+) -> std::result::Result<bool, arboard::Error> {
+    if clipboard.get_text().ok().as_deref() != Some(transcript) {
+        return Ok(false);
+    }
+    snapshot.restore(clipboard)?;
+    Ok(true)
+}
 
 #[derive(Clone)]
 pub struct LinuxTextInjector {
@@ -50,6 +176,53 @@ impl LinuxTextInjector {
                 .as_mut()
                 .expect("clipboard was initialized")
                 .set_text(text)
+                .map_err(|error| FreeFlowError::Clipboard(error.to_string()))
+        })
+        .await
+        .map_err(|error| FreeFlowError::Internal(error.to_string()))?
+    }
+
+    async fn stage_clipboard(&self, text: &str) -> Result<Option<ClipboardSnapshot>> {
+        let clipboard = self.clipboard.clone();
+        let text = text.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let mut clipboard = clipboard
+                .lock()
+                .map_err(|_| FreeFlowError::Clipboard("clipboard lock was poisoned".into()))?;
+            if clipboard.is_none() {
+                *clipboard = Some(Clipboard::new().map_err(|error| {
+                    FreeFlowError::Clipboard(format!(
+                        "could not connect to the desktop clipboard: {error}"
+                    ))
+                })?);
+            }
+            let clipboard = clipboard.as_mut().expect("clipboard was initialized");
+            let snapshot = ClipboardSnapshot::capture(clipboard);
+            clipboard
+                .set_text(text)
+                .map_err(|error| FreeFlowError::Clipboard(error.to_string()))?;
+            Ok(snapshot)
+        })
+        .await
+        .map_err(|error| FreeFlowError::Internal(error.to_string()))?
+    }
+
+    async fn restore_clipboard(
+        &self,
+        transcript: &str,
+        snapshot: ClipboardSnapshot,
+    ) -> Result<bool> {
+        tokio::time::sleep(CLIPBOARD_RESTORE_DELAY).await;
+        let clipboard = self.clipboard.clone();
+        let transcript = transcript.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let mut clipboard = clipboard
+                .lock()
+                .map_err(|_| FreeFlowError::Clipboard("clipboard lock was poisoned".into()))?;
+            let clipboard = clipboard.as_mut().ok_or_else(|| {
+                FreeFlowError::Clipboard("clipboard connection was unavailable".into())
+            })?;
+            restore_if_unchanged(clipboard, &transcript, snapshot)
                 .map_err(|error| FreeFlowError::Clipboard(error.to_string()))
         })
         .await
@@ -192,7 +365,7 @@ impl Default for LinuxTextInjector {
 #[async_trait]
 impl TextInjector for LinuxTextInjector {
     async fn inject(&self, text: &str, context: &AppContext) -> Result<InjectionResult> {
-        self.set_clipboard(text).await?;
+        let previous_clipboard = self.stage_clipboard(text).await?;
         let session = detect_session_type();
         if session == SessionType::Wayland {
             Self::wait_for_wayland_clipboard(text).await;
@@ -212,19 +385,35 @@ impl TextInjector for LinuxTextInjector {
             )),
         };
         match paste {
-            Ok(()) => Ok(InjectionResult {
-                strategy: match (session, terminal) {
-                    (SessionType::X11, true) => "x11ClipboardCtrlShiftV".into(),
-                    (SessionType::X11, false) => "x11ClipboardCtrlV".into(),
-                    (SessionType::Wayland, true) => "waylandClipboardCtrlShiftV".into(),
-                    (SessionType::Wayland, false) => "waylandClipboardCtrlV".into(),
-                    (SessionType::Unknown, _) => unreachable!("unknown sessions cannot paste"),
-                },
-                pasted: true,
-                clipboard_retained: true,
-                requires_manual_paste: false,
-                message: None,
-            }),
+            Ok(()) => {
+                let clipboard_retained = if let Some(snapshot) = previous_clipboard {
+                    match self.restore_clipboard(text, snapshot).await {
+                        Ok(_) => false,
+                        Err(error) => {
+                            warn!(
+                                category = error.category(),
+                                "could not restore the previous clipboard after paste"
+                            );
+                            true
+                        }
+                    }
+                } else {
+                    true
+                };
+                Ok(InjectionResult {
+                    strategy: match (session, terminal) {
+                        (SessionType::X11, true) => "x11ClipboardCtrlShiftV".into(),
+                        (SessionType::X11, false) => "x11ClipboardCtrlV".into(),
+                        (SessionType::Wayland, true) => "waylandClipboardCtrlShiftV".into(),
+                        (SessionType::Wayland, false) => "waylandClipboardCtrlV".into(),
+                        (SessionType::Unknown, _) => unreachable!("unknown sessions cannot paste"),
+                    },
+                    pasted: true,
+                    clipboard_retained,
+                    requires_manual_paste: false,
+                    message: None,
+                })
+            }
             Err(error) => Err(FreeFlowError::Injection(format!(
                 "automatic paste failed: {error}. The transcript remains in the clipboard"
             ))),
@@ -264,6 +453,106 @@ fn injection_error(error: impl std::fmt::Display) -> FreeFlowError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct FakeClipboard {
+        text: Option<String>,
+        html: Option<String>,
+        files: Option<Vec<PathBuf>>,
+    }
+
+    impl ClipboardBackend for FakeClipboard {
+        fn get_text(&mut self) -> std::result::Result<String, arboard::Error> {
+            self.text.clone().ok_or(arboard::Error::ContentNotAvailable)
+        }
+
+        fn get_html(&mut self) -> std::result::Result<String, arboard::Error> {
+            self.html.clone().ok_or(arboard::Error::ContentNotAvailable)
+        }
+
+        fn get_file_list(&mut self) -> std::result::Result<Vec<PathBuf>, arboard::Error> {
+            self.files
+                .clone()
+                .ok_or(arboard::Error::ContentNotAvailable)
+        }
+
+        fn get_image(&mut self) -> std::result::Result<ImageData<'static>, arboard::Error> {
+            Err(arboard::Error::ContentNotAvailable)
+        }
+
+        fn set_text(&mut self, text: String) -> std::result::Result<(), arboard::Error> {
+            self.text = Some(text);
+            self.html = None;
+            self.files = None;
+            Ok(())
+        }
+
+        fn set_html(
+            &mut self,
+            html: String,
+            alt_text: Option<String>,
+        ) -> std::result::Result<(), arboard::Error> {
+            self.html = Some(html);
+            self.text = alt_text;
+            self.files = None;
+            Ok(())
+        }
+
+        fn set_file_list(&mut self, files: &[PathBuf]) -> std::result::Result<(), arboard::Error> {
+            self.files = Some(files.to_vec());
+            self.text = None;
+            self.html = None;
+            Ok(())
+        }
+
+        fn set_image(
+            &mut self,
+            _image: ImageData<'static>,
+        ) -> std::result::Result<(), arboard::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn restores_the_previous_text_after_the_transcript_is_consumed() {
+        let mut clipboard = FakeClipboard {
+            text: Some("previous clipboard".into()),
+            ..FakeClipboard::default()
+        };
+        let snapshot = ClipboardSnapshot::capture(&mut clipboard).unwrap();
+        clipboard.set_text("dictated text".into()).unwrap();
+
+        assert!(restore_if_unchanged(&mut clipboard, "dictated text", snapshot).unwrap());
+        assert_eq!(clipboard.text.as_deref(), Some("previous clipboard"));
+    }
+
+    #[test]
+    fn does_not_overwrite_a_newer_user_clipboard_value() {
+        let mut clipboard = FakeClipboard {
+            text: Some("previous clipboard".into()),
+            ..FakeClipboard::default()
+        };
+        let snapshot = ClipboardSnapshot::capture(&mut clipboard).unwrap();
+        clipboard.set_text("new user copy".into()).unwrap();
+
+        assert!(!restore_if_unchanged(&mut clipboard, "dictated text", snapshot).unwrap());
+        assert_eq!(clipboard.text.as_deref(), Some("new user copy"));
+    }
+
+    #[test]
+    fn preserves_rich_html_with_its_plain_text_fallback() {
+        let mut clipboard = FakeClipboard {
+            text: Some("formatted text".into()),
+            html: Some("<b>formatted</b> text".into()),
+            ..FakeClipboard::default()
+        };
+        let snapshot = ClipboardSnapshot::capture(&mut clipboard).unwrap();
+        clipboard.set_text("dictated text".into()).unwrap();
+
+        assert!(restore_if_unchanged(&mut clipboard, "dictated text", snapshot).unwrap());
+        assert_eq!(clipboard.html.as_deref(), Some("<b>formatted</b> text"));
+        assert_eq!(clipboard.text.as_deref(), Some("formatted text"));
+    }
 
     #[test]
     fn wayland_paste_uses_ctrl_v_for_regular_fields() {
