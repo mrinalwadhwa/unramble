@@ -112,6 +112,14 @@ private func loadScenarios(from filename: String) -> [PolishScenario] {
 /// return training scenarios. Otherwise return test scenarios. Applies
 /// the same category and casual filters.
 func evalScenarios() -> [PolishScenario] {
+    // Load an arbitrary eval set (ScenarioEntry JSON) when pointed at a file.
+    if let path = flagFileOrEnv(
+        "FREEFLOW_EVAL_FILE", flagPath: "/tmp/freeflow-eval-file"),
+        let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+        let entries = try? JSONDecoder().decode([ScenarioEntry].self, from: data)
+    {
+        return entries.map(scenarioFromEntry)
+    }
     if ProcessInfo.processInfo.environment["FREEFLOW_TEST_P1"] == "1"
         || FileManager.default.fileExists(atPath: "/tmp/freeflow-test-p1") {
         return allP1Scenarios
