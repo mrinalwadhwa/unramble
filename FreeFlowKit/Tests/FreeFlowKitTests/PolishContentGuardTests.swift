@@ -127,6 +127,36 @@ struct PolishContentGuardTests {
         #expect(!out.lowercased().contains("pizza"))
         #expect(out.lowercased().contains("cache"))
     }
+
+    // The content guard must catch a genuine clause drop even when the missing
+    // words individually reappear elsewhere or the surrounding words are
+    // reordered — the two blind spots a set-membership check leaves open.
+
+    @Test("a reordered clause drop falls back even when a word reappears")
+    func reorderedClauseDropFallsBack() {
+        // The polish dropped "we were worried about" and moved "both" to the
+        // front. A set check counts "both" as present, so the missing run stays
+        // at three and slips; an ordered comparison sees the real gap.
+        let raw = "the two big customers we were worried about both renewed"
+        let polished = "Both of our big customers renewed."
+        #expect(PolishPipeline.guardAgainstContentLoss(
+            polished: polished, preprocessed: raw) == raw)
+    }
+
+    @Test("a dropped clause whose words echo later still falls back")
+    func droppedClauseWithEchoedWordsFallsBack() {
+        // "and the latency is way better than before" is dropped, but "better"
+        // reappears in "honestly better than expected," so a set check keeps
+        // the missing run short. Ordered comparison catches the loss.
+        let raw = "the database is running on the new cluster now and the "
+            + "latency is way better than before we are seeing the response "
+            + "drop by half which is honestly better than expected"
+        let polished = "The database is running on the new cluster now. We are "
+            + "seeing the response drop by half, which is honestly better than "
+            + "expected."
+        #expect(PolishPipeline.guardAgainstContentLoss(
+            polished: polished, preprocessed: raw) == raw)
+    }
 }
 
 /// Echoes the input but deletes a middle clause, simulating a model that

@@ -1617,12 +1617,15 @@ public enum PolishPipeline {
 
     /// Detect when polish dropped a contiguous run of spoken content.
     ///
-    /// Compare ordered content words (letters only, 3+ characters, lowercased,
-    /// excluding spelled-out numbers) in the input against a set of the same in
-    /// the output. A long run of input words absent from the output means a
-    /// clause or sentence was summarized away, so fall back to the raw input.
-    /// Scattered gaps from filler removal, number normalization, or dedup stay
-    /// short and pass.
+    /// Align the input's ordered content words (letters only, 3+ characters,
+    /// lowercased, excluding spelled-out numbers) against the output's via a
+    /// longest common subsequence. The input words outside that subsequence are
+    /// the dropped or reordered ones; a long contiguous run of them means a
+    /// clause was summarized away, so fall back to the raw input. Matching a
+    /// subsequence rather than set membership catches a drop even when the
+    /// missing words reappear out of order elsewhere in the output. Scattered
+    /// gaps from filler removal, number normalization, or dedup stay short and
+    /// pass.
     ///
     /// Returns the preprocessed text as fallback, or nil if no dropped run.
     static func guardAgainstContentLoss(
@@ -1630,11 +1633,11 @@ public enum PolishPipeline {
         maxConsecutiveMissing: Int = 3
     ) -> String? {
         let inputWords = contentWords(preprocessed)
-        let outputWords = Set(contentWords(polished))
+        let matched = orderedMatchMask(inputWords, contentWords(polished))
         var longestMissingRun = 0
         var currentRun = 0
-        for word in inputWords {
-            if outputWords.contains(word) {
+        for isMatched in matched {
+            if isMatched {
                 currentRun = 0
             } else {
                 currentRun += 1
@@ -1677,6 +1680,43 @@ public enum PolishPipeline {
             return preprocessed
         }
         return nil
+    }
+
+    /// Mark which of `a`'s elements participate in a longest common subsequence
+    /// with `b`. A dropped or reordered clause then shows up as a contiguous run
+    /// of unmarked words, even when individual words reappear elsewhere in `b`.
+    private static func orderedMatchMask(
+        _ a: [String], _ b: [String]
+    ) -> [Bool] {
+        let n = a.count
+        let m = b.count
+        if n == 0 { return [] }
+        if m == 0 { return Array(repeating: false, count: n) }
+        // dp[i][j] = LCS length of a[i...] and b[j...].
+        var dp = Array(
+            repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            for j in stride(from: m - 1, through: 0, by: -1) {
+                dp[i][j] = a[i] == b[j]
+                    ? dp[i + 1][j + 1] + 1
+                    : max(dp[i + 1][j], dp[i][j + 1])
+            }
+        }
+        var mask = Array(repeating: false, count: n)
+        var i = 0
+        var j = 0
+        while i < n && j < m {
+            if a[i] == b[j] {
+                mask[i] = true
+                i += 1
+                j += 1
+            } else if dp[i + 1][j] >= dp[i][j + 1] {
+                i += 1
+            } else {
+                j += 1
+            }
+        }
+        return mask
     }
 
     /// Spelled-out numbers are excluded from content-word coverage because
