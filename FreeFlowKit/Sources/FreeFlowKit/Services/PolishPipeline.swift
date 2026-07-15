@@ -1127,6 +1127,8 @@ public enum PolishPipeline {
                         polished: cleaned, preprocessed: stripped) != nil)
                     || (stripModelBreaks && guardAgainstFabrication(
                         polished: cleaned, preprocessed: stripped) != nil)
+                    || (stripModelBreaks && guardAgainstNumberChange(
+                        polished: cleaned, preprocessed: stripped) != nil)
                 if !guardFires {
                     if attempt > 0 {
                         Log.debug("[POLISH_RESAMPLE_OK] attempt=\(attempt)")
@@ -1682,6 +1684,146 @@ public enum PolishPipeline {
         return nil
     }
 
+    /// Detect when polish substituted or duplicated a dictated number — the
+    /// costliest faithfulness failure, and one the content-word guards ignore
+    /// because they exclude numbers. Compares the multiset of numeric values in
+    /// the input and output, counting a spelled cardinal ("twelve") and its
+    /// digits ("12") as the same value, and fires only on the unambiguous
+    /// signature of a substitution: a value present in the input is dropped
+    /// while another is invented or duplicated in the output. Abstains on
+    /// time/year/sequence forms a simple parser cannot verify.
+    ///
+    /// Returns the preprocessed text as fallback, or nil if numbers are faithful.
+    static func guardAgainstNumberChange(
+        polished: String, preprocessed: String
+    ) -> String? {
+        let input = numericValues(preprocessed)
+        let output = numericValues(polished)
+        // Abstain when either side holds a time, year, or sequence form a simple
+        // additive parser cannot verify, rather than risk a false alarm on a
+        // number that already renders correctly.
+        guard !input.ambiguous, !output.ambiguous else { return nil }
+        let dropped = multisetDifference(input.values, output.values)
+        let invented = multisetDifference(output.values, input.values)
+        // A faithful rewrite keeps the same values; a substitution both drops a
+        // dictated value and invents or duplicates another.
+        if !dropped.isEmpty, !invented.isEmpty {
+            Log.debug(
+                "[NUMBER_GUARD] dropped=\(dropped.sorted()) "
+                + "invented=\(invented.sorted()) — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+        return nil
+    }
+
+    /// Extract the multiset of numeric values a text mentions, mapping a spelled
+    /// cardinal or ordinal to its value and a digit run to its integer, so
+    /// "twelve" and "12" compare equal. `ambiguous` is true when a spelled run
+    /// reads as a time, year, or sequence — ascending number words like "three
+    /// thirty" or "nineteen eighty four" — that additive parsing cannot verify.
+    private static func numericValues(_ text: String)
+        -> (values: [Int], ambiguous: Bool)
+    {
+        // Join digits split by a thousands separator ("1,200" -> "1200").
+        let joined = text.replacingOccurrences(
+            of: #"(?<=\d),(?=\d)"#, with: "", options: .regularExpression)
+        let tokens = joined.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+        var values: [Int] = []
+        var ambiguous = false
+        var i = 0
+        while i < tokens.count {
+            let token = tokens[i]
+            if let first = token.first, first.isNumber {
+                // Digit-led token: take the leading integer ("15th" -> 15).
+                if let value = Int(token.prefix { $0.isNumber }) {
+                    values.append(value)
+                }
+                i += 1
+            } else if isNumberWord(token) {
+                var run: [String] = []
+                while i < tokens.count {
+                    let word = tokens[i]
+                    if isNumberWord(word) {
+                        run.append(word)
+                        i += 1
+                    } else if word == "and", !run.isEmpty,
+                        i + 1 < tokens.count, isNumberWord(tokens[i + 1])
+                    {
+                        i += 1  // "two hundred and fifty" keeps "and" in the run
+                    } else {
+                        break
+                    }
+                }
+                let parsed = parseNumberRun(run)
+                if parsed.ambiguous {
+                    ambiguous = true
+                } else {
+                    values.append(parsed.value)
+                }
+            } else {
+                i += 1
+            }
+        }
+        return (values, ambiguous)
+    }
+
+    private static func isNumberWord(_ word: String) -> Bool {
+        numberWordValues[word] != nil || numberScaleValues[word] != nil
+            || ordinalWordValues[word] != nil
+    }
+
+    /// Compose a run of spelled number words into a value the standard way —
+    /// tens plus units, scaled by hundred/thousand. Flags the run ambiguous when
+    /// its terminal words ascend in magnitude, the mark of a spoken time or year
+    /// ("three thirty", "nineteen eighty four") rather than a plain cardinal.
+    private static func parseNumberRun(_ run: [String])
+        -> (value: Int, ambiguous: Bool)
+    {
+        var total = 0
+        var current = 0
+        var previousTerminal: Int?
+        var ascending = false
+        for word in run {
+            if let scale = numberScaleValues[word] {
+                if scale >= 1000 {
+                    total += (current == 0 ? 1 : current) * scale
+                    current = 0
+                } else {
+                    current = (current == 0 ? 1 : current) * scale
+                }
+                previousTerminal = nil
+            } else if let value = numberWordValues[word]
+                ?? ordinalWordValues[word]
+            {
+                if let previous = previousTerminal, value >= previous {
+                    ascending = true
+                }
+                previousTerminal = value
+                current += value
+            }
+        }
+        return (total + current, ascending && run.count > 1)
+    }
+
+    /// Elements of `a` beyond what `b` supplies, counting multiplicity.
+    private static func multisetDifference(_ a: [Int], _ b: [Int]) -> [Int] {
+        var counts: [Int: Int] = [:]
+        for value in b { counts[value, default: 0] += 1 }
+        var result: [Int] = []
+        for value in a {
+            if let remaining = counts[value], remaining > 0 {
+                counts[value] = remaining - 1
+            } else {
+                result.append(value)
+            }
+        }
+        return result
+    }
+
     /// Mark which of `a`'s elements participate in a longest common subsequence
     /// with `b`. A dropped or reordered clause then shows up as a contiguous run
     /// of unmarked words, even when individual words reappear elsewhere in `b`.
@@ -1727,6 +1869,32 @@ public enum PolishPipeline {
         "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
         "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred",
         "thousand", "million", "billion",
+    ]
+
+    /// Spelled cardinals mapped to their value for the number-faithfulness
+    /// guard (distinct from `numberWords`, which only needs the word set).
+    private static let numberWordValues: [String: Int] = [
+        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+        "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+        "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+        "seventy": 70, "eighty": 80, "ninety": 90,
+    ]
+
+    private static let numberScaleValues: [String: Int] = [
+        "hundred": 100, "thousand": 1000, "million": 1_000_000,
+        "billion": 1_000_000_000,
+    ]
+
+    private static let ordinalWordValues: [String: Int] = [
+        "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+        "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+        "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14,
+        "fifteenth": 15, "sixteenth": 16, "seventeenth": 17, "eighteenth": 18,
+        "nineteenth": 19, "twentieth": 20, "thirtieth": 30, "fortieth": 40,
+        "fiftieth": 50, "sixtieth": 60, "seventieth": 70, "eightieth": 80,
+        "ninetieth": 90,
     ]
 
     /// Extract lowercased letter-only words of 3+ characters, excluding
