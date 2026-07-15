@@ -170,6 +170,35 @@ struct LocalUnitStreamingTests {
 
         #expect(result.lowercased().contains("the plan is ready"))
     }
+
+    @Test("a break command split across a unit boundary still converts")
+    func breakCommandSplitAcrossBoundaryConverts() async throws {
+        // The unit closes just after "new" is recognized but before "line";
+        // the model drops the orphaned "new," so unless the boundary holds it
+        // back, "new line" ships as a literal "line" with no break.
+        let recognizer = ScriptRecognizer([
+            "finalize the pricing page new",
+            "finalize the pricing page new",
+            "finalize the pricing page new",
+            "finalize the pricing page new line set up the dashboards",
+            "finalize the pricing page new line set up the dashboards",
+        ])
+        let provider = LocalStreamingProvider(
+            sttEngine: recognizer,
+            polishChatClient: DropTrailingNewClient(),
+            unitPolicy: LocalUnitPolicy(
+                minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
+                hardPauseSilenceBytes: 100_000, maximumUnitBytes: 1_000_000),
+            silenceThreshold: 0.01)
+        // Speech, a pause right after "new" (closes unit 1), then the rest.
+        let audio = speech(200) + silence(100) + speech(200)
+        let result = try await provider.replay(audio: audio, stepBytes: 100)
+
+        #expect(result.contains("\n"),
+            "the break command produced no line break: \(result.debugDescription)")
+        #expect(!result.lowercased().contains("line"),
+            "the command word leaked as literal text: \(result.debugDescription)")
+    }
 }
 
 /// A recognizer whose session returns a scripted transcript indexed by the
@@ -220,6 +249,19 @@ private final class SentenceFinalizingClient: PolishChatClient, @unchecked Senda
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let first = trimmed.first else { return trimmed }
         return first.uppercased() + String(trimmed.dropFirst()) + "."
+    }
+}
+
+/// Drops a trailing bare "new" the way the real model discards a dangling
+/// incomplete word at a unit boundary — the behavior that split a "new line"
+/// command across two units in real dictation.
+private final class DropTrailingNewClient: PolishChatClient, @unchecked Sendable {
+    func complete(
+        model: String, systemPrompt: String, userPrompt: String
+    ) async throws -> String {
+        userPrompt.replacingOccurrences(
+            of: #"\s*\bnew\s*$"#, with: "",
+            options: [.regularExpression, .caseInsensitive])
     }
 }
 

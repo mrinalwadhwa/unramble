@@ -580,12 +580,31 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
             !unitText.isEmpty
         else { return }
 
+        // Never split a break command across a unit boundary: if a soft-closed
+        // unit ends with a bare "new" (the start of "new paragraph"/"new line"),
+        // hold it back so the next unit sees the whole command and substitution
+        // can convert it. This only moves where the boundary falls; it never
+        // adds a conversion, so it introduces no command false positives. A hard
+        // pause resets recognition, so a real pause mid-command is not treated
+        // as one.
+        var unit = unitText
+        var heldStarter = ""
+        if boundary != .hardPause {
+            let starter = Self.trailingBreakCommandStarter(unitText)
+            let remainder = String(unitText.dropLast(starter.count))
+                .trimmingCharacters(in: .whitespaces)
+            if !starter.isEmpty, !remainder.isEmpty {
+                unit = remainder
+                heldStarter = starter
+            }
+        }
+
         // Prepend the held sentence so a sentence split across this boundary is
         // re-polished whole; the model, seeing the full clause, decides where
         // the real sentence break is.
         let combined = heldCarry.isEmpty
-            ? unitText
-            : Self.stripTerminator(heldCarry) + " " + unitText
+            ? unit
+            : Self.stripTerminator(heldCarry) + " " + unit
 
         let polishStart = CFAbsoluteTimeGetCurrent()
         let polished = await polishWithPreceding(
@@ -622,7 +641,13 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
                 unitStartByte = 0
                 committedTranscript = ""
             } else {
-                committedTranscript = trimmed
+                // Hold a straddling break-command starter out of the committed
+                // baseline so the next unit re-emits it whole.
+                committedTranscript = heldStarter.isEmpty
+                    ? trimmed
+                    : trimmed.replacingOccurrences(
+                        of: #"\s*\bnew\s*$"#, with: "",
+                        options: [.regularExpression, .caseInsensitive])
                 unitStartByte = fedBytes
             }
             trailingSilenceBytes = 0
@@ -673,6 +698,20 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         guard let last = matches.last else { return ("", text) }
         let split = last.range.location + last.range.length
         return (ns.substring(to: split), ns.substring(from: split))
+    }
+
+    private static let trailingNewPattern = try! NSRegularExpression(
+        pattern: #"\bnew\s*$"#, options: .caseInsensitive)
+
+    /// The trailing bare "new" that begins a "new paragraph"/"new line" command,
+    /// or "" when the text does not end with one. Held back at a unit boundary
+    /// so a break command is not split across two units.
+    private static func trailingBreakCommandStarter(_ text: String) -> String {
+        let ns = text as NSString
+        guard let match = trailingNewPattern.firstMatch(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        else { return "" }
+        return ns.substring(with: match.range)
     }
 
     /// Remove trailing sentence punctuation so a held sentence continues into
