@@ -27,13 +27,22 @@ public enum PolishPipeline {
         let pattern: NSRegularExpression
         let replacement: String
         let protect: Bool
+        /// Skip the replacement when the command word is preceded by an article
+        /// or determiner ("a new paragraph", "the comma") — it is being talked
+        /// about, not commanded. Set for command words that are also ordinary
+        /// English words; real commands are never article-preceded.
+        let guarded: Bool
 
-        init(_ pattern: String, _ replacement: String, protect: Bool = false) {
+        init(
+            _ pattern: String, _ replacement: String,
+            protect: Bool = false, guarded: Bool = false
+        ) {
             // swiftlint:disable:next force_try
             self.pattern = try! NSRegularExpression(
                 pattern: pattern, options: .caseInsensitive)
             self.replacement = replacement
             self.protect = protect
+            self.guarded = guarded
         }
     }
 
@@ -41,19 +50,19 @@ public enum PolishPipeline {
     // partial matches.
     private static let punctuationRules: [PunctuationRule] = [
         // Paragraph and line breaks.
-        PunctuationRule(#"\bnew paragraph\b"#, "[PAR]", protect: true),
-        PunctuationRule(#"\bnew line\b"#, "[NL]", protect: true),
-        PunctuationRule(#"\bnewline\b"#, "[NL]", protect: true),
+        PunctuationRule(#"\bnew paragraph\b"#, "[PAR]", protect: true, guarded: true),
+        PunctuationRule(#"\bnew line\b"#, "[NL]", protect: true, guarded: true),
+        PunctuationRule(#"\bnewline\b"#, "[NL]", protect: true, guarded: true),
         // "period" and "full stop" are handled by the model, not
         // deterministically — they collide with nouns ("billing period",
         // "came to a full stop").
-        PunctuationRule(#"\bquestion mark\b"#, "?"),
-        PunctuationRule(#"\bexclamation point\b"#, "!"),
-        PunctuationRule(#"\bexclamation mark\b"#, "!"),
+        PunctuationRule(#"\bquestion mark\b"#, "?", guarded: true),
+        PunctuationRule(#"\bexclamation point\b"#, "!", guarded: true),
+        PunctuationRule(#"\bexclamation mark\b"#, "!", guarded: true),
         // Inline punctuation.
-        PunctuationRule(#"\bcomma\b"#, ","),
-        PunctuationRule(#"\bcolon\b"#, ":"),
-        PunctuationRule(#"\bsemicolon\b"#, ";"),
+        PunctuationRule(#"\bcomma\b"#, ",", guarded: true),
+        PunctuationRule(#"\bcolon\b"#, ":", guarded: true),
+        PunctuationRule(#"\bsemicolon\b"#, ";", guarded: true),
         // Dashes.
         PunctuationRule(#"\bem dash\b"#, "\u{2014}", protect: true),
         PunctuationRule(#"\ben dash\b"#, "\u{2013}", protect: true),
@@ -100,6 +109,31 @@ public enum PolishPipeline {
         PunctuationRule(#"\b(?:degree sign|degree symbol)\b"#, "\u{00b0}", protect: true),
     ]
 
+    /// Articles and determiners that mark a following guarded command word as
+    /// content ("a new paragraph", "the comma") rather than a command.
+    private static let articleDeterminers: Set<String> = [
+        "a", "an", "the", "another", "any", "this", "that",
+    ]
+
+    /// True when `text` ends with an article or determiner, ignoring trailing
+    /// whitespace, so a command word immediately after it is being talked about.
+    private static func endsWithArticle(_ text: Substring) -> Bool {
+        var word = ""
+        var seenLetter = false
+        for character in text.reversed() {
+            if character.isLetter {
+                word.append(character)
+                seenLetter = true
+            } else if !seenLetter, character == " " || character == "\t" {
+                continue
+            } else {
+                break
+            }
+        }
+        return articleDeterminers.contains(
+            String(word.reversed()).lowercased())
+    }
+
     /// Replace spoken punctuation commands with actual symbols.
     ///
     /// Protected symbols are wrapped in `<keep>` tags so the LLM
@@ -128,7 +162,15 @@ public enum PolishPipeline {
             for match in matches {
                 guard let range = Range(match.range, in: result) else { continue }
                 output += result[lastEnd..<range.lowerBound]
-                output += replacement
+                // A guarded command word preceded by an article/determiner is
+                // being talked about, not commanded — keep it verbatim.
+                if rule.guarded,
+                    endsWithArticle(result[..<range.lowerBound])
+                {
+                    output += result[range]
+                } else {
+                    output += replacement
+                }
                 lastEnd = range.upperBound
             }
             output += result[lastEnd...]

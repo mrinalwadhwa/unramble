@@ -200,6 +200,63 @@ struct DictatedPunctuationTests {
         #expect(PolishPipeline.substituteDictatedPunctuation("first semicolon second").contains(";"))
     }
 
+    // -- Article guard: a command word talked about is not converted. Every
+    // observed false positive is preceded by an article/determiner, while real
+    // commands never are (even when the recognizer runs them mid-flow). --
+
+    @Test("'a new paragraph' talked about is not converted")
+    func newParagraphTalkedAbout() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "can you start a new paragraph after the introduction")
+        #expect(!result.contains("[PAR]"))
+        #expect(result.lowercased().contains("a new paragraph"))
+    }
+
+    @Test("'a new line' talked about is not converted")
+    func newLineTalkedAbout() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "we should add a new line at the end of the file")
+        #expect(!result.contains("[NL]"))
+        #expect(result.lowercased().contains("a new line"))
+    }
+
+    @Test("'a comma' talked about is not converted")
+    func commaTalkedAbout() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "remember to use a comma when listing items")
+        #expect(result.lowercased().contains("a comma"))
+        #expect(!result.contains("a ,"))
+    }
+
+    @Test("'the new paragraph structure' is not converted")
+    func newParagraphStructure() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "we discussed the new paragraph structure")
+        #expect(!result.contains("[PAR]"))
+    }
+
+    @Test("'the question mark key' is not converted")
+    func questionMarkKey() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "the question mark key is broken")
+        #expect(!result.contains("?"))
+        #expect(result.lowercased().contains("question mark"))
+    }
+
+    @Test("'the colon cancer' is not converted")
+    func colonCancer() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "the colon cancer screening is Monday")
+        #expect(!result.contains(":"))
+    }
+
+    @Test("a mid-flow new paragraph command still converts")
+    func midFlowCommandConverts() {
+        let result = PolishPipeline.substituteDictatedPunctuation(
+            "the launch new paragraph we are on track")
+        #expect(result.contains("<keep>[PAR]</keep>"))
+    }
+
     @Test("open and close parenthesis variants")
     func parenthesisVariants() {
         let result = PolishPipeline.substituteDictatedPunctuation(
