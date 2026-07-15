@@ -167,6 +167,13 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
     public func transcribe(audio: Data) async throws -> String {
         guard isReady else { throw LocalModelError.modelNotLoaded }
 
+        // Diagnostic (flag-gated, zero cost otherwise): capture per-emission
+        // top-1/top-2 logits so writeConfidenceLog can report per-word
+        // recognition confidence and the runner-up alternative.
+        confidenceCapturing = FileManager.default.fileExists(
+            atPath: "/tmp/freeflow-stt-confidence")
+        emissionLog = []
+
         let samples = try decodeWAV(audio)
         guard samples.count > 160 else { return "" }
 
@@ -192,6 +199,10 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             .replacingOccurrences(of: "\u{2581}", with: " ")
             .trimmingCharacters(in: .whitespaces)
 
+        if confidenceCapturing {
+            writeConfidenceLog(vocab: vocab)
+            confidenceCapturing = false
+        }
         return text
     }
 
@@ -478,6 +489,12 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         let logits = output.featureValue(
             for: "logits")!.multiArrayValue!
 
+        if confidenceCapturing {
+            let (top, topVal, runner, runnerVal) = argmaxTop2(
+                logits, count: Self.vocabSize + 1)
+            emissionLog.append((top, topVal, runner, runnerVal))
+            return top
+        }
         return argmax(logits, count: Self.vocabSize + 1)
     }
 
@@ -613,6 +630,76 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         }
 
         return bestIdx
+    }
+
+    // MARK: - Confidence probe (diagnostic, flag-gated)
+
+    private var confidenceCapturing = false
+    private var emissionLog: [(Int, Float, Int, Float)] = []
+
+    /// Top-1 and top-2 token indices with their logits, found in one scan.
+    private func argmaxTop2(
+        _ logits: MLMultiArray, count: Int
+    ) -> (Int, Float, Int, Float) {
+        var i1 = 0, i2 = -1
+        var v1: Float = -.infinity, v2: Float = -.infinity
+        func consider(_ i: Int, _ v: Float) {
+            if v > v1 {
+                i2 = i1; v2 = v1; i1 = i; v1 = v
+            } else if v > v2 {
+                i2 = i; v2 = v
+            }
+        }
+        if logits.dataType == .float16 {
+            let ptr = logits.dataPointer.assumingMemoryBound(to: UInt16.self)
+            for i in 0..<count { consider(i, Self.float16ToFloat32(ptr[i])) }
+        } else {
+            let ptr = logits.dataPointer.assumingMemoryBound(to: Float.self)
+            for i in 0..<count { consider(i, ptr[i]) }
+        }
+        return (i1, v1, i2, v2)
+    }
+
+    /// Append per-word recognition confidence and the runner-up alternative to
+    /// `/tmp/freeflow-stt-confidence.log`. Confidence is the 2-way softmax of the
+    /// top-1 vs top-2 logits (0.5 = a coin flip, 1.0 = certain). Non-blank
+    /// emissions are grouped into words by the leading-space marker; a word
+    /// takes its least-confident subword and that subword's alternative.
+    private func writeConfidenceLog(vocab: [String]) {
+        let marker = "\u{2581}"
+        struct Sub { let conf: Double; let alt: String }
+        var words: [(text: String, subs: [Sub])] = []
+        for (tok, v1, i2, v2) in emissionLog where tok != Self.blankID {
+            let text = (tok >= 0 && tok < vocab.count) ? vocab[tok] : "?"
+            let conf = 1.0 / (1.0 + exp(Double(v2 - v1)))
+            let altRaw = (i2 >= 0 && i2 < vocab.count) ? vocab[i2] : "?"
+            let sub = Sub(
+                conf: conf,
+                alt: altRaw.replacingOccurrences(of: marker, with: ""))
+            if text.hasPrefix(marker) || words.isEmpty {
+                words.append((text, [sub]))
+            } else {
+                words[words.count - 1].text += text
+                words[words.count - 1].subs.append(sub)
+            }
+        }
+        var lines: [String] = []
+        for w in words {
+            let wtext = w.text.replacingOccurrences(of: marker, with: "")
+            guard let worst = w.subs.min(by: { $0.conf < $1.conf }) else { continue }
+            let conf = String(format: "%.2f", worst.conf)
+            let altConf = String(format: "%.2f", 1.0 - worst.conf)
+            lines.append("  \(conf)  \(wtext)   (alt: \(worst.alt) \(altConf))")
+        }
+        let block = lines.joined(separator: "\n") + "\n"
+        let url = URL(fileURLWithPath: "/tmp/freeflow-stt-confidence.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(block.utf8))
+            try? handle.close()
+        } else {
+            try? block.write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 
     static func float16ToFloat32(_ bits: UInt16) -> Float {
