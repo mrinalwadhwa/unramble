@@ -58,6 +58,8 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     private var _finishDidHang: Bool = false
     private var _sendAudioDidHang: Bool = false
     private var sessionCancelled = false
+    private var activeSessionID: DictationSessionID?
+    private var compatibilitySessionID: DictationSessionID?
 
     var startCallCount: Int { lock.withLock { _startCallCount } }
     var finishCallCount: Int { lock.withLock { _finishCallCount } }
@@ -108,10 +110,32 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     func startStreaming(context: AppContext, language: String?, micProximity: MicProximity)
         async throws
     {
+        let sessionID = DictationSessionID()
+        try await startStreaming(
+            sessionID: sessionID,
+            context: context,
+            language: language,
+            micProximity: micProximity)
         lock.withLock {
+            guard activeSessionID == sessionID else { return }
+            compatibilitySessionID = sessionID
+        }
+    }
+
+    func startStreaming(
+        sessionID: DictationSessionID,
+        context _: AppContext,
+        language _: String?,
+        micProximity _: MicProximity
+    ) async throws {
+        let accepted = lock.withLock {
+            guard activeSessionID == nil else { return false }
             _startCallCount += 1
             sessionCancelled = false
+            activeSessionID = sessionID
+            return true
         }
+        guard accepted else { throw CancellationError() }
 
         if hangOnStart {
             // Block until cancelled or explicitly released.
@@ -134,7 +158,22 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     }
 
     func sendAudio(_ pcmData: Data) async throws {
-        lock.withLock { _sendAudioCallCount += 1 }
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        try await sendAudio(pcmData, sessionID: sessionID)
+    }
+
+    func sendAudio(
+        _ pcmData: Data,
+        sessionID: DictationSessionID
+    ) async throws {
+        let accepted = lock.withLock {
+            guard activeSessionID == sessionID else { return false }
+            _sendAudioCallCount += 1
+            return true
+        }
+        guard accepted else { throw CancellationError() }
 
         if hangOnSendAudio {
             // Block indefinitely, simulating a stuck WebSocket send().
@@ -157,10 +196,25 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     }
 
     func finishStreaming() async throws -> String {
-        lock.withLock { _finishCallCount += 1 }
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        return try await finishStreaming(sessionID: sessionID)
+    }
 
+    func finishStreaming(
+        sessionID: DictationSessionID
+    ) async throws -> String {
+        let accepted = lock.withLock {
+            guard activeSessionID == sessionID else { return false }
+            _finishCallCount += 1
+            return true
+        }
+        guard accepted else { throw CancellationError() }
+
+        let result: String
         if hangOnFinish {
-            return try await withCheckedThrowingContinuation {
+            result = try await withCheckedThrowingContinuation {
                 (cont: CheckedContinuation<String, any Error>) in
                 let shouldCancel = lock.withLock {
                     _finishDidHang = true
@@ -175,18 +229,46 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
         } else if finishDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(finishDelay * 1_000_000_000))
             try Task.checkCancellation()
+            result = stubbedText
+        } else {
+            result = stubbedText
         }
 
         if let error = stubbedFinishError {
             throw error
         }
-        return stubbedText
+        let stillOwned = lock.withLock {
+            guard activeSessionID == sessionID else { return false }
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
+            return true
+        }
+        guard stillOwned else { throw CancellationError() }
+        return result
     }
 
     func cancelStreaming() async {
-        let continuations = lock.withLock {
+        guard let sessionID = lock.withLock({
+            activeSessionID ?? compatibilitySessionID
+        }) else { return }
+        await cancelStreaming(sessionID: sessionID)
+    }
+
+    func cancelStreaming(sessionID: DictationSessionID) async {
+        let continuations = lock.withLock { () -> (
+            CheckedContinuation<Void, any Error>?,
+            CheckedContinuation<String, any Error>?,
+            CheckedContinuation<Void, any Error>?
+        )? in
+            guard activeSessionID == sessionID else { return nil }
             _cancelCallCount += 1
             sessionCancelled = true
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
             let continuations = (
                 startContinuation, finishContinuation, sendAudioContinuation)
             startContinuation = nil
@@ -194,6 +276,7 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
             sendAudioContinuation = nil
             return continuations
         }
+        guard let continuations else { return }
         continuations.0?.resume(throwing: CancellationError())
         continuations.1?.resume(throwing: CancellationError())
         continuations.2?.resume(throwing: CancellationError())
@@ -242,10 +325,11 @@ final class PipelineTimeoutTests: XCTestCase {
         let pipeline = DictationPipeline(
             audioProvider: audio,
             contextProvider: MockAppContextProvider(),
-            batchProvider: batchProvider,
+            backend: .cloud(
+                realtime: streamingProvider,
+                fallback: batchProvider),
             textInjector: injector,
-            coordinator: coordinator,
-            streamingProvider: streamingProvider
+            coordinator: coordinator
         )
         return (pipeline, audio, batchProvider, streamingProvider, injector, coordinator)
     }

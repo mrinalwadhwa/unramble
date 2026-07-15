@@ -377,18 +377,23 @@ struct HUDContentView: View {
     /// Dictation failed — all transcription paths exhausted. Retry or dismiss.
     private var dictationFailedContent: some View {
         HStack(spacing: 8) {
-            Button(action: { viewModel.onRetryDictation?() }) {
-                Text("Retry")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color.white.opacity(0.2)))
+            if viewModel.isDictationRetryAvailable {
+                Button(action: { viewModel.onRetryDictation?() }) {
+                    Text("Retry")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.2)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Retry transcription")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Retry transcription")
 
-            Text("Lost connection")
+            Text(
+                viewModel.isDictationRetryAvailable
+                    ? "Lost connection" : "Microphone unavailable"
+            )
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.7))
                 .lineLimit(1)

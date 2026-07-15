@@ -141,6 +141,25 @@ final class RecordingCoordinatorTests: XCTestCase {
         await assertState(coordinator, .injecting)
     }
 
+    func testRetryInjectionClaimsOnlyOwningFailedSession() async {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        _ = await coordinator.startRecording(sessionID: sessionID)
+        _ = await coordinator.stopRecording(sessionID: sessionID)
+        _ = await coordinator.startInjecting(sessionID: sessionID)
+        _ = await coordinator.failInjection(sessionID: sessionID)
+
+        let staleClaim = await coordinator.retryInjection(
+            sessionID: DictationSessionID())
+        let owningClaim = await coordinator.retryInjection(sessionID: sessionID)
+        let duplicateClaim = await coordinator.retryInjection(sessionID: sessionID)
+
+        XCTAssertFalse(staleClaim)
+        XCTAssertTrue(owningClaim)
+        XCTAssertFalse(duplicateClaim)
+        await assertState(coordinator, .injecting)
+    }
+
     // MARK: - finishInjecting edge cases
 
     func testFinishInjectingFromIdleFails() async {
@@ -240,6 +259,41 @@ final class RecordingCoordinatorTests: XCTestCase {
         await assertState(coordinator, .idle)
     }
 
+    func testStaleSessionCannotResetReplacementRecording() async {
+        let coordinator = RecordingCoordinator()
+        let first = DictationSessionID()
+        let replacement = DictationSessionID()
+
+        let firstStarted = await coordinator.startRecording(sessionID: first)
+        let firstReset = await coordinator.reset(sessionID: first)
+        let replacementStarted = await coordinator.startRecording(
+            sessionID: replacement)
+
+        XCTAssertTrue(firstStarted)
+        XCTAssertTrue(firstReset)
+        XCTAssertTrue(replacementStarted)
+        let staleReset = await coordinator.reset(sessionID: first)
+        XCTAssertFalse(staleReset)
+        await assertState(coordinator, .recording)
+    }
+
+    func testDelayedFailureDismissalCannotResetReplacementRecording() async {
+        let coordinator = RecordingCoordinator()
+        let first = DictationSessionID()
+        let replacement = DictationSessionID()
+
+        _ = await coordinator.startRecording(sessionID: first)
+        await coordinator.reset(sessionID: first)
+        _ = await coordinator.startRecording(sessionID: replacement)
+
+        let reset = await coordinator.reset(
+            sessionID: first,
+            ifState: .injectionFailed)
+
+        XCTAssertFalse(reset)
+        await assertState(coordinator, .recording)
+    }
+
     // MARK: - Multiple cycles
 
     func testMultipleFullCycles() async {
@@ -322,6 +376,69 @@ final class RecordingCoordinatorTests: XCTestCase {
     }
 
     // MARK: - State stream observation
+
+    func testSessionStateStreamTagsIdleWithTheSessionThatEnded() async {
+        let coordinator = RecordingCoordinator()
+        let first = DictationSessionID()
+        let replacement = DictationSessionID()
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<4 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        _ = await coordinator.startRecording(sessionID: first)
+        _ = await coordinator.reset(sessionID: first)
+        _ = await coordinator.startRecording(sessionID: replacement)
+
+        let updates = await collector.value
+        XCTAssertEqual(
+            updates,
+            [
+                RecordingStateUpdate(state: .idle, sessionID: nil),
+                RecordingStateUpdate(state: .recording, sessionID: first),
+                RecordingStateUpdate(state: .idle, sessionID: first),
+                RecordingStateUpdate(
+                    state: .recording,
+                    sessionID: replacement),
+            ])
+    }
+
+    func testSessionStateStreamTagsEveryStateInACompletedCycle() async {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<5 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        _ = await coordinator.startRecording(sessionID: sessionID)
+        _ = await coordinator.stopRecording(sessionID: sessionID)
+        _ = await coordinator.startInjecting(sessionID: sessionID)
+        _ = await coordinator.finishInjecting(sessionID: sessionID)
+
+        let updates = await collector.value
+        XCTAssertEqual(
+            updates,
+            [
+                RecordingStateUpdate(state: .idle, sessionID: nil),
+                RecordingStateUpdate(state: .recording, sessionID: sessionID),
+                RecordingStateUpdate(state: .processing, sessionID: sessionID),
+                RecordingStateUpdate(state: .injecting, sessionID: sessionID),
+                RecordingStateUpdate(state: .idle, sessionID: sessionID),
+            ])
+    }
 
     func testStateStreamEmitsCurrentStateThenChanges() async {
         let coordinator = RecordingCoordinator()
@@ -516,6 +633,87 @@ final class RecordingCoordinatorTests: XCTestCase {
         let result = await coordinator.startRecording()
         XCTAssertFalse(result)
         await assertState(coordinator, .injectionFailed)
+    }
+
+    // MARK: - Two-phase idle ownership
+
+    func testIdleClaimFreezesRetryUntilPipelineReleasesOwnership() async throws {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let started = await coordinator.startRecording(sessionID: sessionID)
+        let stopped = await coordinator.stopRecording(sessionID: sessionID)
+        let failed = await coordinator.failDictation(sessionID: sessionID)
+        XCTAssertTrue(started)
+        XCTAssertTrue(stopped)
+        XCTAssertTrue(failed)
+
+        let claimed = await coordinator.claimReset(
+            sessionID: sessionID,
+            ifState: .dictationFailed)
+        let claim = try XCTUnwrap(claimed)
+
+        await assertState(coordinator, .dictationFailed)
+        let retryStarted = await coordinator.retryDictation(sessionID: sessionID)
+        let committed = await coordinator.commitIdleTransition(claim)
+        XCTAssertFalse(retryStarted)
+        XCTAssertTrue(committed)
+        await assertState(coordinator, .idle)
+    }
+
+    func testRetryThatWinsBeforeIdleClaimCannotBeRevoked() async {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let started = await coordinator.startRecording(sessionID: sessionID)
+        let stopped = await coordinator.stopRecording(sessionID: sessionID)
+        let failed = await coordinator.failDictation(sessionID: sessionID)
+        let retryStarted = await coordinator.retryDictation(sessionID: sessionID)
+        XCTAssertTrue(started)
+        XCTAssertTrue(stopped)
+        XCTAssertTrue(failed)
+        XCTAssertTrue(retryStarted)
+
+        let claim = await coordinator.claimReset(
+            sessionID: sessionID,
+            ifState: .dictationFailed)
+
+        XCTAssertNil(claim)
+        await assertState(coordinator, .processing)
+    }
+
+    func testSessionResetAdoptsMatchingIdleClaimDuringCancellation() async throws {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let started = await coordinator.startRecording(sessionID: sessionID)
+        let stopped = await coordinator.stopRecording(sessionID: sessionID)
+        XCTAssertTrue(started)
+        XCTAssertTrue(stopped)
+        let claimed = await coordinator.claimReset(sessionID: sessionID)
+        let claim = try XCTUnwrap(claimed)
+
+        let reset = await coordinator.reset(sessionID: sessionID)
+        let staleCommit = await coordinator.commitIdleTransition(claim)
+        XCTAssertTrue(reset)
+        XCTAssertFalse(staleCommit)
+        await assertState(coordinator, .idle)
+    }
+
+    func testUnscopedResetCannotPublishIdleAcrossOwnershipRelease() async throws {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let started = await coordinator.startRecording(sessionID: sessionID)
+        let stopped = await coordinator.stopRecording(sessionID: sessionID)
+        XCTAssertTrue(started)
+        XCTAssertTrue(stopped)
+        let claimed = await coordinator.claimReset(sessionID: sessionID)
+        let claim = try XCTUnwrap(claimed)
+
+        let reset = await coordinator.reset()
+
+        XCTAssertFalse(reset)
+        await assertState(coordinator, .processing)
+        let committed = await coordinator.commitIdleTransition(claim)
+        XCTAssertTrue(committed)
+        await assertState(coordinator, .idle)
     }
 
     // MARK: - Rapid transitions

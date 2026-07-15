@@ -1120,10 +1120,16 @@ struct SystemPromptLanguageTests {
         #expect(prompt == PolishPipeline.systemPromptEnglish)
     }
 
-    @Test("nil language defaults to English prompt")
+    @Test("nil language uses the language-safe prompt")
     func nilLanguage() {
         let prompt = PolishPipeline.systemPrompt(forLanguage: nil)
-        #expect(prompt == PolishPipeline.systemPromptEnglish)
+        #expect(prompt == PolishPipeline.systemPromptMinimal)
+    }
+
+    @Test("empty Auto language uses the language-safe prompt")
+    func emptyLanguage() {
+        let prompt = PolishPipeline.systemPrompt(forLanguage: "")
+        #expect(prompt == PolishPipeline.systemPromptMinimal)
     }
 
     @Test("French returns minimal prompt")
@@ -1154,6 +1160,30 @@ struct SystemPromptLanguageTests {
     func tamil() {
         let prompt = PolishPipeline.systemPrompt(forLanguage: "ta")
         #expect(prompt == PolishPipeline.systemPromptTamil)
+    }
+
+    @Test("casual English prompt requires explicit English")
+    func casualPromptRequiresExplicitEnglish() {
+        let context = AppContext(
+            bundleID: "com.tinyspeck.slackmacgap",
+            appName: "Slack",
+            windowTitle: "",
+            focusedFieldContent: nil)
+
+        #expect(
+            PolishPipeline.buildCloudSystemPrompt(
+                context: context,
+                language: "en") == PolishPipeline.systemPromptCasual)
+        let autoPrompt = PolishPipeline.buildCloudSystemPrompt(
+            context: context,
+            language: nil)
+        let germanPrompt = PolishPipeline.buildCloudSystemPrompt(
+            context: context,
+            language: "de")
+        #expect(autoPrompt == PolishPipeline.systemPromptMinimal)
+        #expect(germanPrompt == PolishPipeline.systemPromptMinimal)
+        #expect(!autoPrompt.contains("Remove filler sounds (um"))
+        #expect(!germanPrompt.contains("A bare \"no\""))
     }
 }
 
@@ -1335,4 +1365,3 @@ struct ConvertNumberWordsTests {
         #expect(PolishPipeline.convertNumberWords("$49 per month") == "$49 per month")
     }
 }
-

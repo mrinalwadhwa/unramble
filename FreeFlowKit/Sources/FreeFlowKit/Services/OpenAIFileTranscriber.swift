@@ -17,19 +17,15 @@ public struct OpenAIFileTranscriber: BatchDictationProviding {
     private let model: String
     private let endpoint: URL
     private let session: URLSession
-    /// Read once at request start so settings changes apply between sessions.
-    private let languageProvider: @Sendable () -> String?
 
     public init(
         apiKey: @autoclosure @escaping @Sendable () -> String,
         model: String = "gpt-4o-mini-transcribe",
-        language: @autoclosure @escaping @Sendable () -> String? = nil,
         endpoint: URL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
         session: URLSession? = nil
     ) {
         self.apiKeyProvider = apiKey
         self.model = model
-        self.languageProvider = language
         self.endpoint = endpoint
         if let session {
             self.session = session
@@ -50,7 +46,11 @@ public struct OpenAIFileTranscriber: BatchDictationProviding {
 
     // MARK: - BatchDictationProviding
 
-    public func dictate(audio: Data, context: AppContext) async throws -> String {
+    public func dictate(
+        audio: Data,
+        context: AppContext,
+        language: String?
+    ) async throws -> String {
         guard !audio.isEmpty else {
             throw DictationError.emptyAudio
         }
@@ -60,7 +60,7 @@ public struct OpenAIFileTranscriber: BatchDictationProviding {
                 actualBytes: audio.count)
         }
 
-        let configuredLanguage = languageProvider()?
+        let configuredLanguage = language?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let language = configuredLanguage?.isEmpty == false
@@ -187,7 +187,7 @@ public struct OpenAIFileTranscriber: BatchDictationProviding {
     private static func cleanUp(
         _ raw: String, context: AppContext, language: String?
     ) -> String {
-        guard language == nil || language == "en" else {
+        guard language == "en" else {
             return raw
         }
         let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"

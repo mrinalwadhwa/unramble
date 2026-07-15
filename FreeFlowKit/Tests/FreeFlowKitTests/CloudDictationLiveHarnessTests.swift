@@ -285,13 +285,13 @@ struct CloudDictationLiveHarnessTests {
                     && $0.input.hasPrefix("the key takeaways")
             })
         let provider = OpenAIFileTranscriber(
-            apiKey: apiKey,
-            language: "en")
+            apiKey: apiKey)
 
         let startedAt = Date()
         let output = try await provider.dictate(
             audio: canonicalWAV,
-            context: .empty)
+            context: .empty,
+            language: "en")
         let finishedAt = Date()
 
         #expect(!output.isEmpty)

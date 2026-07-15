@@ -9,6 +9,294 @@ import ObjCExceptionCatcher
     import CoreAudio
 #endif
 
+/// Tracks ownership of an audio-engine start independently of the provider's
+/// main state lock. A timeout can therefore invalidate and reach the engine
+/// even while `AVAudioEngine.start()` is holding that main lock.
+final class AudioEngineStartResetLedger<Engine: AnyObject>: @unchecked Sendable {
+    struct Attempt: Equatable, Sendable {
+        fileprivate let id: UInt64
+    }
+
+    struct Invalidation {
+        let attempt: Attempt
+        let engine: Engine?
+    }
+
+    private struct Entry {
+        let attempt: Attempt
+        var engine: Engine?
+        var isValid = true
+    }
+
+    private let lock = NSLock()
+    private var nextID: UInt64 = 0
+    private var active: Entry?
+
+    func begin() -> Attempt {
+        guard let attempt = beginIfIdle() else {
+            preconditionFailure("An audio-engine start attempt is already active")
+        }
+        return attempt
+    }
+
+    func beginIfIdle() -> Attempt? {
+        lock.withLock {
+            guard active == nil else { return nil }
+            nextID &+= 1
+            let attempt = Attempt(id: nextID)
+            active = Entry(attempt: attempt)
+            return attempt
+        }
+    }
+
+    @discardableResult
+    func publish(_ engine: Engine, for attempt: Attempt) -> Bool {
+        lock.withLock {
+            guard active?.attempt == attempt, active?.isValid == true else {
+                return false
+            }
+            active?.engine = engine
+            return true
+        }
+    }
+
+    func invalidateActiveAttempt() -> Invalidation? {
+        lock.withLock {
+            guard let entry = active else { return nil }
+            active?.isValid = false
+            return Invalidation(attempt: entry.attempt, engine: entry.engine)
+        }
+    }
+
+    func isValid(_ attempt: Attempt) -> Bool {
+        lock.withLock {
+            active?.attempt == attempt && active?.isValid == true
+        }
+    }
+
+    @discardableResult
+    func withValidAttempt(_ attempt: Attempt, _ body: () -> Void) -> Bool {
+        lock.withLock {
+            guard active?.attempt == attempt, active?.isValid == true else {
+                return false
+            }
+            body()
+            return true
+        }
+    }
+
+    /// Publish capture state and readiness at one reset boundary. A reset can
+    /// linearize before both callbacks or after both callbacks, never between
+    /// recording becoming live and the pipeline observing that fact.
+    @discardableResult
+    func commitCaptureReady(
+        _ attempt: Attempt,
+        publish: () -> Void,
+        onCaptureReady: () -> Void
+    ) -> Bool {
+        withValidAttempt(attempt) {
+            publish()
+            onCaptureReady()
+        }
+    }
+
+    func end(_ attempt: Attempt) {
+        lock.withLock {
+            guard active?.attempt == attempt else { return }
+            active = nil
+        }
+    }
+}
+
+/// Fences tap callbacks independently of the provider's main state lock.
+/// Closing a boundary timestamps release while callbacks remain admissible for
+/// pre-release sample classification until normal stop drains them. Reset
+/// invalidates all admissions before a replacement can publish state.
+final class AudioCapturePublicationLedger<Token: Equatable & Sendable>:
+    @unchecked Sendable
+{
+    struct Publication: Sendable {
+        fileprivate let token: Token
+        fileprivate let generation: UInt64
+    }
+
+    struct CallbackAdmission: Sendable {
+        fileprivate let token: Token
+        fileprivate let generation: UInt64
+    }
+
+    private enum Phase {
+        case open
+        case draining(releaseHostTime: UInt64)
+    }
+
+    private struct Entry {
+        let token: Token
+        let generation: UInt64
+        let releaseBoundary: AudioCaptureReleaseBoundary?
+        var phase: Phase
+    }
+
+    private let lock = NSLock()
+    private var nextGeneration: UInt64 = 0
+    private var entry: Entry?
+
+    var canBegin: Bool {
+        lock.withLock { entry == nil }
+    }
+
+    var drainingToken: Token? {
+        lock.withLock {
+            guard let entry else { return nil }
+            guard case .draining = entry.phase else { return nil }
+            return entry.token
+        }
+    }
+
+    @discardableResult
+    func begin(
+        _ token: Token,
+        releaseBoundary: AudioCaptureReleaseBoundary? = nil
+    ) -> Publication {
+        lock.withLock {
+            precondition(entry == nil, "An audio capture publication is still owned")
+            nextGeneration &+= 1
+            entry = Entry(
+                token: token,
+                generation: nextGeneration,
+                releaseBoundary: releaseBoundary,
+                phase: .open)
+            return Publication(token: token, generation: nextGeneration)
+        }
+    }
+
+    /// Admit one callback owned by this publication. Draining callbacks remain
+    /// admissible because a queued buffer can straddle the release timestamp.
+    func admitCallback(for publication: Publication) -> CallbackAdmission? {
+        lock.withLock {
+            guard let entry,
+                entry.token == publication.token,
+                entry.generation == publication.generation
+            else {
+                return nil
+            }
+            return CallbackAdmission(
+                token: publication.token,
+                generation: publication.generation)
+        }
+    }
+
+    /// Timestamp release and enter the drain phase. This is idempotent so
+    /// `stopRecording()` can join a boundary closed synchronously earlier.
+    @discardableResult
+    func beginDraining(
+        _ token: Token,
+        releaseHostTime: UInt64 = AudioCaptureReleaseFence.currentHostTime()
+    ) -> Bool {
+        lock.withLock {
+            guard var entry, entry.token == token else { return false }
+            if case .open = entry.phase {
+                entry.phase = .draining(releaseHostTime: releaseHostTime)
+                self.entry = entry
+            }
+            return true
+        }
+    }
+
+    /// Close whichever capture currently owns publication. This token-free
+    /// entry point lets the provider publish the sample-time boundary without
+    /// first taking the main engine lock.
+    @discardableResult
+    func beginDrainingCurrentCapture(
+        releaseHostTime: UInt64 = AudioCaptureReleaseFence.currentHostTime()
+    ) -> Bool {
+        lock.withLock {
+            guard var entry else { return false }
+            if case .open = entry.phase {
+                entry.phase = .draining(releaseHostTime: releaseHostTime)
+                self.entry = entry
+            }
+            return true
+        }
+    }
+
+    /// Whether a callback admitted before the boundary may still publish.
+    /// Reset invalidates its generation; normal draining does not.
+    func accepts(_ admission: CallbackAdmission) -> Bool {
+        lock.withLock {
+            guard let entry else { return false }
+            return entry.token == admission.token
+                && entry.generation == admission.generation
+        }
+    }
+
+    /// Return the exact sample prefix owned by this publication. Callbacks may
+    /// enter during drain so a queued buffer can retain samples captured before
+    /// release while excluding samples at or after the release timestamp.
+    func preReleaseFrameCount(
+        for admission: CallbackAdmission,
+        bufferStartHostTime: UInt64?,
+        sampleRate: Double,
+        frameLength: Int
+    ) -> Int? {
+        lock.withLock {
+            guard let entry,
+                entry.token == admission.token,
+                entry.generation == admission.generation
+            else { return nil }
+
+            let physicalReleaseHostTime = entry.releaseBoundary?.releaseHostTime
+            let releaseHostTime: UInt64?
+            switch entry.phase {
+            case .open:
+                releaseHostTime = physicalReleaseHostTime
+            case .draining(let drainedReleaseHostTime):
+                releaseHostTime = physicalReleaseHostTime.map {
+                    min($0, drainedReleaseHostTime)
+                } ?? drainedReleaseHostTime
+            }
+
+            guard let releaseHostTime else {
+                return frameLength
+            }
+            // AVAudioEngine normally supplies a valid first-sample host time.
+            // If it does not, retain the buffer: preserving dictated speech is
+            // more important than excluding an unknowable post-release suffix.
+            guard let bufferStartHostTime else { return frameLength }
+            return AudioCaptureReleaseFence.preReleaseFrameCount(
+                bufferStartHostTime: bufferStartHostTime,
+                releaseHostTime: releaseHostTime,
+                sampleRate: sampleRate,
+                frameLength: frameLength)
+        }
+    }
+
+    func finishDraining(_ token: Token) {
+        lock.withLock {
+            guard let entry, entry.token == token else { return }
+            guard case .draining = entry.phase else { return }
+            self.entry = nil
+        }
+    }
+
+    func reset() {
+        lock.withLock {
+            entry = nil
+        }
+    }
+
+    /// Reset only the named capture. A delayed stop must not invalidate a
+    /// replacement capture that has already opened a new generation.
+    @discardableResult
+    func reset(_ token: Token) -> Bool {
+        lock.withLock {
+            guard entry?.token == token else { return false }
+            entry = nil
+            return true
+        }
+    }
+}
+
 /// Capture audio from the default input device via AVAudioEngine.
 ///
 /// Records audio and converts it to 16kHz, mono, 16-bit PCM. On stop,
@@ -31,6 +319,23 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
 
     private let lock = NSLock()
     private var _isRecording = false
+
+    #if canImport(AVFoundation)
+        private typealias CaptureAttempt =
+            AudioEngineStartResetLedger<AVAudioEngine>.Attempt
+        private typealias CaptureCallbackAdmission =
+            AudioCapturePublicationLedger<CaptureAttempt>.CallbackAdmission
+        private typealias CapturePublication =
+            AudioCapturePublicationLedger<CaptureAttempt>.Publication
+
+        private let engineStartResetLedger = AudioEngineStartResetLedger<AVAudioEngine>()
+        private var recordingStartAttempt: CaptureAttempt?
+        private let publicationLedger =
+            AudioCapturePublicationLedger<CaptureAttempt>()
+        private let captureSinkOwnership =
+            AudioCaptureSinkOwnershipLedger<CaptureAttempt>()
+        private var startCleanupInProgress = false
+    #endif
 
     private var _peakRMS: Float = 0
     private var _ambientRMS: Float = 0
@@ -82,7 +387,7 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
     #if canImport(AVFoundation)
         /// Persistent engine, created on first recording and reused.
         private var engine: AVAudioEngine?
-        private var converter: AVAudioConverter?
+        private var converterLifecycle: PCMConverterLifecycle?
         /// The tap format negotiated with the hardware on engine creation.
         private var tapFormat: AVAudioFormat?
         /// Observer token for audio device configuration changes.
@@ -97,11 +402,11 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
 
     // MARK: - PCM audio stream
 
-    private var _pcmAudioStream: AsyncStream<Data>?
+    private let pcmStreamSnapshot = AudioCapturePCMStreamSnapshot()
     private var pcmContinuation: AsyncStream<Data>.Continuation?
 
     public var pcmAudioStream: AsyncStream<Data>? {
-        lock.withLock { _pcmAudioStream }
+        pcmStreamSnapshot.current
     }
 
     // MARK: - Audio level stream
@@ -188,100 +493,197 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
     }
 
     public func startRecording() async throws {
+        try await startRecording(onCaptureReady: {})
+    }
+
+    public func startRecording(
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await startRecordingOwned(
+            releaseBoundary: nil,
+            onCaptureReady: onCaptureReady)
+    }
+
+    public func startRecording(
+        releaseBoundary: AudioCaptureReleaseBoundary,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await startRecordingOwned(
+            releaseBoundary: releaseBoundary,
+            onCaptureReady: onCaptureReady)
+    }
+
+    private func startRecordingOwned(
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
         #if canImport(AVFoundation)
-            let soundProvider: SoundFeedbackProvider? = try lock.withLock {
-                guard !_isRecording else {
-                    throw AudioCaptureError.alreadyRecording
-                }
-
-                pcmChunks = []
-                _peakRMS = 0
-                _ambientRMS = 0
-                _ambientSampleCount = 0
-                _ambientSumOfSquares = 0
-                _ambientCalibrated = false
-                _gainFactor = 1.0
-
-                // Set up the PCM audio stream before starting capture.
-                let (pcmStream, pcmCont) = AsyncStream<Data>.makeStream()
-                self._pcmAudioStream = pcmStream
-                self.pcmContinuation = pcmCont
-
-                // Set up the audio level stream before starting capture.
-                let (stream, continuation) = AsyncStream<Float>.makeStream()
-                self._audioLevelStream = stream
-                self.levelContinuation = continuation
-
-                // Create or reuse the persistent engine.
-                var engine = try ensureEngine()
-
-                // Install the audio tap. Pass nil as the format so
-                // AVAudioEngine uses the input node's current native
-                // format, avoiding a crash when the hardware sample
-                // rate changes between ensureEngine() and installTap()
-                // (e.g. AirPods finishing Bluetooth negotiation).
-                //
-                // AVAudioEngine throws ObjC exceptions (not Swift
-                // errors) on installTap failures such as stale audio
-                // hardware state after device switches. Catch the
-                // exception, tear down, rebuild, and retry once.
-                let bufferSize: AVAudioFrameCount = 4096
-                let tapException = ObjCTryCatch {
-                    engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: nil) {
-                        [weak self] buffer, _ in
-                        self?.emitAudioLevel(buffer)
-                        self?.processAudioBuffer(buffer)
+            // Reserve reset ownership before waiting on the engine lock. A
+            // concurrent reset can now invalidate even a start that has not
+            // entered provider state yet.
+            guard let attempt = engineStartResetLedger.beginIfIdle() else {
+                throw AudioCaptureError.alreadyRecording
+            }
+            var failedEngine: AVAudioEngine?
+            var claimedProviderState = false
+            let soundProvider: SoundFeedbackProvider?
+            do {
+                soundProvider = try lock.withLock {
+                    guard !_isRecording, !startCleanupInProgress,
+                        publicationLedger.canBegin
+                    else {
+                        throw AudioCaptureError.alreadyRecording
                     }
-                }
+                    guard captureSinkOwnership.begin(attempt) else {
+                        throw AudioCaptureError.alreadyRecording
+                    }
 
-                if let tapException {
-                    Log.debug(
-                        "[AudioCapture] installTap failed: \(tapException.reason ?? tapException.name.rawValue), "
-                            + "rebuilding engine and retrying"
-                    )
-                    tearDownEngineLocked()
-                    engine = try ensureEngine()
-
-                    let retryException = ObjCTryCatch {
-                        engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: nil) {
-                            [weak self] buffer, _ in
-                            self?.emitAudioLevel(buffer)
-                            self?.processAudioBuffer(buffer)
+                    claimedProviderState = true
+                    var didStart = false
+                    defer {
+                        if !didStart {
+                            failedEngine = engineStartResetLedger
+                                .invalidateActiveAttempt()?.engine
+                            startCleanupInProgress = true
+                            discardCaptureStateLocked(ownedBy: attempt)
+                            engineStartResetLedger.end(attempt)
                         }
                     }
-                    if let retryException {
+
+                    pcmChunks = []
+                    _peakRMS = 0
+                    _ambientRMS = 0
+                    _ambientSampleCount = 0
+                    _ambientSumOfSquares = 0
+                    _ambientCalibrated = false
+                    _gainFactor = 1.0
+
+                    // Set up the PCM audio stream before starting capture.
+                    let (pcmStream, pcmCont) = AsyncStream<Data>.makeStream()
+                    self.pcmContinuation = pcmCont
+
+                    // Set up the audio level stream before starting capture.
+                    let (stream, continuation) = AsyncStream<Float>.makeStream()
+                    self._audioLevelStream = stream
+                    self.levelContinuation = continuation
+
+                    // Create or reuse the persistent engine.
+                    var engine = try ensureEngine(for: attempt)
+
+                    // Open callback admission before installing the tap. A running
+                    // engine can invoke the tap immediately; opening later would
+                    // discard the first captured buffer while this lock is held.
+                    let tapPublication = publicationLedger.begin(
+                        attempt,
+                        releaseBoundary: releaseBoundary)
+
+                    // Install the audio tap. Pass nil as the format so
+                    // AVAudioEngine uses the input node's current native
+                    // format, avoiding a crash when the hardware sample
+                    // rate changes between ensureEngine() and installTap()
+                    // (e.g. AirPods finishing Bluetooth negotiation).
+                    //
+                    // AVAudioEngine throws ObjC exceptions (not Swift
+                    // errors) on installTap failures such as stale audio
+                    // hardware state after device switches. Catch the
+                    // exception, tear down, rebuild, and retry once.
+                    let bufferSize: AVAudioFrameCount = 4096
+                    let tapException = ObjCTryCatch {
+                        engine.inputNode.installTap(
+                            onBus: 0,
+                            bufferSize: bufferSize,
+                            format: nil
+                        ) { [weak self] buffer, timestamp in
+                            self?.processTapBuffer(
+                                buffer,
+                                timestamp: timestamp,
+                                publication: tapPublication)
+                        }
+                    }
+
+                    if let tapException {
                         Log.debug(
-                            "[AudioCapture] installTap retry failed: "
-                                + "\(retryException.reason ?? retryException.name.rawValue)"
+                            "[AudioCapture] installTap failed: \(tapException.reason ?? tapException.name.rawValue), "
+                                + "rebuilding engine and retrying"
                         )
                         tearDownEngineLocked()
-                        throw AudioCaptureError.noInputDevice
+                        engine = try ensureEngine(for: attempt)
+                        publicationLedger.reset()
+                        let retryTapPublication = publicationLedger.begin(
+                            attempt,
+                            releaseBoundary: releaseBoundary)
+
+                        let retryException = ObjCTryCatch {
+                            engine.inputNode.installTap(
+                                onBus: 0,
+                                bufferSize: bufferSize,
+                                format: nil
+                            ) { [weak self] buffer, timestamp in
+                                self?.processTapBuffer(
+                                    buffer,
+                                    timestamp: timestamp,
+                                    publication: retryTapPublication)
+                            }
+                        }
+                        if let retryException {
+                            Log.debug(
+                                "[AudioCapture] installTap retry failed: "
+                                    + "\(retryException.reason ?? retryException.name.rawValue)"
+                            )
+                            tearDownEngineLocked()
+                            throw AudioCaptureError.noInputDevice
+                        }
                     }
+
+                    // Read the actual tap format from the input node after
+                    // installation. This is the format buffers will arrive
+                    // in, which may differ from what outputFormat(forBus:)
+                    // reported during ensureEngine().
+                    let actualTapFormat = engine.inputNode.outputFormat(forBus: 0)
+                    if self.tapFormat?.sampleRate != actualTapFormat.sampleRate
+                        || self.tapFormat?.channelCount != actualTapFormat.channelCount
+                    {
+                        Log.debug(
+                            "[AudioCapture] Tap format updated: "
+                                + "sampleRate=\(actualTapFormat.sampleRate), "
+                                + "channels=\(actualTapFormat.channelCount)"
+                        )
+                        self.tapFormat = actualTapFormat
+                        self.converterLifecycle = nil
+                    }
+
+                    // Every recording gets a fresh converter session. Reusing a
+                    // converter leaks its resampler state across dictations.
+                    do {
+                        try ensureConverterLifecycle().begin()
+                    } catch {
+                        throw AudioCaptureError.formatError
+                    }
+
+                    guard
+                        engineStartResetLedger.commitCaptureReady(
+                            attempt,
+                            publish: {
+                                _isRecording = true
+                                recordingStartAttempt = attempt
+                                _droppedFrameCount = 0
+                                pcmStreamSnapshot.publish(pcmStream)
+                            },
+                            onCaptureReady: onCaptureReady)
+                    else {
+                        tearDownEngineLocked()
+                        throw resetDuringEngineStartError
+                    }
+                    didStart = true
+                    return _soundFeedbackProvider
                 }
-
-                // Read the actual tap format from the input node after
-                // installation. This is the format buffers will arrive
-                // in, which may differ from what outputFormat(forBus:)
-                // reported during ensureEngine().
-                let actualTapFormat = engine.inputNode.outputFormat(forBus: 0)
-                if self.tapFormat?.sampleRate != actualTapFormat.sampleRate
-                    || self.tapFormat?.channelCount != actualTapFormat.channelCount
-                {
-                    Log.debug(
-                        "[AudioCapture] Tap format updated: "
-                            + "sampleRate=\(actualTapFormat.sampleRate), "
-                            + "channels=\(actualTapFormat.channelCount)"
-                    )
-                    self.tapFormat = actualTapFormat
-                    self.converter = nil
+            } catch {
+                if claimedProviderState {
+                    cleanUpFailedStart(engine: failedEngine)
+                } else {
+                    engineStartResetLedger.end(attempt)
                 }
-
-                // Build the converter against the actual tap format.
-                let _ = try ensureConverter()
-
-                _isRecording = true
-                _droppedFrameCount = 0
-                return _soundFeedbackProvider
+                throw error
             }
 
             // Play the start sound after the lock is released. The
@@ -296,30 +698,78 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
         #endif
     }
 
+    public func closeRecordingBoundary() {
+        #if canImport(AVFoundation)
+            let releaseHostTime = AudioCaptureReleaseFence.currentHostTime()
+            closeRecordingBoundary(atHostTime: releaseHostTime)
+        #endif
+    }
+
+    public func closeRecordingBoundary(atHostTime releaseHostTime: UInt64) {
+        #if canImport(AVFoundation)
+            publicationLedger.beginDrainingCurrentCapture(
+                releaseHostTime: releaseHostTime)
+        #endif
+    }
+
     public func stopRecording() async throws -> AudioBuffer {
         #if canImport(AVFoundation)
+            let releaseHostTime = AudioCaptureReleaseFence.currentHostTime()
             // Grab the engine reference and mark not-recording under the
             // lock, but do NOT call removeTap inside the lock. removeTap
             // synchronously waits for any in-flight tap callback to
             // finish, and the tap callback acquires this same lock to
             // append PCM chunks — calling removeTap while holding the
             // lock deadlocks when a callback is in progress.
-            let (engineToStop, soundFeedbackProvider): (AVAudioEngine?, SoundFeedbackProvider?) =
-                lock.withLock {
-                    guard _isRecording else { return (nil, nil) }
+            let stopClaim: (
+                engine: AVAudioEngine,
+                sound: SoundFeedbackProvider?,
+                attempt: CaptureAttempt
+            )? = lock.withLock {
+                    guard _isRecording,
+                        let attempt = recordingStartAttempt,
+                        let engine,
+                        publicationLedger.beginDraining(
+                            attempt,
+                            releaseHostTime: releaseHostTime)
+                    else { return nil }
                     _isRecording = false
-                    return (engine, _soundFeedbackProvider)
+                    engineStartResetLedger.end(attempt)
+                    recordingStartAttempt = nil
+                    return (engine, _soundFeedbackProvider, attempt)
                 }
 
-            guard let engineToStop else {
+            guard let stopClaim else {
                 return .empty
             }
+            let engineToStop = stopClaim.engine
+            let attempt = stopClaim.attempt
 
             // Remove the tap outside the lock. This blocks until any
             // in-flight tap callback completes, which is safe because
             // we are not holding the lock. After this returns, no more
             // callbacks will fire.
-            engineToStop.inputNode.removeTap(onBus: 0)
+            let removeTapException = ObjCTryCatch {
+                engineToStop.inputNode.removeTap(onBus: 0)
+            }
+            if let removeTapException {
+                let resetOwnedPublication = publicationLedger.reset(attempt)
+                engineToStop.stop()
+                let discardedOwnedState = lock.withLock {
+                    guard captureSinkOwnership.owns(attempt) else { return false }
+                    if engine === engineToStop {
+                        tearDownEngineLocked()
+                    }
+                    discardCaptureStateLocked(ownedBy: attempt)
+                    return true
+                }
+                guard resetOwnedPublication, discardedOwnedState else {
+                    return .empty
+                }
+                throw AudioCaptureError.engineStopFailed(
+                    removeTapException.reason ?? removeTapException.name.rawValue
+                )
+            }
 
             // Stop the engine to release the microphone hardware. This
             // dismisses the orange mic indicator in the menu bar between
@@ -334,18 +784,59 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             // so the sound is not captured by the next recording session's
             // ambient calibration window (which would inflate the silence
             // threshold and reject real speech).
-            soundFeedbackProvider?.playStopSound()
+            stopClaim.sound?.playStopSound()
+
+            // With the tap removed, all admitted callbacks have completed and
+            // the converter can be ended without racing a consume call. Append
+            // and stream the exact same tail bytes before closing either sink.
+            let converterClaim: (owned: Bool, session: PCMConverterLifecycle?) =
+                lock.withLock {
+                    guard captureSinkOwnership.owns(attempt) else {
+                        return (false, nil)
+                    }
+                    defer { converterLifecycle = nil }
+                    return (true, converterLifecycle)
+                }
+            guard converterClaim.owned else { return .empty }
+            let converterSession = converterClaim.session
+            let converterTail: Data
+            do {
+                let rawTail = try converterSession?.finish() ?? Data()
+                let gain = lock.withLock { _gainFactor }
+                converterTail = Self.applySoftwareGain(rawTail, gain: gain)
+            } catch {
+                converterSession?.discard()
+                converterTail = Data()
+                Log.debug("[AudioCapture] Audio converter tail drain failed: \(error)")
+            }
 
             // Collect accumulated data and tear down streams under the
             // lock. No tap callbacks can race here because removeTap
             // has already drained them.
-            let pcmData: Data = lock.withLock {
+            let captureResult: (data: Data, peak: Float) = lock.withLock {
+                guard captureSinkOwnership.owns(attempt) else {
+                    return (Data(), 0)
+                }
+                let ownsDrain = publicationLedger.drainingToken == attempt
+                if ownsDrain {
+                    publishPCMDataLocked(converterTail)
+                }
                 pcmContinuation?.finish()
                 pcmContinuation = nil
-                _pcmAudioStream = nil
+                pcmStreamSnapshot.clear()
                 levelContinuation?.finish()
                 levelContinuation = nil
                 _audioLevelStream = nil
+                if ownsDrain {
+                    publicationLedger.finishDraining(attempt)
+                }
+                captureSinkOwnership.finish(attempt)
+                let peak = _peakRMS
+
+                guard ownsDrain else {
+                    pcmChunks = []
+                    return (Data(), peak)
+                }
 
                 // Concatenate all accumulated PCM chunks.
                 let totalSize = pcmChunks.reduce(0) { $0 + $1.count }
@@ -354,8 +845,9 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
                     combined.append(chunk)
                 }
                 pcmChunks = []
-                return combined
+                return (combined, peak)
             }
+            let pcmData = captureResult.data
 
             if pcmData.isEmpty {
                 return .empty
@@ -388,13 +880,15 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             // fail to re-establish their SCO audio channel after a
             // device switch. Tear down the engine so the next session
             // gets a fresh one instead of reusing the broken state.
-            let peak = lock.withLock { _peakRMS }
-            if peak == 0, duration > 0.5 {
+            if captureResult.peak == 0, duration > 0.5 {
                 Log.debug(
                     "[AudioCapture] Zero audio captured (\(String(format: "%.2f", duration))s), "
                         + "tearing down engine"
                 )
                 lock.withLock {
+                    guard !captureSinkOwnership.hasOwner,
+                        engine === engineToStop
+                    else { return }
                     tearDownEngineLocked()
                 }
             }
@@ -420,20 +914,35 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
     /// negotiation), it holds the lock indefinitely. This method uses
     /// `lock.try()` — if the lock is available, it tears down normally.
     /// If the lock is held (stuck `startRecording`), it stops the engine
-    /// directly to unblock `engine.start()`, then marks for rebuild so
-    /// the next session creates a fresh engine.
+    /// directly to unblock `engine.start()`. The invalidated start owner
+    /// tears down its state as it unwinds and cannot publish recording.
     public func forceReset() {
         #if canImport(AVFoundation)
+            // Publish/reset ownership is independent of `lock`, so the
+            // first engine is reachable even while its start call blocks.
+            let invalidated = engineStartResetLedger.invalidateActiveAttempt()
+            publicationLedger.reset()
+            pcmStreamSnapshot.clear()
             if lock.try() {
                 tearDownEngineLocked()
                 _isRecording = false
+                if let attempt = recordingStartAttempt {
+                    engineStartResetLedger.end(attempt)
+                    recordingStartAttempt = nil
+                }
+                discardCaptureStateLocked()
                 lock.unlock()
                 Log.debug("[AudioCapture] Force reset (lock available)")
             } else {
-                // Lock is held — startRecording() is stuck. Stop the
-                // engine directly to unblock engine.start().
-                engine?.stop()
-                _needsEngineRebuild = true
+                // The candidate was published before `engine.start()`.
+                // Stopping it can unblock BT SCO negotiation without
+                // reading provider state outside its main lock.
+                invalidated?.engine?.stop()
+                if let attempt = invalidated?.attempt {
+                    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                        self?.finishForceReset(for: attempt)
+                    }
+                }
                 Log.debug("[AudioCapture] Force reset (lock held, engine stopped)")
             }
         #endif
@@ -472,10 +981,15 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
         /// the engine's input node is configured to capture from that device.
         /// When the selected device changes between sessions, the existing
         /// engine is torn down and rebuilt for the new device.
-        private func ensureEngine() throws -> AVAudioEngine {
+        private func ensureEngine(
+            for attempt: AudioEngineStartResetLedger<AVAudioEngine>.Attempt
+        ) throws -> AVAudioEngine {
             let desiredDeviceID = _audioDeviceProvider?.selectedDeviceID
 
             if let engine {
+                guard engineStartResetLedger.publish(engine, for: attempt) else {
+                    throw resetDuringEngineStartError
+                }
                 // If the selected device changed or a config change was
                 // deferred during a previous recording, tear down and
                 // rebuild with the current hardware.
@@ -527,6 +1041,9 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
                             tearDownEngineLocked()
                             // Fall through to create a new engine.
                         } else {
+                            guard engineStartResetLedger.isValid(attempt) else {
+                                throw resetDuringEngineStartError
+                            }
                             engine.prepare()
                             var startError: Error?
                             let startException = ObjCTryCatch {
@@ -548,18 +1065,33 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
                                 tearDownEngineLocked()
                                 // Fall through to create a new engine.
                             } else {
+                                guard engineStartResetLedger.isValid(attempt) else {
+                                    engine.stop()
+                                    tearDownEngineLocked()
+                                    throw resetDuringEngineStartError
+                                }
                                 return engine
                             }
                         }
                     } else {
+                        guard engineStartResetLedger.isValid(attempt) else {
+                            throw resetDuringEngineStartError
+                        }
                         return engine
                     }
                 }
             }
 
+            guard engineStartResetLedger.isValid(attempt) else {
+                throw resetDuringEngineStartError
+            }
+
             _engineCreatedAt = CFAbsoluteTimeGetCurrent()
 
             let engine = AVAudioEngine()
+            guard engineStartResetLedger.publish(engine, for: attempt) else {
+                throw resetDuringEngineStartError
+            }
 
             // Configure the input device before accessing inputNode's
             // format. Setting the device after reading the format would
@@ -612,6 +1144,10 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             }
 
             engine.prepare()
+            guard engineStartResetLedger.isValid(attempt) else {
+                engine.stop()
+                throw resetDuringEngineStartError
+            }
             var startError: Error?
             let startException = ObjCTryCatch {
                 do { try engine.start() } catch { startError = error }
@@ -624,11 +1160,15 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             if let startError {
                 throw startError
             }
+            guard engineStartResetLedger.isValid(attempt) else {
+                engine.stop()
+                throw resetDuringEngineStartError
+            }
 
             self.engine = engine
             self.tapFormat = tapFmt
             // Invalidate the converter so it is rebuilt against the new tap format.
-            self.converter = nil
+            self.converterLifecycle = nil
 
             registerConfigChangeObserver()
 
@@ -673,11 +1213,11 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             }
         #endif
 
-        /// Return the existing converter or create one matching `tapFormat`.
+        /// Return the converter lifecycle matching `tapFormat`.
         /// Must be called while `lock` is held and after `ensureEngine()`.
-        private func ensureConverter() throws -> AVAudioConverter {
-            if let converter {
-                return converter
+        private func ensureConverterLifecycle() throws -> PCMConverterLifecycle {
+            if let converterLifecycle {
+                return converterLifecycle
             }
 
             guard let tapFormat else {
@@ -695,11 +1235,12 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
                 throw AudioCaptureError.formatError
             }
 
-            guard let converter = AVAudioConverter(from: tapFormat, to: targetFormat) else {
-                throw AudioCaptureError.formatError
-            }
-            self.converter = converter
-            return converter
+            let lifecycle = PCMConverterLifecycle(
+                inputFormat: tapFormat,
+                outputFormat: targetFormat
+            )
+            self.converterLifecycle = lifecycle
+            return lifecycle
         }
 
         /// Register for `AVAudioEngineConfigurationChange` to handle device
@@ -751,6 +1292,13 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
                 )
                 return
             }
+            if publicationLedger.drainingToken != nil {
+                _needsEngineRebuild = true
+                Log.debug(
+                    "[AudioCapture] Config change while stopping, deferring rebuild"
+                )
+                return
+            }
             if _isRecording {
                 // Check if the hardware format actually changed before
                 // deferring a rebuild. AVAudioEngine fires spurious
@@ -785,15 +1333,105 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             }
             engine?.stop()
             engine = nil
-            converter = nil
+            converterLifecycle?.discard()
+            converterLifecycle = nil
             tapFormat = nil
             _configuredDeviceID = nil
+        }
+
+        private var resetDuringEngineStartError: AudioCaptureError {
+            .engineStartFailed("Audio engine was reset while starting")
+        }
+
+        /// Finish a reset that could not acquire `lock` synchronously. The
+        /// attempt check prevents delayed cleanup from touching a replacement.
+        private func finishForceReset(
+            for attempt: AudioEngineStartResetLedger<AVAudioEngine>.Attempt
+        ) {
+            lock.withLock {
+                guard recordingStartAttempt == attempt else { return }
+                tearDownEngineLocked()
+                discardCaptureStateLocked(ownedBy: attempt)
+                engineStartResetLedger.end(attempt)
+            }
+        }
+
+        /// Tear down an engine/tap allocated by a failed start without holding
+        /// the provider lock while removeTap drains callbacks. The cleanup flag
+        /// prevents a replacement start from claiming the engine in between.
+        private func cleanUpFailedStart(engine failedEngine: AVAudioEngine?) {
+            if let failedEngine {
+                _ = ObjCTryCatch {
+                    failedEngine.inputNode.removeTap(onBus: 0)
+                }
+                failedEngine.stop()
+            }
+            lock.withLock {
+                if let failedEngine, engine === failedEngine {
+                    tearDownEngineLocked()
+                }
+                startCleanupInProgress = false
+            }
+        }
+
+        /// Clear state allocated before a failed start. Must be called
+        /// while `lock` is held.
+        private func discardCaptureStateLocked(
+            ownedBy attempt: CaptureAttempt? = nil
+        ) {
+            if let attempt {
+                guard captureSinkOwnership.finish(attempt) else { return }
+                publicationLedger.reset(attempt)
+            } else {
+                captureSinkOwnership.reset()
+                publicationLedger.reset()
+            }
+            _isRecording = false
+            recordingStartAttempt = nil
+            pcmContinuation?.finish()
+            pcmContinuation = nil
+            pcmStreamSnapshot.clear()
+            levelContinuation?.finish()
+            levelContinuation = nil
+            _audioLevelStream = nil
+            pcmChunks = []
+            converterLifecycle?.discard()
         }
     #endif
 
     // MARK: - Audio level metering
 
     #if canImport(AVFoundation)
+        /// Classify the callback against the key-release host timestamp before
+        /// either metering or conversion. A callback queued until after release
+        /// can still contribute its pre-release prefix, but never its suffix.
+        private func processTapBuffer(
+            _ buffer: AVAudioPCMBuffer,
+            timestamp: AVAudioTime,
+            publication: CapturePublication
+        ) {
+            guard let admission = publicationLedger.admitCallback(for: publication)
+            else { return }
+
+            let frameLength = Int(buffer.frameLength)
+            let sampleRate = buffer.format.sampleRate
+            let bufferStartHostTime = AudioCaptureReleaseFence.bufferStartHostTime(
+                timestamp: timestamp)
+            guard
+                let retainedFrameCount = publicationLedger.preReleaseFrameCount(
+                    for: admission,
+                    bufferStartHostTime: bufferStartHostTime,
+                    sampleRate: sampleRate,
+                    frameLength: frameLength),
+                let retainedBuffer = AudioCaptureReleaseFence.trimToPrefix(
+                    buffer,
+                    frameCount: retainedFrameCount)
+            else { return }
+
+            emitAudioLevel(retainedBuffer, admission: admission)
+            processAudioBuffer(retainedBuffer, admission: admission)
+        }
+
         /// Compute RMS level from a float32 PCM buffer, update peak tracking,
         /// and emit the scaled level to the stream.
         /// Ambient calibration window in samples at the hardware sample
@@ -802,7 +1440,10 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
         /// approximation; the exact window length is not critical.
         private static let ambientCalibrationSamples: Int = Int(targetSampleRate * 0.5)
 
-        private func emitAudioLevel(_ buffer: AVAudioPCMBuffer) {
+        private func emitAudioLevel(
+            _ buffer: AVAudioPCMBuffer,
+            admission: CaptureCallbackAdmission
+        ) {
             guard let floatData = buffer.floatChannelData else { return }
             let frameLength = Int(buffer.frameLength)
             guard frameLength > 0 else { return }
@@ -816,6 +1457,7 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             let rms = sqrtf(sumOfSquares / Float(frameLength))
 
             lock.withLock {
+                guard publicationLedger.accepts(admission) else { return }
                 // Track the raw (unscaled) peak for silence detection.
                 // Raw values are used so the silence gate in
                 // DictationPipeline is unaffected by gain.
@@ -863,74 +1505,55 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
 
     #if canImport(AVFoundation)
         private func processAudioBuffer(
-            _ buffer: AVAudioPCMBuffer
+            _ buffer: AVAudioPCMBuffer,
+            admission: CaptureCallbackAdmission
         ) {
-            // Acquire the converter under the lock. It is rebuilt when
-            // the tap format changes (device switch).
-            let converter: AVAudioConverter? = lock.withLock { self.converter }
-            guard let converter else { return }
-
-            // Convert the tap buffer to the target format (16kHz mono int16).
-            let frameCapacity = AVAudioFrameCount(
-                Double(buffer.frameLength) * Self.targetSampleRate
-                    / buffer.format.sampleRate
-            )
-            guard frameCapacity > 0 else { return }
-
-            guard
-                let outputBuffer = AVAudioPCMBuffer(
-                    pcmFormat: converter.outputFormat,
-                    frameCapacity: frameCapacity + 1
-                )
-            else {
-                return
+            let converterLifecycle: PCMConverterLifecycle? = lock.withLock {
+                guard publicationLedger.accepts(admission) else { return nil }
+                return self.converterLifecycle
             }
+            guard let converterLifecycle else { return }
 
-            var error: NSError?
-            var inputConsumed = false
-
-            converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-                if inputConsumed {
-                    outStatus.pointee = .noDataNow
-                    return nil
-                }
-                inputConsumed = true
-                outStatus.pointee = .haveData
-                return buffer
-            }
-
-            if let error {
+            let rawData: Data
+            do {
+                rawData = try converterLifecycle.consume(buffer)
+            } catch {
                 // Log and skip this chunk rather than crashing.
-                let count = lock.withLock {
+                let count: Int? = lock.withLock {
+                    guard publicationLedger.accepts(admission) else { return nil }
                     _droppedFrameCount += 1
                     return _droppedFrameCount
                 }
-                Log.debug("[AudioCapture] Audio conversion error (dropped \(count)): \(error)")
+                if let count {
+                    Log.debug(
+                        "[AudioCapture] Audio conversion error (dropped \(count)): \(error)")
+                }
                 return
             }
 
-            guard outputBuffer.frameLength > 0 else { return }
+            guard !rawData.isEmpty else { return }
 
-            // Extract raw int16 PCM bytes from the output buffer,
-            // applying software gain for far-field mics to lift quiet
-            // speech and whispers into a range the transcription model
-            // handles well.
-            let frameCount = Int(outputBuffer.frameLength)
-            let gain: Float = lock.withLock { _gainFactor }
-            let data: Data
-
-            if let int16Data = outputBuffer.int16ChannelData {
-                let byteCount = frameCount * (Self.targetBitsPerSample / 8)
-                let raw = Data(bytes: int16Data[0], count: byteCount)
-                data = Self.applySoftwareGain(raw, gain: gain)
-            } else {
-                return
+            // Apply software gain for far-field mics to lift quiet speech and
+            // whispers into a range the transcription model handles well.
+            let gain: Float? = lock.withLock {
+                guard publicationLedger.accepts(admission) else { return nil }
+                return _gainFactor
             }
+            guard let gain else { return }
+            let data = Self.applySoftwareGain(rawData, gain: gain)
 
             lock.withLock {
-                pcmChunks.append(data)
-                pcmContinuation?.yield(data)
+                guard publicationLedger.accepts(admission) else { return }
+                publishPCMDataLocked(data)
             }
+        }
+
+        /// Publish one byte-identical PCM chunk to both the live stream and
+        /// the eventual WAV accumulator. Must be called while `lock` is held.
+        private func publishPCMDataLocked(_ data: Data) {
+            guard !data.isEmpty else { return }
+            pcmChunks.append(data)
+            pcmContinuation?.yield(data)
         }
     #endif
 
@@ -991,6 +1614,8 @@ public enum AudioCaptureError: Error, Sendable, CustomStringConvertible {
     case deviceSelectionFailed(UInt32)
     /// The audio engine threw an exception during start.
     case engineStartFailed(String)
+    /// The audio engine threw an exception while removing its input tap.
+    case engineStopFailed(String)
 
     public var description: String {
         switch self {
@@ -1004,6 +1629,8 @@ public enum AudioCaptureError: Error, Sendable, CustomStringConvertible {
             return "Failed to select audio input device \(id)"
         case .engineStartFailed(let reason):
             return "Audio engine failed to start: \(reason)"
+        case .engineStopFailed(let reason):
+            return "Audio engine failed to stop: \(reason)"
         }
     }
 }

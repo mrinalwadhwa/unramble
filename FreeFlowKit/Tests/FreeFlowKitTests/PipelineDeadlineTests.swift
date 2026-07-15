@@ -6,18 +6,92 @@ import Testing
 private final class GrowingFinishWatchdogProvider:
     StreamingDictationProviding, @unchecked Sendable
 {
+    private let lock = NSLock()
+    private var activeSessionID: DictationSessionID?
+    private var compatibilitySessionID: DictationSessionID?
+
     var finishStreamingWatchdog: TimeInterval = 20
     let maximumFinishStreamingWatchdog: TimeInterval = 175
 
     func startStreaming(
+        context: AppContext,
+        language: String?,
+        micProximity: MicProximity
+    ) async throws {
+        let sessionID = DictationSessionID()
+        try await startStreaming(
+            sessionID: sessionID,
+            context: context,
+            language: language,
+            micProximity: micProximity)
+        lock.withLock { compatibilitySessionID = sessionID }
+    }
+
+    func startStreaming(
+        sessionID: DictationSessionID,
         context _: AppContext,
         language _: String?,
         micProximity _: MicProximity
-    ) async throws {}
+    ) async throws {
+        let claimed = lock.withLock {
+            guard activeSessionID == nil else { return false }
+            activeSessionID = sessionID
+            return true
+        }
+        guard claimed else { throw CancellationError() }
+    }
 
-    func sendAudio(_: Data) async throws {}
-    func finishStreaming() async throws -> String { "" }
-    func cancelStreaming() async {}
+    func sendAudio(_ data: Data) async throws {
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        try await sendAudio(data, sessionID: sessionID)
+    }
+
+    func sendAudio(
+        _: Data,
+        sessionID: DictationSessionID
+    ) async throws {
+        let accepted = lock.withLock { activeSessionID == sessionID }
+        guard accepted else { throw CancellationError() }
+    }
+
+    func finishStreaming() async throws -> String {
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        return try await finishStreaming(sessionID: sessionID)
+    }
+
+    func finishStreaming(sessionID: DictationSessionID) async throws -> String {
+        let finished = lock.withLock {
+            guard activeSessionID == sessionID else { return false }
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
+            return true
+        }
+        guard finished else { throw CancellationError() }
+        return ""
+    }
+
+    func cancelStreaming() async {
+        lock.withLock {
+            activeSessionID = nil
+            compatibilitySessionID = nil
+        }
+    }
+
+    func cancelStreaming(sessionID: DictationSessionID) async {
+        lock.withLock {
+            guard activeSessionID == sessionID else { return }
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

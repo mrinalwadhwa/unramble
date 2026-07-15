@@ -39,6 +39,11 @@ public protocol LocalRecognitionSession: AnyObject {
     func feed(_ samples: [Float]) throws
 
     /// Return the transcript produced by complete chunks so far.
+    ///
+    /// Each non-empty result must preserve the previous result as an exact
+    /// prefix. Nemotron satisfies this by appending decoded tokens. Supporting
+    /// a recognizer that revises earlier tokens requires a revision-aware unit
+    /// ledger in `LocalStreamingProvider` before it can conform here.
     func transcript() -> String
 
     /// Flush buffered samples and return the complete transcript.

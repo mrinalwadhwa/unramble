@@ -4,6 +4,30 @@ import Foundation
 /// for one OpenAI Realtime connection. Network I/O remains at the provider edge.
 actor OpenAIRealtimeCommitSession {
 
+    private struct ResponsePartIndex: Hashable, Comparable, Sendable {
+        let output: Int
+        let content: Int
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            (lhs.output, lhs.content) < (rhs.output, rhs.content)
+        }
+    }
+
+    private struct ResponsePart: Sendable {
+        var deltas = ""
+        var completedText: String?
+
+        var resolvedText: String { completedText ?? deltas }
+    }
+
+    enum TransportAdmission: Equatable, Sendable {
+        case immediate
+        case queued
+    }
+
+    typealias TransportAdmissionObserver =
+        @Sendable (TransportAdmission) -> Void
+
     private struct Waiter<Value: Sendable>: Sendable {
         let id: UUID
         let continuation: CheckedContinuation<Value, any Error>
@@ -50,6 +74,7 @@ actor OpenAIRealtimeCommitSession {
 
     private let policy: RealtimeCommitPolicy
     private let maxUnresolvedItems: Int
+    private let onTransportAdmission: TransportAdmissionObserver?
     private var reducer = OpenAIRealtimeTranscriptReducer()
     private var audioResampler = AudioResampler.Stream16kTo24k()
 
@@ -75,19 +100,21 @@ actor OpenAIRealtimeCommitSession {
     private var resolvedRawTranscript: String?
     private var resolvedTranscriptSegments: [String]?
     private var polishStarted = false
-    private var responseText = ""
-    private var completedResponseText: String?
+    private var responseParts: [ResponsePartIndex: ResponsePart] = [:]
+    private var receivedNonemptyResponseDelta = false
     private var resolvedPolishedResponse: String?
     private var responseWaiters:
         [Waiter<String>] = []
 
     init(
         policy: RealtimeCommitPolicy = RealtimeCommitPolicy(),
-        maxUnresolvedItems: Int = 2
+        maxUnresolvedItems: Int = 2,
+        onTransportAdmission: TransportAdmissionObserver? = nil
     ) {
         precondition(maxUnresolvedItems > 0)
         self.policy = policy
         self.maxUnresolvedItems = maxUnresolvedItems
+        self.onTransportAdmission = onTransportAdmission
     }
 
     func acquireTransportTurn() async throws {
@@ -95,6 +122,7 @@ actor OpenAIRealtimeCommitSession {
         try requireSessionSuccess()
         if !transportTurnHeld {
             transportTurnHeld = true
+            onTransportAdmission?(.immediate)
             if Task.isCancelled {
                 releaseTransportTurn()
                 throw CancellationError()
@@ -114,6 +142,7 @@ actor OpenAIRealtimeCommitSession {
                         Waiter(
                             id: waiterID,
                             continuation: continuation))
+                    onTransportAdmission?(.queued)
                 }
             }
         } onCancel: {
@@ -404,16 +433,32 @@ actor OpenAIRealtimeCommitSession {
     }
 
     @discardableResult
-    func appendResponseDelta(_ delta: String) throws -> Bool {
+    func appendResponseDelta(
+        _ delta: String,
+        outputIndex: Int = 0,
+        contentIndex: Int = 0
+    ) throws -> Bool {
         try requirePolishInProgress()
-        let isFirst = responseText.isEmpty
-        responseText += delta
-        return isFirst && !delta.isEmpty
+        let index = ResponsePartIndex(
+            output: outputIndex,
+            content: contentIndex)
+        responseParts[index, default: ResponsePart()].deltas += delta
+        let isFirst = !receivedNonemptyResponseDelta && !delta.isEmpty
+        receivedNonemptyResponseDelta = receivedNonemptyResponseDelta
+            || !delta.isEmpty
+        return isFirst
     }
 
-    func completeResponseText(_ text: String) throws {
+    func completeResponseText(
+        _ text: String,
+        outputIndex: Int = 0,
+        contentIndex: Int = 0
+    ) throws {
         try requirePolishInProgress()
-        completedResponseText = text
+        let index = ResponsePartIndex(
+            output: outputIndex,
+            content: contentIndex)
+        responseParts[index, default: ResponsePart()].completedText = text
     }
 
     func completeResponse() throws {
@@ -421,7 +466,9 @@ actor OpenAIRealtimeCommitSession {
         guard resolvedPolishedResponse == nil else {
             throw Failure.responseAlreadyCompleted
         }
-        let result = completedResponseText ?? responseText
+        let result = responseParts.keys.sorted().map {
+            responseParts[$0]?.resolvedText ?? ""
+        }.joined()
         resolvedPolishedResponse = result
         let waiters = responseWaiters
         responseWaiters.removeAll()

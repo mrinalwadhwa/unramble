@@ -22,7 +22,7 @@ import Foundation
 public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendable {
 
     private let lock = NSLock()
-    private var callback: (@Sendable (HotkeyEvent) -> Void)?
+    private var callback: (@Sendable (HotkeyEvent, UInt64) -> Void)?
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
@@ -56,7 +56,15 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
 
     /// Register a global hotkey listener with the default (persisted) hotkey.
     public func register(callback: @escaping @Sendable (HotkeyEvent) -> Void) throws {
-        try register(with: Settings.shared.hotkeySetting, callback: callback)
+        try registerTimestamped { event, _ in callback(event) }
+    }
+
+    public func registerTimestamped(
+        callback: @escaping @Sendable (HotkeyEvent, UInt64) -> Void
+    ) throws {
+        try registerTimestamped(
+            with: Settings.shared.hotkeySetting,
+            callback: callback)
     }
 
     /// Register a global hotkey listener with a specific hotkey configuration.
@@ -68,6 +76,13 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
     public func register(
         with setting: HotkeySetting,
         callback: @escaping @Sendable (HotkeyEvent) -> Void
+    ) throws {
+        try registerTimestamped(with: setting) { event, _ in callback(event) }
+    }
+
+    private func registerTimestamped(
+        with setting: HotkeySetting,
+        callback: @escaping @Sendable (HotkeyEvent, UInt64) -> Void
     ) throws {
         lock.lock()
         defer { lock.unlock() }
@@ -180,12 +195,18 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
             lock.lock()
             _isHotkeyDown = true
             lock.unlock()
-            cb?(.pressed)
+            cb?(
+                .pressed,
+                AudioCaptureReleaseFence.hostTime(
+                    eventTimestampNanoseconds: event.timestamp))
         } else if !hotkeyPressed && wasDown {
             lock.lock()
             _isHotkeyDown = false
             lock.unlock()
-            cb?(.released)
+            cb?(
+                .released,
+                AudioCaptureReleaseFence.hostTime(
+                    eventTimestampNanoseconds: event.timestamp))
         }
     }
 
@@ -224,14 +245,20 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
             lock.lock()
             _isHotkeyDown = true
             lock.unlock()
-            cb?(.pressed)
+            cb?(
+                .pressed,
+                AudioCaptureReleaseFence.hostTime(
+                    eventTimestampNanoseconds: event.timestamp))
         } else if !isKeyDown && wasDown {
             // On key up, only check the key code (modifiers may have been released).
             if keyMatches {
                 lock.lock()
                 _isHotkeyDown = false
                 lock.unlock()
-                cb?(.released)
+                cb?(
+                    .released,
+                    AudioCaptureReleaseFence.hostTime(
+                        eventTimestampNanoseconds: event.timestamp))
             }
         }
     }

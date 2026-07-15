@@ -565,12 +565,33 @@ struct MicDiagnosticStoreTests {
             let pipeline = DictationPipeline(
                 audioProvider: audioProvider,
                 contextProvider: MockAppContextProvider(),
-                batchProvider: batchProvider,
+                backend: .cloud(
+                    realtime: MockStreamingProvider(),
+                    fallback: batchProvider),
                 textInjector: MockTextInjector(),
                 coordinator: RecordingCoordinator(),
                 micDiagnosticStore: store
             )
             return (pipeline, audioProvider, batchProvider, store)
+        }
+
+        private func activateAndWaitForCapture(
+            _ pipeline: DictationPipeline,
+            audioProvider: MockAudioProvider
+        ) async {
+            let previousReadyCount = audioProvider.captureReadyCount
+            guard await pipeline.activate() != nil else {
+                Issue.record("Pipeline activation was rejected")
+                return
+            }
+
+            for _ in 0..<10_000 {
+                if audioProvider.captureReadyCount > previousReadyCount {
+                    return
+                }
+                await Task.yield()
+            }
+            Issue.record("Audio capture did not become ready")
         }
 
         @Test("Successful dictation records an 'ok' entry")
@@ -588,11 +609,8 @@ struct MicDiagnosticStoreTests {
                 store: store
             )
 
-            await pipeline.activate()
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-
-            // Wait for the background processing task to finish.
-            try? await Task.sleep(nanoseconds: 200_000_000)
 
             let count = await store.count
             #expect(count == 1)
@@ -617,12 +635,8 @@ struct MicDiagnosticStoreTests {
                 store: store
             )
 
-            await pipeline.activate()
-            // Wait for the background setup to pick up the early
-            // silence short-circuit.
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-            try? await Task.sleep(nanoseconds: 200_000_000)
 
             let count = await store.count
             #expect(count == 1)
@@ -647,9 +661,8 @@ struct MicDiagnosticStoreTests {
                 store: store
             )
 
-            await pipeline.activate()
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-            try? await Task.sleep(nanoseconds: 200_000_000)
 
             let count = await store.count
             #expect(count == 1)
@@ -674,15 +687,13 @@ struct MicDiagnosticStoreTests {
             )
 
             // First dictation: success.
-            await pipeline.activate()
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-            try? await Task.sleep(nanoseconds: 200_000_000)
 
             // Second dictation: success with different text.
             dictation.stubbedText = "Second"
-            await pipeline.activate()
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-            try? await Task.sleep(nanoseconds: 200_000_000)
 
             let count = await store.count
             #expect(count == 2)
@@ -707,9 +718,8 @@ struct MicDiagnosticStoreTests {
                 store: store
             )
 
-            await pipeline.activate()
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-            try? await Task.sleep(nanoseconds: 200_000_000)
 
             let count = await store.count
             #expect(count == 1)
@@ -723,17 +733,19 @@ struct MicDiagnosticStoreTests {
 
         @Test("Pipeline without store does not crash")
         func noStoreSafe() async {
+            let audio = MockAudioProvider()
             let pipeline = DictationPipeline(
-                audioProvider: MockAudioProvider(),
+                audioProvider: audio,
                 contextProvider: MockAppContextProvider(),
-                batchProvider: MockBatchProvider(stubbedText: "safe"),
+                backend: .cloud(
+                    realtime: MockStreamingProvider(),
+                    fallback: MockBatchProvider(stubbedText: "safe")),
                 textInjector: MockTextInjector(),
                 coordinator: RecordingCoordinator()
             )
 
-            await pipeline.activate()
+            await activateAndWaitForCapture(pipeline, audioProvider: audio)
             await pipeline.complete()
-            try? await Task.sleep(nanoseconds: 200_000_000)
             // No crash, no store — just verifying the nil path is safe.
         }
     }

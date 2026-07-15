@@ -20,7 +20,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private weak var coordinator: RecordingCoordinator?
     private weak var pipeline: DictationPipeline?
     private var transcriptBuffer: TranscriptBuffer?
-    private var textInjector: (any TextInjecting)?
     private var audioDeviceProvider: (any AudioDeviceProviding)?
     private var updaterService: UpdaterService?
     private var micDiagnosticStore: MicDiagnosticStore?
@@ -68,7 +67,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     ///   - statusItem: The menu bar status item to manage.
     ///   - coordinator: The recording coordinator to observe.
     ///   - transcriptBuffer: The buffer holding the last transcript for re-paste.
-    ///   - textInjector: The injector used to re-paste transcripts.
     ///   - audioDeviceProvider: The provider for mic enumeration and selection.
     ///   - shortcuts: The shortcut configuration for display hints.
     ///   - hotkeyRegistered: Whether the global hotkey registered successfully.
@@ -77,7 +75,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         coordinator: RecordingCoordinator,
         pipeline: DictationPipeline? = nil,
         transcriptBuffer: TranscriptBuffer? = nil,
-        textInjector: (any TextInjecting)? = nil,
         audioDeviceProvider: (any AudioDeviceProviding)? = nil,
         updaterService: UpdaterService? = nil,
         micDiagnosticStore: MicDiagnosticStore? = nil,
@@ -88,7 +85,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.coordinator = coordinator
         self.pipeline = pipeline
         self.transcriptBuffer = transcriptBuffer
-        self.textInjector = textInjector
         self.audioDeviceProvider = audioDeviceProvider
         self.updaterService = updaterService
         self.micDiagnosticStore = micDiagnosticStore
@@ -573,33 +569,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func pasteLastTranscript() {
-        guard let transcriptBuffer, let textInjector else {
-            Log.debug("[MenuBar] Paste requested but buffer or injector not available")
+        guard let pipeline else {
+            Log.debug("[MenuBar] Paste requested but pipeline not available")
             return
         }
         Task {
-            guard let transcript = await transcriptBuffer.consume() else {
-                Log.debug("[MenuBar] No transcript in buffer to paste")
-                return
-            }
-
-            // Read context at the moment of paste for accurate injection.
-            let context = AppContext.empty
-
-            do {
-                try await textInjector.inject(text: transcript, into: context)
-                Log.debug("[MenuBar] Pasted last transcript (\(transcript.count) chars)")
-            } catch {
-                Log.debug("[MenuBar] Paste injection failed: \(error)")
-                // Re-store the transcript so the user can try again.
-                await transcriptBuffer.store(transcript)
-            }
-
-            // If the coordinator is in injectionFailed, reset to idle after
-            // a successful paste.
-            if let coordinator, await coordinator.state == .injectionFailed {
-                await coordinator.reset()
-            }
+            await pipeline.pasteBufferedTranscript()
         }
     }
 

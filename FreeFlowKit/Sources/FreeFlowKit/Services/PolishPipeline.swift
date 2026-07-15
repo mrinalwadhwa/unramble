@@ -601,8 +601,9 @@ public enum PolishPipeline {
     public static func buildCloudSystemPrompt(
         context: AppContext, language: String?
     ) -> String {
-        let isCasual = toneLabel(for: context.bundleID) == "casual"
-        var prompt = isCasual
+        let usesCasualEnglish = language == "en"
+            && toneLabel(for: context.bundleID) == "casual"
+        var prompt = usesCasualEnglish
             ? systemPromptCasual
             : systemPrompt(forLanguage: language)
 
@@ -1359,11 +1360,12 @@ public enum PolishPipeline {
 
     /// Select the system prompt based on the transcription language.
     ///
-    /// English (or nil) uses the detailed English prompt. Languages with
-    /// a dedicated prompt use it; all others fall back to the minimal
-    /// language-agnostic prompt.
+    /// Explicit English uses the detailed English prompt. Languages with a
+    /// dedicated prompt use it; Auto/nil and all others fall back to the
+    /// language-safe minimal prompt. Auto must not assume English because
+    /// English filler and correction rules can delete words in other languages.
     public static func systemPrompt(forLanguage language: String?) -> String {
-        guard let language, !language.isEmpty, language != "en" else {
+        if language == "en" {
             return systemPromptEnglish
         }
         switch language {

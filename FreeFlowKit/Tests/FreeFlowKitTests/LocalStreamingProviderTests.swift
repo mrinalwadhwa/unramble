@@ -109,6 +109,48 @@ struct LocalStreamingProviderTests {
         #expect(engine.finishCallCount == 0)
     }
 
+    @Test("Stale session calls cannot mutate a replacement")
+    func staleSessionCannotMutateReplacement() async throws {
+        let engine = ScriptedRecognizer(transcription: "replacement")
+        let provider = LocalStreamingProvider(
+            sttEngine: engine, polishChatClient: nil)
+        let firstSession = DictationSessionID()
+        let replacementSession = DictationSessionID()
+
+        try await provider.startStreaming(
+            sessionID: firstSession,
+            context: .empty,
+            language: nil,
+            micProximity: .farField)
+        await provider.cancelStreaming(sessionID: firstSession)
+
+        try await provider.startStreaming(
+            sessionID: replacementSession,
+            context: .empty,
+            language: nil,
+            micProximity: .farField)
+        await provider.cancelStreaming(sessionID: firstSession)
+        await #expect(throws: CancellationError.self) {
+            try await provider.sendAudio(
+                self.makePCM(),
+                sessionID: firstSession)
+        }
+        await #expect(throws: CancellationError.self) {
+            _ = try await provider.finishStreaming(
+                sessionID: firstSession)
+        }
+        #expect(engine.finishCallCount == 0)
+
+        try await provider.sendAudio(
+            makePCM(),
+            sessionID: replacementSession)
+        let result = try await provider.finishStreaming(
+            sessionID: replacementSession)
+
+        #expect(result == "Replacement")
+        #expect(engine.finishCallCount == 1)
+    }
+
     // MARK: - Empty buffer returns empty
 
     @Test("Returns empty string when no audio was sent")
@@ -153,8 +195,19 @@ struct LocalStreamingProviderTests {
                 context: .empty, language: nil, micProximity: .farField)
         }
         await load.waitUntilStarted()
-        await provider.cancelStreaming()
+
+        let cancelFinished = LockedFlag()
+        let cancel = Task {
+            await provider.cancelStreaming()
+            cancelFinished.set()
+        }
+        for _ in 0..<100 where !cancelFinished.value {
+            await Task.yield()
+        }
+        #expect(!cancelFinished.value)
+
         await load.release()
+        await cancel.value
 
         await #expect(throws: CancellationError.self) {
             try await startTask.value
@@ -162,12 +215,126 @@ struct LocalStreamingProviderTests {
         await #expect(throws: CancellationError.self) {
             try await provider.sendAudio(makePCM())
         }
+        #expect(engine.sessionCreationCount == 0)
 
         engine.stubbedIsReady = true
         try await provider.startStreaming(
             context: .empty, language: nil, micProximity: .farField)
-        #expect(engine.sessionCreationCount == 2)
+        #expect(engine.sessionCreationCount == 1)
         await provider.cancelStreaming()
+    }
+
+    @Test("Concurrent scoped start is rejected while model load is pending")
+    func concurrentScopedStartDuringLoadIsRejected() async throws {
+        let engine = ScriptedRecognizer(isReady: false)
+        let load = ControlledLoad()
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            loadSTT: { await load.run() })
+        let firstSession = DictationSessionID()
+        let secondSession = DictationSessionID()
+
+        let firstStart = Task {
+            try await provider.startStreaming(
+                sessionID: firstSession,
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
+        }
+        await load.waitUntilStarted()
+
+        await #expect(throws: CancellationError.self) {
+            try await provider.startStreaming(
+                sessionID: secondSession,
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
+        }
+        #expect(await load.callCount() == 1)
+
+        await load.release()
+        try await firstStart.value
+        await provider.cancelStreaming(sessionID: firstSession)
+    }
+
+    @Test("Cancel drains a pending load without creating a stale session")
+    func cancelDuringLoadDrainsWithoutCreatingSession() async throws {
+        let engine = ScriptedRecognizer(isReady: false)
+        let load = ControlledLoad()
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            loadSTT: { await load.run() })
+        let sessionID = DictationSessionID()
+
+        let start = Task {
+            try await provider.startStreaming(
+                sessionID: sessionID,
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
+        }
+        await load.waitUntilStarted()
+
+        let cancelFinished = LockedFlag()
+        let cancel = Task {
+            await provider.cancelStreaming(sessionID: sessionID)
+            cancelFinished.set()
+        }
+        for _ in 0..<100 where !cancelFinished.value {
+            await Task.yield()
+        }
+        #expect(!cancelFinished.value)
+
+        await load.release()
+        await cancel.value
+        await #expect(throws: CancellationError.self) {
+            try await start.value
+        }
+        #expect(engine.sessionCreationCount == 0)
+    }
+
+    @Test("Concurrent legacy start cannot steal the active owner")
+    func concurrentLegacyStartCannotStealActiveOwner() async throws {
+        let engine = ScriptedRecognizer(isReady: false)
+        let load = ControlledLoad()
+        let provider = LocalStreamingProvider(
+            sttEngine: engine,
+            polishChatClient: nil,
+            loadSTT: { await load.run() })
+
+        let firstStart = Task {
+            try await provider.startStreaming(
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
+        }
+        await load.waitUntilStarted()
+
+        await #expect(throws: CancellationError.self) {
+            try await provider.startStreaming(
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
+        }
+        #expect(await load.callCount() == 1)
+
+        let cancelFinished = LockedFlag()
+        let cancel = Task {
+            await provider.cancelStreaming()
+            cancelFinished.set()
+        }
+        for _ in 0..<100 where !cancelFinished.value {
+            await Task.yield()
+        }
+        #expect(!cancelFinished.value)
+
+        await load.release()
+        await cancel.value
+        await #expect(throws: CancellationError.self) {
+            try await firstStart.value
+        }
     }
 
     @Test("Surfaces an incremental feed failure without retrying the session")
@@ -509,10 +676,12 @@ private final class LockedFlag: @unchecked Sendable {
 
 private actor ControlledLoad {
     private var started = false
+    private var runs = 0
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var releaseContinuation: CheckedContinuation<Void, Never>?
 
     func run() async {
+        runs += 1
         started = true
         let waiters = startWaiters
         startWaiters.removeAll()
@@ -523,6 +692,10 @@ private actor ControlledLoad {
     func waitUntilStarted() async {
         guard !started else { return }
         await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func callCount() -> Int {
+        runs
     }
 
     func release() {

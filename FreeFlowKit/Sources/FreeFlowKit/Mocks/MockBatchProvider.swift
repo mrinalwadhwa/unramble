@@ -10,6 +10,7 @@ public final class MockBatchProvider: BatchDictationProviding, @unchecked Sendab
     private var _dictateCallCount: Int = 0
     private var _receivedAudioData: [Data] = []
     private var _receivedContexts: [AppContext] = []
+    private var _receivedLanguages: [String?] = []
 
     /// The text returned by `dictate(audio:context:)`.
     public var stubbedText: String
@@ -38,6 +39,10 @@ public final class MockBatchProvider: BatchDictationProviding, @unchecked Sendab
         lock.withLock { _receivedContexts }
     }
 
+    public var receivedLanguages: [String?] {
+        lock.withLock { _receivedLanguages }
+    }
+
     /// The most recent audio data received, or nil if never called.
     public var lastReceivedAudio: Data? {
         lock.withLock { _receivedAudioData.last }
@@ -52,11 +57,16 @@ public final class MockBatchProvider: BatchDictationProviding, @unchecked Sendab
         self.stubbedText = stubbedText
     }
 
-    public func dictate(audio: Data, context: AppContext) async throws -> String {
+    public func dictate(
+        audio: Data,
+        context: AppContext,
+        language: String?
+    ) async throws -> String {
         lock.withLock {
             _dictateCallCount += 1
             _receivedAudioData.append(audio)
             _receivedContexts.append(context)
+            _receivedLanguages.append(language)
         }
 
         if stubbedDelay > 0 {
@@ -77,6 +87,7 @@ public final class MockBatchProvider: BatchDictationProviding, @unchecked Sendab
             _dictateCallCount = 0
             _receivedAudioData.removeAll()
             _receivedContexts.removeAll()
+            _receivedLanguages.removeAll()
         }
     }
 }

@@ -225,16 +225,23 @@ struct LocalModelRuntimeTests {
             cancellationGate: cancellationGate,
             trace: trace
         )
+        let audio = MockAudioProvider()
+        audio.enablePCMStream = true
         let pipeline = DictationPipeline(
-            audioProvider: MockAudioProvider(),
+            audioProvider: audio,
             contextProvider: MockAppContextProvider(),
+            backend: .local(streaming: streaming),
             textInjector: MockTextInjector(),
-            coordinator: RecordingCoordinator(),
-            streamingProvider: streaming
+            coordinator: RecordingCoordinator()
         )
+        guard let sessionID = await pipeline.activate() else {
+            Issue.record("Pipeline activation was rejected")
+            return
+        }
+        await trace.wait(for: "streaming.start")
 
         let cancellation = Task {
-            await pipeline.cancel()
+            await pipeline.cancel(sessionID: sessionID)
             trace.record("pipeline.cancel.finished")
         }
         await cancellationGate.waitUntilArrived()
@@ -249,10 +256,10 @@ struct LocalModelRuntimeTests {
         await cancellation.value
 
         #expect(streaming.cancelCallCount == 1)
-        #expect(trace.snapshot() == [
+        #expect(trace.contains("pipeline.cancel.finished"))
+        #expect(trace.snapshot().filter { $0.hasPrefix("streaming.cancel") } == [
             "streaming.cancel.1.started",
             "streaming.cancel.1.finished",
-            "pipeline.cancel.finished",
         ])
     }
 }
@@ -315,12 +322,14 @@ private final class ControlledModelEngine: LocalSTTEngine, LocalLLMEngine,
 }
 
 private final class GatedCancellationStreamingProvider:
-    StreamingDictationProviding, @unchecked Sendable
+    LocalAudioReplayProviding, @unchecked Sendable
 {
     private let lock = NSLock()
     private let cancellationGate: AsyncGate
     private let trace: EventTrace
     private var cancellations = 0
+    private var activeSessionID: DictationSessionID?
+    private var compatibilitySessionID: DictationSessionID?
 
     init(cancellationGate: AsyncGate, trace: EventTrace) {
         self.cancellationGate = cancellationGate
@@ -333,13 +342,93 @@ private final class GatedCancellationStreamingProvider:
         context: AppContext,
         language: String?,
         micProximity: MicProximity
-    ) async throws {}
+    ) async throws {
+        let sessionID = DictationSessionID()
+        try await startStreaming(
+            sessionID: sessionID,
+            context: context,
+            language: language,
+            micProximity: micProximity)
+        lock.withLock {
+            guard activeSessionID == sessionID else { return }
+            compatibilitySessionID = sessionID
+        }
+    }
 
-    func sendAudio(_ pcmData: Data) async throws {}
+    func startStreaming(
+        sessionID: DictationSessionID,
+        context _: AppContext,
+        language _: String?,
+        micProximity _: MicProximity
+    ) async throws {
+        let claimed = lock.withLock {
+            guard activeSessionID == nil else { return false }
+            activeSessionID = sessionID
+            return true
+        }
+        guard claimed else { throw CancellationError() }
+        trace.record("streaming.start")
+    }
 
-    func finishStreaming() async throws -> String { "" }
+    func sendAudio(_ pcmData: Data) async throws {
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        try await sendAudio(pcmData, sessionID: sessionID)
+    }
+
+    func sendAudio(
+        _ pcmData: Data,
+        sessionID: DictationSessionID
+    ) async throws {
+        let accepted = lock.withLock { activeSessionID == sessionID }
+        guard accepted else { throw CancellationError() }
+    }
+
+    func finishStreaming() async throws -> String {
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        return try await finishStreaming(sessionID: sessionID)
+    }
+
+    func finishStreaming(
+        sessionID: DictationSessionID
+    ) async throws -> String {
+        let finished = lock.withLock {
+            guard activeSessionID == sessionID else { return false }
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
+            return true
+        }
+        guard finished else { throw CancellationError() }
+        return ""
+    }
 
     func cancelStreaming() async {
+        lock.withLock {
+            activeSessionID = nil
+            compatibilitySessionID = nil
+        }
+        await performCancellation()
+    }
+
+    func cancelStreaming(sessionID: DictationSessionID) async {
+        let owned = lock.withLock {
+            guard activeSessionID == sessionID else { return false }
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
+            return true
+        }
+        guard owned else { return }
+        await performCancellation()
+    }
+
+    private func performCancellation() async {
         let invocation = lock.withLock {
             cancellations += 1
             return cancellations
@@ -349,6 +438,17 @@ private final class GatedCancellationStreamingProvider:
             await cancellationGate.arriveAndWait()
         }
         trace.record("streaming.cancel.\(invocation).finished")
+    }
+
+    func replayCapturedAudio(
+        _ pcmData: Data,
+        sessionID: DictationSessionID,
+        context: AppContext,
+        language: String?,
+        micProximity: MicProximity,
+        silenceThreshold: Float
+    ) async throws -> String {
+        ""
     }
 }
 

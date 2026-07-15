@@ -1,5 +1,68 @@
 import CoreFoundation
+import CryptoKit
 import Foundation
+
+enum OpenAIRealtimeTransportCloseReason: Equatable, Sendable {
+    case normal
+    case goingAway
+    case abnormal
+}
+
+protocol OpenAIRealtimeTransport: Sendable {
+    func resume()
+    func send(_ text: String) async throws
+    func receiveText() async throws -> String
+    func close(_ reason: OpenAIRealtimeTransportCloseReason)
+}
+
+private final class URLSessionRealtimeTransport:
+    OpenAIRealtimeTransport, @unchecked Sendable
+{
+    private let task: URLSessionWebSocketTask
+    private let session: URLSession
+
+    init(task: URLSessionWebSocketTask, session: URLSession) {
+        self.task = task
+        self.session = session
+    }
+
+    func resume() {
+        task.resume()
+    }
+
+    func send(_ text: String) async throws {
+        try await task.send(.string(text))
+    }
+
+    func receiveText() async throws -> String {
+        let message: URLSessionWebSocketTask.Message
+        do {
+            message = try await task.receive()
+        } catch {
+            throw DictationError.networkError(
+                "WebSocket receive failed: \(error.localizedDescription)")
+        }
+
+        switch message {
+        case .string(let text):
+            return text
+        case .data(let data):
+            return String(data: data, encoding: .utf8) ?? ""
+        @unknown default:
+            return ""
+        }
+    }
+
+    func close(_ reason: OpenAIRealtimeTransportCloseReason) {
+        let code: URLSessionWebSocketTask.CloseCode = switch reason {
+        case .normal: .normalClosure
+        case .goingAway: .goingAway
+        case .abnormal: .abnormalClosure
+        }
+        task.cancel(with: code, reason: nil)
+        session.invalidateAndCancel()
+    }
+}
 
 /// Stream audio to the OpenAI Realtime API and return polished text.
 ///
@@ -71,22 +134,45 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         let evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot
     }
     private let evidenceObserver: EvidenceObserver?
+    typealias TransportFactory = @Sendable (
+        _ apiKey: String,
+        _ model: String
+    ) throws -> any OpenAIRealtimeTransport
+    typealias SetupAdmission = @Sendable (DictationSessionID) async -> Void
+    typealias BackupReadyObserver = @Sendable () -> Void
+    typealias BackupOpenObserver = @Sendable (UUID) async -> Void
+    typealias BackupOpenCompletionObserver = @Sendable (UUID) -> Void
+    typealias BackupRefreshObserver = @Sendable (UUID) async -> Void
+    typealias BackupRefreshCompletionObserver = @Sendable (UUID) -> Void
+    private let transportFactory: TransportFactory
+    private let setupAdmission: SetupAdmission?
+    private let backupReadyObserver: BackupReadyObserver?
+    private let backupOpenWillPublish: BackupOpenObserver?
+    private let backupOpenDidFinish: BackupOpenCompletionObserver?
+    private let backupRefreshDelay: TimeInterval
+    private let backupRefreshWillDiscard: BackupRefreshObserver?
+    private let backupRefreshDidFinish: BackupRefreshCompletionObserver?
     private let serverEventTimeout: TimeInterval = 60
 
     // MARK: - State (guarded by lock)
 
     private let lock = NSLock()
 
-    /// Active session's WebSocket task, if any.
-    private var webSocketTask: URLSessionWebSocketTask?
-
-    /// Active session's URLSession, kept alive with the task.
-    private var urlSession: URLSession?
+    /// Active session's WebSocket transport, if any.
+    private var transport: (any OpenAIRealtimeTransport)?
 
     /// Background task that opens the connection and sends session.update.
     /// `sendAudio` and `finishStreaming` await this future before using
     /// the active task.
     private var setupTask: Task<Void, Error>?
+    private var activeSessionID: DictationSessionID?
+    private var compatibilitySessionID: DictationSessionID?
+    private var currentTimingSessionID: DictationSessionID?
+    private var chunkReaderSessionID: DictationSessionID?
+
+    /// Invalidates post-session background work that was admitted before a
+    /// disconnect completed.
+    private var lifecycleEpoch: UInt64 = 0
 
     /// Monotonically increasing session counter for diagnostic logging.
     private var nextSessionID: Int = 1
@@ -137,16 +223,71 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     /// Reader task that receives the transcription and polished response.
     private var chunkReaderTask: Task<Void, Never>?
 
+    private struct TeardownOperation {
+        let token: UUID
+        let sessionID: DictationSessionID
+        let task: Task<Void, Never>
+    }
+
+    /// A closing session retains provider ownership until all setup and reader
+    /// work has drained, preventing the next session from adopting its writes.
+    private var teardownOperation: TeardownOperation?
+
     // MARK: - Backup connection (warm standby)
 
-    /// Pre-opened connection ready to be adopted by the next session.
-    private var backupTask: URLSessionWebSocketTask?
-    private var backupSession: URLSession?
-    private var backupOpenedAt: Date?
-    private var backupOpenTask: Task<Void, Never>?
+    private struct BackupConnection {
+        let generation: UUID
+        let credentialFingerprint: Data
+        let transport: any OpenAIRealtimeTransport
+        let openedAt: Date
+    }
 
-    /// Background task that refreshes the backup before it goes stale.
-    private var backupRefreshTask: Task<Void, Never>?
+    private struct BackupOpenOperation {
+        let token: UUID
+        let credentialFingerprint: Data
+        var task: Task<Void, Never>?
+    }
+
+    private struct BackupRefreshOperation {
+        let token: UUID
+        let generation: UUID
+        var task: Task<Void, Never>?
+    }
+
+    private final class AsyncLaunchGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            if lock.withLock({ released }) { return }
+            await withCheckedContinuation { continuation in
+                let ready = lock.withLock {
+                    if released { return true }
+                    waiters.append(continuation)
+                    return false
+                }
+                if ready { continuation.resume() }
+            }
+        }
+
+        func release() {
+            let ready: [CheckedContinuation<Void, Never>] = lock.withLock {
+                guard !released else { return [] }
+                released = true
+                let ready = waiters
+                waiters.removeAll()
+                return ready
+            }
+            for waiter in ready { waiter.resume() }
+        }
+    }
+
+    /// Each asynchronous backup transition is reserved before its task starts.
+    /// A task may publish or discard only while its token still owns the slot.
+    private var backupConnection: BackupConnection?
+    private var backupOpenOperation: BackupOpenOperation?
+    private var backupRefreshOperation: BackupRefreshOperation?
 
     /// Maximum age for an idle backup connection. OpenAI closes idle
     /// WebSockets after ~60-90s, so keep this well under that threshold.
@@ -176,66 +317,109 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         sttModel: String,
         commitPolicy: RealtimeCommitPolicy,
         maxUnresolvedItems: Int,
-        evidenceObserver: EvidenceObserver?
+        evidenceObserver: EvidenceObserver?,
+        transportFactory: @escaping TransportFactory = {
+            try OpenAIStreamingProvider.buildTransport(apiKey: $0, model: $1)
+        },
+        setupAdmission: SetupAdmission? = nil,
+        backupReadyObserver: BackupReadyObserver? = nil,
+        backupOpenWillPublish: BackupOpenObserver? = nil,
+        backupOpenDidFinish: BackupOpenCompletionObserver? = nil,
+        backupRefreshDelay: TimeInterval = 35,
+        backupRefreshWillDiscard: BackupRefreshObserver? = nil,
+        backupRefreshDidFinish: BackupRefreshCompletionObserver? = nil
     ) {
         precondition(maxUnresolvedItems > 0)
+        precondition(backupRefreshDelay >= 0 && backupRefreshDelay.isFinite)
         self.apiKeyProvider = apiKeyProvider
         self.realtimeModel = realtimeModel
         self.sttModel = sttModel
         self.commitPolicy = commitPolicy
         self.maxUnresolvedItems = maxUnresolvedItems
         self.evidenceObserver = evidenceObserver
+        self.transportFactory = transportFactory
+        self.setupAdmission = setupAdmission
+        self.backupReadyObserver = backupReadyObserver
+        self.backupOpenWillPublish = backupOpenWillPublish
+        self.backupOpenDidFinish = backupOpenDidFinish
+        self.backupRefreshDelay = backupRefreshDelay
+        self.backupRefreshWillDiscard = backupRefreshWillDiscard
+        self.backupRefreshDidFinish = backupRefreshDidFinish
     }
 
     deinit {
-        let (reader, ws, session, bOpen, bTask, bSession, bRefresh) = lock.withLock {
-            (chunkReaderTask, webSocketTask, urlSession,
-             backupOpenTask, backupTask, backupSession, backupRefreshTask)
+        let (reader, active, bOpen, backup, bRefresh) = lock.withLock {
+            (chunkReaderTask, transport,
+             backupOpenOperation?.task,
+             backupConnection?.transport,
+             backupRefreshOperation?.task)
         }
         reader?.cancel()
         bOpen?.cancel()
         bRefresh?.cancel()
-        bTask?.cancel(with: .normalClosure, reason: nil)
-        bSession?.invalidateAndCancel()
-        ws?.cancel(with: .normalClosure, reason: nil)
-        session?.invalidateAndCancel()
+        backup?.close(.normal)
+        active?.close(.normal)
     }
 
     // MARK: - StreamingDictationProviding
 
     public func startStreaming(
-        context: AppContext, language: String?, micProximity _: MicProximity
+        context: AppContext, language: String?, micProximity: MicProximity
+    ) async throws {
+        let sessionID = DictationSessionID()
+        try await startStreaming(
+            sessionID: sessionID,
+            context: context,
+            language: language,
+            micProximity: micProximity)
+        lock.withLock {
+            if activeSessionID == sessionID {
+                compatibilitySessionID = sessionID
+            }
+        }
+    }
+
+    public func startStreaming(
+        sessionID: DictationSessionID,
+        context: AppContext,
+        language: String?,
+        micProximity _: MicProximity
     ) async throws {
         try Task.checkCancellation()
-
-        // Warn if a session is already active — callers should cancel
-        // or finish the previous session before starting a new one.
-        if lock.withLock({ currentTiming != nil }) {
-            Log.debug("[OpenAIRealtime] startStreaming called while a session is active")
-            assertionFailure("startStreaming called while a session is active")
-        }
 
         let commitSession = OpenAIRealtimeCommitSession(
             policy: commitPolicy,
             maxUnresolvedItems: maxUnresolvedItems)
 
-        // Install a fresh timing record and source-coverage owner.
-        let sessionID: Int = lock.withLock {
+        // Checking and reserving ownership are one atomic operation so two
+        // concurrent starts cannot both observe an idle provider.
+        let claimed = lock.withLock {
+            guard activeSessionID == nil else { return false }
             let id = self.nextSessionID
             self.nextSessionID += 1
+            self.activeSessionID = sessionID
+            self.currentTimingSessionID = sessionID
             self.currentTiming = SessionTiming(id: id, startedAt: Date())
             self.commitSession = commitSession
-            return id
+            return true
+        }
+        guard claimed else {
+            throw DictationError.networkError(
+                "A Realtime session is already active")
         }
 
         // Try to adopt a fresh backup connection. If the backup is missing
         // or stale, open a new one. Either way, store the setup future so
         // sendAudio and finishStreaming can await it.
-        let adoption = adoptBackupIfFresh()
+        let freshAPIKey = apiKeyProvider()
+        let credentialFingerprint = Self.credentialFingerprint(freshAPIKey)
+        let adoption = adoptBackupIfFresh(
+            credentialFingerprint: credentialFingerprint)
         let adopted = adoption.adopted
         let staleBackup = adoption.discardedStale
 
         lock.withLock {
+            guard activeSessionID == sessionID else { return }
             self.currentTiming?.setupKind =
                 adopted != nil
                 ? .adoptedBackup
@@ -243,71 +427,106 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         }
 
         let freshModel = realtimeModel
-        let freshAPIKey = apiKeyProvider()
         let freshSTTModel = sttModel
+        let setupAdmission = setupAdmission
 
         let setup = Task { [weak self] in
-            try Task.checkCancellation()
-            guard let self else { return }
+            guard let self else {
+                adopted?.close(.normal)
+                return
+            }
 
-            let task: URLSessionWebSocketTask
-            let session: URLSession
-
+            let candidate: any OpenAIRealtimeTransport
             if let adopted {
-                task = adopted.task
-                session = adopted.session
+                candidate = adopted
             } else {
-                let (newTask, newSession) = try Self.buildWebSocketTask(
-                    apiKey: freshAPIKey, model: freshModel)
-                newTask.resume()
-                task = newTask
-                session = newSession
+                try Task.checkCancellation()
+                let transport = try self.transportFactory(freshAPIKey, freshModel)
+                transport.resume()
+                candidate = transport
+            }
+
+            // Until publication transfers the candidate into provider state,
+            // every exit path retains responsibility for closing it.
+            var didPublish = false
+            defer {
+                if !didPublish { candidate.close(.normal) }
+            }
+
+            await setupAdmission?(sessionID)
+            try Task.checkCancellation()
+            guard self.lock.withLock({ self.activeSessionID == sessionID }) else {
+                throw CancellationError()
             }
 
             // If cancelled after building but before publishing, clean
             // up the locally held task/session and bail. Without this,
             // cancelStreaming running between these lines could leave a
-            // stale task in webSocketTask for the next session.
+            // stale transport in provider state for the next session.
             if Task.isCancelled {
-                task.cancel(with: .normalClosure, reason: nil)
-                session.invalidateAndCancel()
                 throw CancellationError()
             }
 
             // Publish the task immediately so tearDown can reach it even
             // if session.update fails.
-            self.lock.withLock {
-                self.webSocketTask = task
-                self.urlSession = session
+            let wasPublished = self.lock.withLock {
+                guard self.activeSessionID == sessionID,
+                    self.teardownOperation == nil
+                else { return false }
+                self.transport = candidate
+                return true
             }
+            guard wasPublished else {
+                throw CancellationError()
+            }
+            didPublish = true
 
             let update = Self.buildSessionUpdate(
                 sttModel: freshSTTModel,
                 language: language,
                 context: context)
-            try await task.send(.string(update))
+            try await candidate.send(update)
+            try Task.checkCancellation()
 
             // Record setup completion for the diagnostic summary.
             self.lock.withLock {
-                if self.currentTiming?.id == sessionID {
+                if self.activeSessionID == sessionID,
+                    self.teardownOperation == nil
+                {
                     self.currentTiming?.setupCompletedAt = Date()
                 }
             }
         }
-        lock.withLock { self.setupTask = setup }
+        let setupInstalled = lock.withLock {
+            guard activeSessionID == sessionID, teardownOperation == nil else {
+                return false
+            }
+            self.setupTask = setup
+            return true
+        }
+        guard setupInstalled else {
+            setup.cancel()
+            _ = try? await setup.value
+            throw CancellationError()
+        }
 
         // Keep one receive owner for acknowledgement, transcription, and
         // response events throughout the session.
         let reader = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.awaitSetup()
+                try await self.awaitSetup(sessionID: sessionID)
             } catch {
                 await commitSession.fail(error)
                 return
             }
-            let task: URLSessionWebSocketTask? = self.lock.withLock { self.webSocketTask }
-            guard let task else {
+            let transport: (any OpenAIRealtimeTransport)? = self.lock.withLock {
+                guard self.activeSessionID == sessionID,
+                    self.teardownOperation == nil
+                else { return nil }
+                return self.transport
+            }
+            guard let transport else {
                 await commitSession.fail(
                     DictationError.networkError("No active WebSocket"))
                 return
@@ -316,17 +535,19 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             do {
                 try await Self.readRealtimeSessionEvents(
                     session: commitSession,
-                    receive: { try await Self.receiveText(on: task) },
+                    receive: { try await transport.receiveText() },
                     onTranscriptCompleted: { [weak self] transcript in
                         Log.debug(
                             "[RealtimeResponse] transcript:"
                                 + " \"\(transcript.prefix(200))\"")
                         self?.lock.withLock {
+                            guard self?.currentTimingSessionID == sessionID else { return }
                             self?.currentTiming?.transcriptCompletedAt = Date()
                         }
                     },
                     onFirstResponseDelta: { [weak self] in
                         self?.lock.withLock {
+                            guard self?.currentTimingSessionID == sessionID else { return }
                             if self?.currentTiming?.firstDeltaAt == nil {
                                 self?.currentTiming?.firstDeltaAt = Date()
                             }
@@ -336,15 +557,39 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 await commitSession.fail(error)
             }
         }
-        lock.withLock { self.chunkReaderTask = reader }
+        let readerInstalled = lock.withLock {
+            guard activeSessionID == sessionID, teardownOperation == nil else {
+                return false
+            }
+            self.chunkReaderTask = reader
+            self.chunkReaderSessionID = sessionID
+            return true
+        }
+        if !readerInstalled { reader.cancel() }
     }
 
     public func sendAudio(_ pcmData: Data) async throws {
-        guard !pcmData.isEmpty else { return }
-        try await awaitSetup()
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        try await sendAudio(pcmData, sessionID: sessionID)
+    }
 
-        let state = lock.withLock { (self.webSocketTask, self.commitSession) }
-        guard let task = state.0, let commitSession = state.1 else {
+    public func sendAudio(
+        _ pcmData: Data,
+        sessionID: DictationSessionID
+    ) async throws {
+        guard !pcmData.isEmpty else { return }
+        try await awaitSetup(sessionID: sessionID)
+
+        let state: ((any OpenAIRealtimeTransport)?, OpenAIRealtimeCommitSession?) =
+            lock.withLock {
+                guard activeSessionID == sessionID, teardownOperation == nil else {
+                    return (nil, nil)
+                }
+                return (self.transport, self.commitSession)
+            }
+        guard let transport = state.0, let commitSession = state.1 else {
             throw DictationError.networkError("No active WebSocket")
         }
 
@@ -354,27 +599,30 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 waitingFor: "Realtime commit state",
                 session: commitSession,
                 onTimeout: {
-                    task.cancel(with: .abnormalClosure, reason: nil)
+                    transport.close(.abnormal)
                 },
                 operation: { [self] in
                     try await Self.sendRealtimeAudio(
                         pcmData,
                         session: commitSession,
-                        send: { try await task.send(.string($0)) },
+                        send: { try await transport.send($0) },
                         onAppendSent: { [self] _, submittedBytes in
                             lock.withLock {
+                                guard currentTimingSessionID == sessionID else { return }
                                 currentTiming?.audioBytesSent += submittedBytes
                                 currentTiming?.audioChunksSent += 1
                             }
                         },
                         onCommitSent: { [self] in
                             lock.withLock {
+                                guard currentTimingSessionID == sessionID else { return }
                                 currentTiming?.commitSentAt = Date()
                             }
                         })
                 })
         } catch {
             lock.withLock {
+                guard self.currentTimingSessionID == sessionID else { return }
                 if self.currentTiming?.error == nil {
                     self.currentTiming?.error = error.localizedDescription
                 }
@@ -384,40 +632,54 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     }
 
     public func finishStreaming() async throws -> String {
+        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
+            throw CancellationError()
+        }
+        return try await finishStreaming(sessionID: sessionID)
+    }
+
+    public func finishStreaming(
+        sessionID: DictationSessionID
+    ) async throws -> String {
+        let finishLifecycleEpoch = lock.withLock { lifecycleEpoch }
+
         func fail(_ error: Error) async -> Error {
-            let commitSession = lock.withLock { self.commitSession }
-            await commitSession?.fail(error)
             lock.withLock {
+                guard self.currentTimingSessionID == sessionID else { return }
                 if self.currentTiming?.error == nil {
                     self.currentTiming?.error = error.localizedDescription
                 }
                 self.currentTiming?.endedAt = Date()
             }
-            emitSessionSummary()
-            await tearDown()
-            let reader = lock.withLock { () -> Task<Void, Never>? in
-                let r = self.chunkReaderTask
-                self.chunkReaderTask = nil
-                return r
-            }
-            reader?.cancel()
+            await tearDown(
+                sessionID: sessionID,
+                cancelSetup: true,
+                failure: error)
+            emitSessionSummary(sessionID: sessionID)
             return error
         }
 
         do {
-            try await awaitSetup()
+            try await awaitSetup(sessionID: sessionID)
         } catch {
             throw await fail(error)
         }
 
-        let state = lock.withLock { (self.webSocketTask, self.commitSession) }
-        guard let task = state.0, let commitSession = state.1 else {
+        let state: ((any OpenAIRealtimeTransport)?, OpenAIRealtimeCommitSession?) =
+            lock.withLock {
+                guard activeSessionID == sessionID, teardownOperation == nil else {
+                    return (nil, nil)
+                }
+                return (self.transport, self.commitSession)
+            }
+        guard let transport = state.0, let commitSession = state.1 else {
             throw await fail(
                 DictationError.networkError("No active WebSocket"))
         }
 
         let bytesSent: Int = lock.withLock {
-            self.currentTiming?.audioBytesSent ?? 0
+            guard currentTimingSessionID == sessionID else { return 0 }
+            return self.currentTiming?.audioBytesSent ?? 0
         }
         let transcriptTimeout = Self.transcriptTimeout(forAudioBytes: bytesSent)
         let finishResult: RealtimeFinishResult
@@ -427,20 +689,22 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 waitingFor: "complete Realtime transcript and polish",
                 session: commitSession,
                 onTimeout: {
-                    task.cancel(with: .abnormalClosure, reason: nil)
+                    transport.close(.abnormal)
                 },
                 operation: { [self] in
                     try await Self.finishRealtimeSessionResult(
                         session: commitSession,
-                        send: { try await task.send(.string($0)) },
+                        send: { try await transport.send($0) },
                         onAppendSent: { [self] _, submittedBytes in
                             lock.withLock {
+                                guard currentTimingSessionID == sessionID else { return }
                                 currentTiming?.audioBytesSent += submittedBytes
                                 currentTiming?.audioChunksSent += 1
                             }
                         },
                         onCommitSent: { [self] in
                             lock.withLock {
+                                guard currentTimingSessionID == sessionID else { return }
                                 currentTiming?.commitSentAt = Date()
                             }
                         })
@@ -451,14 +715,11 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
         // Tear down the current session's connection and spawn a new
         // backup in the background for the next session.
-        let doneReader = lock.withLock { () -> Task<Void, Never>? in
-            let r = self.chunkReaderTask
-            self.chunkReaderTask = nil
-            return r
-        }
-        await tearDown()
-        doneReader?.cancel()
-        warmBackup()
+        await tearDown(
+            sessionID: sessionID,
+            cancelSetup: false,
+            failure: nil)
+        warmBackup(expectedLifecycleEpoch: finishLifecycleEpoch)
 
         do {
             try await Self.notifyEvidenceObserver(
@@ -472,18 +733,20 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             in: .whitespacesAndNewlines)
         if polished.isEmpty {
             lock.withLock {
+                guard self.currentTimingSessionID == sessionID else { return }
                 self.currentTiming?.polishKind = .skip
                 self.currentTiming?.endedAt = Date()
             }
-            emitSessionSummary()
+            emitSessionSummary(sessionID: sessionID)
             return ""
         }
 
         lock.withLock {
+            guard self.currentTimingSessionID == sessionID else { return }
             self.currentTiming?.polishKind = .realtimeOK
             self.currentTiming?.endedAt = Date()
         }
-        emitSessionSummary()
+        emitSessionSummary(sessionID: sessionID)
         Log.debug("[Pipeline] realtime-polished: \"\(polished)\"")
         return polished
     }
@@ -502,16 +765,24 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             forAudioBytes: Self.finishWatchdogBoundWireAudioBytes) + 5
     }
 
-    public func cancelStreaming() async {
-        let cancellation = CancellationError()
-        let state: (Task<Void, Error>?, OpenAIRealtimeCommitSession?) = lock.withLock {
-            let s = self.setupTask
-            self.setupTask = nil
-            return (s, self.commitSession)
-        }
-        state.0?.cancel()
-        await state.1?.fail(cancellation)
+    var hasStandbyOwnership: Bool {
         lock.withLock {
+            backupConnection != nil
+                || backupOpenOperation != nil
+                || backupRefreshOperation != nil
+        }
+    }
+
+    public func cancelStreaming() async {
+        guard let sessionID = lock.withLock({
+            compatibilitySessionID ?? activeSessionID
+        }) else { return }
+        await cancelStreaming(sessionID: sessionID)
+    }
+
+    public func cancelStreaming(sessionID: DictationSessionID) async {
+        lock.withLock {
+            guard self.currentTimingSessionID == sessionID else { return }
             if self.currentTiming != nil {
                 self.currentTiming?.endedAt = Date()
                 if self.currentTiming?.error == nil {
@@ -519,28 +790,22 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 }
             }
         }
-        emitSessionSummary()
-        // Tear down the WebSocket before cancelling the reader task.
-        // URLSessionWebSocketTask.receive() does not respond to Swift
-        // task cancellation — it only returns when the WebSocket is
-        // closed or receives a message. Closing the socket first
-        // unblocks the reader immediately.
-        await tearDown()
-        let cancelReader: Task<Void, Never>? = lock.withLock {
-            let r = self.chunkReaderTask
-            self.chunkReaderTask = nil
-            return r
-        }
-        cancelReader?.cancel()
+        await tearDown(
+            sessionID: sessionID,
+            cancelSetup: true,
+            failure: CancellationError())
+        emitSessionSummary(sessionID: sessionID)
     }
 
     /// Disconnect and release all connections. Call at app shutdown.
     public func disconnect() async {
-        let state = lock.withLock { (self.setupTask, self.commitSession) }
-        state.0?.cancel()
-        await state.1?.fail(CancellationError())
-        backupOpenTask?.cancel()
-        await tearDown()
+        let sessionID = lock.withLock {
+            lifecycleEpoch &+= 1
+            return activeSessionID
+        }
+        if let sessionID {
+            await cancelStreaming(sessionID: sessionID)
+        }
         await discardBackup()
     }
 
@@ -548,11 +813,23 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     /// Await the setup task, returning when the connection is ready and
     /// session.update has been sent. Throws any setup error.
-    private func awaitSetup() async throws {
-        guard let task = lock.withLock({ self.setupTask }) else {
+    private func awaitSetup(sessionID: DictationSessionID) async throws {
+        let lookup: (ownsSession: Bool, task: Task<Void, Error>?) = lock.withLock {
+            guard activeSessionID == sessionID, teardownOperation == nil else {
+                return (false, nil)
+            }
+            return (true, self.setupTask)
+        }
+        guard lookup.ownsSession else { throw CancellationError() }
+        guard let task = lookup.task else {
             throw DictationError.networkError("No active streaming session")
         }
         try await task.value
+        guard lock.withLock({
+            activeSessionID == sessionID && teardownOperation == nil
+        }) else {
+            throw CancellationError()
+        }
     }
 
     // MARK: - Session diagnostics
@@ -566,10 +843,12 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     ///     [RealtimeSession] id=42 setup=backup setup_wait=0.001 bytes=64000
     ///     chunks=5 first_delta=0.410 transcript=0.352
     ///     polish=realtime-ok total=0.674
-    private func emitSessionSummary() {
+    private func emitSessionSummary(sessionID: DictationSessionID) {
         let timing: SessionTiming? = lock.withLock {
+            guard self.currentTimingSessionID == sessionID else { return nil }
             let t = self.currentTiming
             self.currentTiming = nil
+            self.currentTimingSessionID = nil
             return t
         }
         guard let t = timing else { return }
@@ -616,160 +895,300 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     // MARK: - Backup connection
 
+    private static func credentialFingerprint(_ apiKey: String) -> Data {
+        Data(SHA256.hash(data: Data(apiKey.utf8)))
+    }
+
     /// Spawn a background task that opens a new connection for the next
     /// session. No-op if one is already in flight or ready.
-    private func warmBackup() {
+    private func warmBackup(
+        replacingRefresh refreshToken: UUID? = nil,
+        expectedLifecycleEpoch: UInt64? = nil
+    ) {
+        if let expectedLifecycleEpoch,
+            lock.withLock({ lifecycleEpoch != expectedLifecycleEpoch })
+        {
+            return
+        }
         let bApiKey = apiKeyProvider()
+        let credentialFingerprint = Self.credentialFingerprint(bApiKey)
         let bModel = realtimeModel
         let startedAt = Date()
+        let token = UUID()
 
-        // Atomically check eligibility and assign backupOpenTask in the
-        // same lock scope to prevent duplicate backup spawns.
-        var captured: Task<Void, Never>?
+        let reserved = lock.withLock {
+            if let expectedLifecycleEpoch,
+                lifecycleEpoch != expectedLifecycleEpoch
+            {
+                return false
+            }
+            guard backupConnection == nil, backupOpenOperation == nil else {
+                return false
+            }
+            if let refreshToken {
+                guard backupRefreshOperation?.token == refreshToken else {
+                    return false
+                }
+                backupRefreshOperation = nil
+            } else {
+                guard backupRefreshOperation == nil else { return false }
+            }
+            backupOpenOperation = BackupOpenOperation(
+                token: token,
+                credentialFingerprint: credentialFingerprint,
+                task: nil)
+            return true
+        }
+        guard reserved else { return }
+
+        let launchGate = AsyncLaunchGate()
         let openTask = Task { [weak self] in
+            await launchGate.wait()
             do {
-                let (task, session) = try Self.buildWebSocketTask(
-                    apiKey: bApiKey, model: bModel)
-                task.resume()
-                // Don't send any messages on the backup — it stays idle
-                // until adopted by a future startStreaming call.
+                guard let self else { return }
+                defer { self.backupOpenDidFinish?(token) }
+                try Task.checkCancellation()
+                let transport = try self.transportFactory(bApiKey, bModel)
+                transport.resume()
                 guard !Task.isCancelled else {
-                    task.cancel(with: .normalClosure, reason: nil)
-                    session.invalidateAndCancel()
+                    transport.close(.normal)
                     return
                 }
-                self?.lock.withLock {
-                    self?.backupTask = task
-                    self?.backupSession = session
-                    self?.backupOpenedAt = Date()
-                    self?.backupOpenTask = nil
+                await self.backupOpenWillPublish?(token)
+
+                let published = self.lock.withLock {
+                    guard self.backupOpenOperation?.token == token,
+                        self.backupConnection == nil
+                    else { return false }
+                    self.backupConnection = BackupConnection(
+                        generation: token,
+                        credentialFingerprint: credentialFingerprint,
+                        transport: transport,
+                        openedAt: Date())
+                    self.backupOpenOperation = nil
+                    return true
                 }
+                guard published else {
+                    transport.close(.normal)
+                    return
+                }
+
+                self.backupReadyObserver?()
                 Log.debug(
                     String(
                         format: "[RealtimeBackup] ready after %.3fs",
                         Date().timeIntervalSince(startedAt)))
-                // Schedule a background refresh so the backup is
-                // replaced before it goes stale. Sleep until 10s
-                // before maxBackupAge, then discard and re-open.
-                self?.scheduleBackupRefresh()
+                self.scheduleBackupRefresh(generation: token)
             } catch {
-                self?.lock.withLock {
-                    self?.backupOpenTask = nil
+                let owned = self?.lock.withLock {
+                    guard self?.backupOpenOperation?.token == token else {
+                        return false
+                    }
+                    self?.backupOpenOperation = nil
+                    return true
+                } ?? false
+                if owned, !(error is CancellationError) {
+                    Log.debug(
+                        "[RealtimeBackup] open failed: \(error.localizedDescription)")
                 }
-                Log.debug(
-                    "[RealtimeBackup] open failed: \(error.localizedDescription)")
             }
         }
 
-        captured = openTask
-        lock.withLock {
-            if self.backupTask != nil || self.backupOpenTask != nil {
-                captured = nil  // another thread won; cancel ours
-            } else {
-                self.backupOpenTask = openTask
+        let shouldCancel = lock.withLock {
+            if backupConnection?.generation == token {
+                return false
             }
+            guard backupOpenOperation?.token == token else { return true }
+            backupOpenOperation?.task = openTask
+            return false
         }
-        if captured == nil {
-            openTask.cancel()
-        }
+        if shouldCancel { openTask.cancel() }
+        launchGate.release()
     }
 
     /// Schedule a background task that replaces the backup connection
     /// before it goes stale. Sleeps until 10s before `maxBackupAge`,
     /// then discards the old connection and opens a fresh one.
-    private func scheduleBackupRefresh() {
-        let refreshDelay = max(10, maxBackupAge - 10)
-        lock.withLock {
-            backupRefreshTask?.cancel()
-        }
-        let task = Task { [weak self] in
-            try? await Task.sleep(
-                nanoseconds: UInt64(refreshDelay * 1_000_000_000))
-            guard !Task.isCancelled, let self else { return }
-            // Only refresh if the backup hasn't been adopted or
-            // replaced by another session in the meantime.
-            let shouldRefresh: Bool = self.lock.withLock {
-                self.backupTask != nil
+    private func scheduleBackupRefresh(generation: UUID) {
+        let refreshDelay = backupRefreshDelay
+        let refreshToken = UUID()
+        let reservation: (reserved: Bool, previous: Task<Void, Never>?) =
+            lock.withLock {
+                guard backupConnection?.generation == generation else {
+                    return (false, nil)
+                }
+                let previous = backupRefreshOperation?.task
+                backupRefreshOperation = BackupRefreshOperation(
+                    token: refreshToken,
+                    generation: generation,
+                    task: nil)
+                return (true, previous)
             }
-            guard shouldRefresh else { return }
-            Log.debug("[RealtimeBackup] refreshing before staleness")
-            await self.discardBackup()
-            self.warmBackup()
+        guard reservation.reserved else { return }
+        reservation.previous?.cancel()
+
+        let launchGate = AsyncLaunchGate()
+        let didFinish = backupRefreshDidFinish
+        let task = Task { [weak self] in
+            defer { didFinish?(refreshToken) }
+            await launchGate.wait()
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(refreshDelay * 1_000_000_000))
+                try Task.checkCancellation()
+                guard let self else { return }
+
+                let ownsGeneration = self.lock.withLock {
+                    self.backupRefreshOperation?.token == refreshToken
+                        && self.backupRefreshOperation?.generation == generation
+                        && self.backupConnection?.generation == generation
+                }
+                guard ownsGeneration else { return }
+                await self.backupRefreshWillDiscard?(refreshToken)
+
+                let connection: BackupConnection? = self.lock.withLock {
+                    guard self.backupRefreshOperation?.token == refreshToken,
+                        self.backupRefreshOperation?.generation == generation,
+                        self.backupConnection?.generation == generation
+                    else { return nil }
+                    let connection = self.backupConnection
+                    self.backupConnection = nil
+                    return connection
+                }
+                guard let connection else { return }
+                connection.transport.close(.normal)
+                Log.debug("[RealtimeBackup] refreshing before staleness")
+                self.warmBackup(replacingRefresh: refreshToken)
+            } catch is CancellationError {
+                return
+            } catch {
+                Log.debug(
+                    "[RealtimeBackup] refresh failed: \(error.localizedDescription)")
+            }
         }
-        lock.withLock {
-            backupRefreshTask = task
+
+        let shouldCancel = lock.withLock {
+            guard backupRefreshOperation?.token == refreshToken,
+                backupRefreshOperation?.generation == generation
+            else { return true }
+            backupRefreshOperation?.task = task
+            return false
         }
+        if shouldCancel { task.cancel() }
+        launchGate.release()
     }
 
     /// Outcome of an attempt to adopt the warm backup connection as the
     /// active one for a new session.
     private struct BackupAdoption {
-        /// The adopted connection, or nil if none was available or if
-        /// the backup was too old.
-        let adopted: (task: URLSessionWebSocketTask, session: URLSession)?
-        /// Whether a stale backup existed and had to be discarded. Used
-        /// by diagnostic logging to distinguish "no backup existed" from
-        /// "backup existed but was stale".
+        let adopted: (any OpenAIRealtimeTransport)?
         let discardedStale: Bool
     }
 
-    /// Attempt to adopt a fresh backup as the active connection.
-    ///
-    /// A stale backup (older than `maxBackupAge`) is discarded instead
-    /// of adopted, and the caller must open a fresh connection.
-    private func adoptBackupIfFresh() -> BackupAdoption {
+    /// Attempt to adopt a fresh backup created with the current credential.
+    private func adoptBackupIfFresh(
+        credentialFingerprint: Data
+    ) -> BackupAdoption {
         enum Outcome {
-            case adopted(URLSessionWebSocketTask, URLSession, age: TimeInterval)
-            case stale
-            case none
+            case adopted(
+                BackupConnection,
+                refreshTask: Task<Void, Never>?)
+            case discarded(
+                BackupConnection,
+                stale: Bool,
+                refreshTask: Task<Void, Never>?)
+            case none(
+                cancelOpenTask: Task<Void, Never>?,
+                cancelRefreshTask: Task<Void, Never>?)
         }
 
         let outcome: Outcome = lock.withLock {
-            guard let task = self.backupTask,
-                let session = self.backupSession,
-                let openedAt = self.backupOpenedAt
-            else {
-                return .none
+            if let connection = backupConnection {
+                let refreshTask = backupRefreshOperation?.task
+                backupConnection = nil
+                backupRefreshOperation = nil
+
+                let age = Date().timeIntervalSince(connection.openedAt)
+                if age > maxBackupAge {
+                    return .discarded(
+                        connection,
+                        stale: true,
+                        refreshTask: refreshTask)
+                }
+                guard connection.credentialFingerprint == credentialFingerprint else {
+                    return .discarded(
+                        connection,
+                        stale: false,
+                        refreshTask: refreshTask)
+                }
+                return .adopted(connection, refreshTask: refreshTask)
             }
-            let age = Date().timeIntervalSince(openedAt)
-            if age > self.maxBackupAge {
-                return .stale
+
+            if let operation = backupOpenOperation,
+                operation.credentialFingerprint != credentialFingerprint
+            {
+                backupOpenOperation = nil
+                return .none(
+                    cancelOpenTask: operation.task,
+                    cancelRefreshTask: nil)
             }
-            self.backupTask = nil
-            self.backupSession = nil
-            self.backupOpenedAt = nil
-            return .adopted(task, session, age: age)
+            if let operation = backupRefreshOperation {
+                backupRefreshOperation = nil
+                return .none(
+                    cancelOpenTask: nil,
+                    cancelRefreshTask: operation.task)
+            }
+            return .none(
+                cancelOpenTask: nil,
+                cancelRefreshTask: nil)
         }
 
         switch outcome {
-        case .adopted(let task, let session, let age):
-            // Cancel the refresh task — the backup is now in use.
-            lock.withLock { backupRefreshTask?.cancel(); backupRefreshTask = nil }
+        case .adopted(let connection, let refreshTask):
+            refreshTask?.cancel()
             Log.debug(
                 String(
-                    format: "[RealtimeBackup] adopt age=%.3fs", age))
-            return BackupAdoption(adopted: (task, session), discardedStale: false)
-        case .stale:
-            Log.debug("[RealtimeBackup] stale, discarding")
-            Task { await self.discardBackup() }
-            return BackupAdoption(adopted: nil, discardedStale: true)
-        case .none:
+                    format: "[RealtimeBackup] adopt age=%.3fs",
+                    Date().timeIntervalSince(connection.openedAt)))
+            return BackupAdoption(
+                adopted: connection.transport,
+                discardedStale: false)
+        case .discarded(let connection, let stale, let refreshTask):
+            refreshTask?.cancel()
+            connection.transport.close(.normal)
+            Log.debug(
+                stale
+                    ? "[RealtimeBackup] stale, discarding"
+                    : "[RealtimeBackup] credential changed, discarding")
+            return BackupAdoption(adopted: nil, discardedStale: stale)
+        case .none(let openTask, let refreshTask):
+            openTask?.cancel()
+            refreshTask?.cancel()
             return BackupAdoption(adopted: nil, discardedStale: false)
         }
     }
 
     /// Tear down and forget any pre-opened backup connection.
     private func discardBackup() async {
-        let (task, session): (URLSessionWebSocketTask?, URLSession?) = lock.withLock {
-            let t = self.backupTask
-            let s = self.backupSession
-            self.backupTask = nil
-            self.backupSession = nil
-            self.backupOpenedAt = nil
-            return (t, s)
+        let detached: (
+            connection: BackupConnection?,
+            open: Task<Void, Never>?,
+            refresh: Task<Void, Never>?
+        ) = lock.withLock {
+            let detached = (
+                backupConnection,
+                backupOpenOperation?.task,
+                backupRefreshOperation?.task)
+            backupConnection = nil
+            backupOpenOperation = nil
+            backupRefreshOperation = nil
+            return detached
         }
-        task?.cancel(with: .normalClosure, reason: nil)
-        session?.invalidateAndCancel()
+        detached.open?.cancel()
+        detached.refresh?.cancel()
+        detached.connection?.transport.close(.normal)
+        await detached.open?.value
+        await detached.refresh?.value
     }
 
     // MARK: - Connection lifecycle
@@ -789,7 +1208,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         return min(300.0, max(15.0, budget))
     }
 
-    /// Build a fresh URLSessionWebSocketTask for the OpenAI Realtime API.
+    /// Build a fresh WebSocket transport for the OpenAI Realtime API.
     ///
     /// The URLSessionConfiguration's `timeoutIntervalForRequest` applies to
     /// the interval between data packets on the WebSocket, not the total
@@ -798,9 +1217,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     /// connection mid-session. Previously this was the default (60 s),
     /// which caused `NSPOSIXErrorDomain Code=57 "Socket is not connected"`
     /// failures on dictations longer than about a minute.
-    static func buildWebSocketTask(
+    static func buildTransport(
         apiKey: String, model: String
-    ) throws -> (URLSessionWebSocketTask, URLSession) {
+    ) throws -> any OpenAIRealtimeTransport {
         let url = buildWebSocketURL(model: model)
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -808,22 +1227,72 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 300
         let session = URLSession(configuration: config)
-        return (session.webSocketTask(with: request), session)
+        return URLSessionRealtimeTransport(
+            task: session.webSocketTask(with: request),
+            session: session)
     }
 
-    /// Tear down the active session's WebSocket and URLSession.
-    private func tearDown() async {
-        let (task, session): (URLSessionWebSocketTask?, URLSession?) = lock.withLock {
-            let t = self.webSocketTask
-            let s = self.urlSession
-            self.webSocketTask = nil
-            self.urlSession = nil
-            self.setupTask = nil
-            self.commitSession = nil
-            return (t, s)
+    private struct DetachedSession: @unchecked Sendable {
+        let setup: Task<Void, Error>?
+        let commit: OpenAIRealtimeCommitSession?
+        let transport: (any OpenAIRealtimeTransport)?
+        let reader: Task<Void, Never>?
+    }
+
+    /// Close and drain only the matching session. Ownership is released after
+    /// both setup and receive tasks can no longer publish into provider state.
+    private func tearDown(
+        sessionID: DictationSessionID,
+        cancelSetup: Bool,
+        failure: Error?
+    ) async {
+        let operation: TeardownOperation? = lock.withLock {
+            if let existing = teardownOperation {
+                return existing.sessionID == sessionID ? existing : nil
+            }
+            guard activeSessionID == sessionID else { return nil }
+
+            let detached = DetachedSession(
+                setup: setupTask,
+                commit: commitSession,
+                transport: self.transport,
+                reader: chunkReaderSessionID == sessionID ? chunkReaderTask : nil)
+            self.transport = nil
+            setupTask = nil
+            commitSession = nil
+            if chunkReaderSessionID == sessionID {
+                chunkReaderTask = nil
+                chunkReaderSessionID = nil
+            }
+
+            let token = UUID()
+            let task = Task {
+                if cancelSetup { detached.setup?.cancel() }
+                detached.transport?.close(.goingAway)
+                if let failure { await detached.commit?.fail(failure) }
+                if cancelSetup { _ = await detached.setup?.result }
+                detached.reader?.cancel()
+                await detached.reader?.value
+            }
+            let operation = TeardownOperation(
+                token: token,
+                sessionID: sessionID,
+                task: task)
+            teardownOperation = operation
+            return operation
         }
-        task?.cancel(with: .goingAway, reason: nil)
-        session?.invalidateAndCancel()
+        guard let operation else { return }
+        await operation.task.value
+
+        lock.withLock {
+            guard teardownOperation?.token == operation.token else { return }
+            teardownOperation = nil
+            guard activeSessionID == sessionID else { return }
+            activeSessionID = nil
+            if compatibilitySessionID == sessionID {
+                compatibilitySessionID = nil
+            }
+        }
     }
 
     // MARK: - Message builders (testable pure functions)
@@ -937,8 +1406,14 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     enum ParsedEvent: Equatable {
         case transcription(OpenAIRealtimeTranscriptionEvent)
         case transcriptionDelta(String)
-        case responseTextDelta(String)
-        case responseTextDone(String)
+        case responseTextDelta(
+            outputIndex: Int,
+            contentIndex: Int,
+            delta: String)
+        case responseTextDone(
+            outputIndex: Int,
+            contentIndex: Int,
+            text: String)
         case responseDone
         case error(String)
         case serverError(OpenAIRealtimeServerError)
@@ -1056,7 +1531,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         case "response.text.delta", "response.output_text.delta":
             do {
                 return .responseTextDelta(
-                    try requiredString(
+                    outputIndex: try responseTextIndex(
+                        in: obj,
+                        field: "output_index",
+                        eventType: type),
+                    contentIndex: try responseTextIndex(
+                        in: obj,
+                        field: "content_index",
+                        eventType: type),
+                    delta: try requiredString(
                         in: obj,
                         field: "delta",
                         eventType: type))
@@ -1068,7 +1551,15 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         case "response.text.done", "response.output_text.done":
             do {
                 return .responseTextDone(
-                    try requiredString(
+                    outputIndex: try responseTextIndex(
+                        in: obj,
+                        field: "output_index",
+                        eventType: type),
+                    contentIndex: try responseTextIndex(
+                        in: obj,
+                        field: "content_index",
+                        eventType: type),
+                    text: try requiredString(
                         in: obj,
                         field: "text",
                         eventType: type))
@@ -1208,6 +1699,18 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 message: "\(eventType) requires nonnegative integer \(field)")
         }
         return value
+    }
+
+    private static func responseTextIndex(
+        in object: [String: Any],
+        field: String,
+        eventType: String
+    ) throws -> Int {
+        guard object[field] != nil else { return 0 }
+        return try requiredNonnegativeInteger(
+            in: object,
+            field: field,
+            eventType: eventType)
     }
 
     private static func itemPredecessor(
@@ -1377,9 +1880,12 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     eventID: eventID()))
             try await send(buildResponseCreate(eventID: eventID()))
             let response = try await session.waitForPolishedResponse()
+            let validatedResponse = validatedRealtimePolish(
+                response,
+                rawTranscript: transcript)
             await session.releaseTransportTurn()
             return RealtimeFinishResult(
-                response: response,
+                response: validatedResponse,
                 evidence: evidence)
         } catch {
             await session.fail(error)
@@ -1388,6 +1894,42 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             }
             throw error
         }
+    }
+
+    /// Reject a same-connection polish that drops, invents, or truncates
+    /// dictated content. The commit session's ordered transcript is the
+    /// fidelity source of truth, so every failed guard returns it unchanged.
+    static func validatedRealtimePolish(
+        _ polished: String,
+        rawTranscript: String
+    ) -> String {
+        guard !rawTranscript.isEmpty else { return polished }
+        let candidate = polished.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else {
+            Log.debug(
+                "[REALTIME_POLISH_RAW_FALLBACK] empty polished response")
+            return rawTranscript
+        }
+
+        let guardFires = PolishPipeline.guardAgainstHallucination(
+                polished: candidate,
+                preprocessed: rawTranscript) != nil
+            || PolishPipeline.guardAgainstTruncation(
+                polished: candidate,
+                preprocessed: rawTranscript) != nil
+            || PolishPipeline.guardAgainstContentLoss(
+                polished: candidate,
+                preprocessed: rawTranscript) != nil
+            || PolishPipeline.guardAgainstFabrication(
+                polished: candidate,
+                preprocessed: rawTranscript) != nil
+        if guardFires {
+            Log.debug(
+                "[REALTIME_POLISH_RAW_FALLBACK] fidelity guard rejected polish")
+            return rawTranscript
+        }
+        return candidate
     }
 
     static func readRealtimeSessionEvents(
@@ -1405,12 +1947,25 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     if case .completed(_, _, _, let transcript) = event {
                         onTranscriptCompleted?(transcript)
                     }
-                case .responseTextDelta(let delta):
-                    if try await session.appendResponseDelta(delta) {
+                case .responseTextDelta(
+                    let outputIndex,
+                    let contentIndex,
+                    let delta):
+                    if try await session.appendResponseDelta(
+                        delta,
+                        outputIndex: outputIndex,
+                        contentIndex: contentIndex)
+                    {
                         onFirstResponseDelta?()
                     }
-                case .responseTextDone(let text):
-                    try await session.completeResponseText(text)
+                case .responseTextDone(
+                    let outputIndex,
+                    let contentIndex,
+                    let text):
+                    try await session.completeResponseText(
+                        text,
+                        outputIndex: outputIndex,
+                        contentIndex: contentIndex)
                 case .responseDone:
                     try await session.completeResponse()
                     return
@@ -1492,29 +2047,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 try Task.checkCancellation()
                 return
             }
-        }
-    }
-
-    // MARK: - WebSocket receive
-
-    private static func receiveText(
-        on task: URLSessionWebSocketTask
-    ) async throws -> String {
-        let message: URLSessionWebSocketTask.Message
-        do {
-            message = try await task.receive()
-        } catch {
-            throw DictationError.networkError(
-                "WebSocket receive failed: \(error.localizedDescription)")
-        }
-
-        switch message {
-        case .string(let text):
-            return text
-        case .data(let data):
-            return String(data: data, encoding: .utf8) ?? ""
-        @unknown default:
-            return ""
         }
     }
 

@@ -539,6 +539,45 @@ struct OpenAIRealtimeCommitSessionTests {
         #expect(try await session.waitForPolishedResponse().isEmpty)
     }
 
+    @Test("response text parts are assembled by output and content index")
+    func indexedResponseTextPartsAreOrdered() async throws {
+        let session = makeSession()
+        _ = try await session.appendSucceeded(
+            byteCount: 8,
+            containsSpeech: true)
+        let commit = try #require(
+            try await session.prepareCommit(force: false).commit)
+        try await acknowledgeAndComplete(
+            commit,
+            session: session,
+            previousItemID: nil)
+        try await session.sealCapture()
+        _ = try await session.waitForRawTranscript()
+        try await session.beginPolish()
+
+        let exchange = InteractiveRealtimeExchange()
+        let reader = Task {
+            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+                session: session,
+                receive: { try await exchange.receive() })
+        }
+        await exchange.yield(
+            #"{"type":"response.output_text.done","output_index":1,"content_index":0,"text":"third "}"#)
+        await exchange.yield(
+            #"{"type":"response.output_text.done","output_index":0,"content_index":1,"text":"second "}"#)
+        await exchange.yield(
+            #"{"type":"response.output_text.done","output_index":1,"content_index":1,"text":"fourth"}"#)
+        await exchange.yield(
+            #"{"type":"response.output_text.done","output_index":0,"content_index":0,"text":"first "}"#)
+        await exchange.yield(
+            #"{"type":"response.done","response":{"status":"completed"}}"#)
+
+        try await reader.value
+        #expect(
+            try await session.waitForPolishedResponse()
+                == "first second third fourth")
+    }
+
     private func acknowledgeAndComplete(
         _ commit: RealtimeTranscriptLedger.Commit,
         session: OpenAIRealtimeCommitSession,
@@ -622,7 +661,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 == ["input_audio_buffer.append"])
     }
 
-    @Test("waits for every item then polishes one ordered aggregate")
+    @Test("waits for every item then validates one ordered aggregate")
     func orderedAggregate() async throws {
         let session = OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
@@ -695,13 +734,13 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         #expect(Set(clientEventIDs).count == sent.count)
 
         await exchange.yield(
-            #"{"type":"response.output_text.delta","delta":"Polished "}"#)
+            #"{"type":"response.output_text.delta","delta":"Executive approved "}"#)
         await exchange.yield(
-            #"{"type":"response.output_text.delta","delta":"words."}"#)
+            #"{"type":"response.output_text.delta","delta":"launch today."}"#)
         await exchange.yield(
             #"{"type":"response.done","response":{"status":"completed"}}"#)
 
-        #expect(try await finishTask.value == "Polished words.")
+        #expect(try await finishTask.value == "we should go  go go now")
         let evidence = await evidenceRecorder.snapshots()
         #expect(evidence.count == 1)
         #expect(evidence.first?.sourceByteCount == 20)
@@ -710,6 +749,46 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             evidence.first?.items.map(\.transcript)
                 == ["we should go", "", "go go now"])
         try await reader.value
+    }
+
+    @Test("Realtime polish cannot drop a dictated clause")
+    func polishContentLossFallsBackToRawTranscript() async throws {
+        let raw = "We finished moving the services on Tuesday and then carefully "
+            + "verified every downstream consumer before announcing completion."
+
+        let result = try await finishPolish(
+            raw: raw,
+            polished: "We finished moving the services on Tuesday.")
+
+        #expect(result == raw)
+    }
+
+    @Test("Realtime polish cannot truncate a dictated transcript")
+    func polishTruncationFallsBackToRawTranscript() async throws {
+        let raw = "First verify the database migration. Then compare every account "
+            + "balance. Finally publish the audit report to the team."
+
+        let result = try await finishPolish(raw: raw, polished: "Done.")
+
+        #expect(result == raw)
+    }
+
+    @Test("Realtime polish keeps a faithful English cleanup")
+    func faithfulPolishIsPreserved() async throws {
+        let raw = "can you verify the deployment status"
+
+        let result = try await finishPolish(
+            raw: raw,
+            polished: "Can you verify the deployment status?")
+
+        #expect(result == "Can you verify the deployment status?")
+    }
+
+    @Test("empty Realtime polish cannot erase a short transcript")
+    func emptyPolishFallsBackToRawTranscript() async throws {
+        let result = try await finishPolish(raw: "yes no", polished: "")
+
+        #expect(result == "yes no")
     }
 
     @Test("an item failure rejects the whole aggregate before polish")
@@ -766,48 +845,66 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
     @Test("slow evidence observer does not retain the transport turn")
     func slowEvidenceObserverReleasesTransport() async throws {
         let observer = BlockingRealtimeEvidenceObserver()
+        let admissions = TransportAdmissionProbe()
+        var admissionIterator = admissions.makeAsyncIterator()
         let (session, finish) = try await startObservedFinish(
             transcript: "raw words",
-            onEvidence: { await observer.observe($0) })
+            onEvidence: { await observer.observe($0) },
+            onTransportAdmission: { admissions.record($0) })
         await observer.waitUntilStarted()
+        #expect(await admissionIterator.next() == .immediate)
 
-        let transportAcquired = AsyncStartProbe()
         let nextTransportTurn = Task {
             try await session.acquireTransportTurn()
-            await transportAcquired.markStarted()
             await session.releaseTransportTurn()
         }
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(await transportAcquired.hasStarted())
+        let nextAdmission = await admissionIterator.next()
+        #expect(nextAdmission == .immediate)
+        if nextAdmission == .queued {
+            nextTransportTurn.cancel()
+            await #expect(throws: CancellationError.self) {
+                try await nextTransportTurn.value
+            }
+        } else {
+            try await nextTransportTurn.value
+        }
 
         await observer.release()
         #expect(try await finish.value == "Polished words.")
-        try await nextTransportTurn.value
     }
 
     @Test("cancelling a slow evidence observer preserves transport cleanup")
     func cancelledEvidenceObserverReleasesTransport() async throws {
         let observer = BlockingRealtimeEvidenceObserver()
+        let admissions = TransportAdmissionProbe()
+        var admissionIterator = admissions.makeAsyncIterator()
         let (session, finish) = try await startObservedFinish(
             transcript: "raw words",
-            onEvidence: { await observer.observe($0) })
+            onEvidence: { await observer.observe($0) },
+            onTransportAdmission: { admissions.record($0) })
         await observer.waitUntilStarted()
+        #expect(await admissionIterator.next() == .immediate)
         finish.cancel()
 
-        let transportAcquired = AsyncStartProbe()
         let nextTransportTurn = Task {
             try await session.acquireTransportTurn()
-            await transportAcquired.markStarted()
             await session.releaseTransportTurn()
         }
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(await transportAcquired.hasStarted())
+        let nextAdmission = await admissionIterator.next()
+        #expect(nextAdmission == .immediate)
+        if nextAdmission == .queued {
+            nextTransportTurn.cancel()
+            await #expect(throws: CancellationError.self) {
+                try await nextTransportTurn.value
+            }
+        } else {
+            try await nextTransportTurn.value
+        }
 
         await observer.release()
         await #expect(throws: CancellationError.self) {
             _ = try await finish.value
         }
-        try await nextTransportTurn.value
     }
 
     @Test("all-empty committed items skip the polish transaction")
@@ -1053,14 +1150,16 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
 
     @Test("concurrent audio calls serialize transport writes")
     func concurrentAudioSerialization() async throws {
+        let admissions = TransportAdmissionProbe()
+        var admissionIterator = admissions.makeAsyncIterator()
         let session = OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: 100,
                 minimumUniqueBytesBeforeSilence: 100,
                 trailingSilenceBytesRequired: 2),
-            maxUnresolvedItems: 2)
+            maxUnresolvedItems: 2,
+            onTransportAdmission: { admissions.record($0) })
         let exchange = BlockingRealtimeSend()
-        let secondStart = AsyncStartProbe()
 
         let first = Task {
             try await OpenAIStreamingProvider.sendRealtimeAudio(
@@ -1068,17 +1167,16 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 session: session,
                 send: { await exchange.send($0) })
         }
+        #expect(await admissionIterator.next() == .immediate)
         await exchange.waitForSentCount(1)
 
         let second = Task {
-            await secondStart.markStarted()
             try await OpenAIStreamingProvider.sendRealtimeAudio(
                 Data([2, 0]),
                 session: session,
                 send: { await exchange.send($0) })
         }
-        await secondStart.waitUntilStarted()
-        try await Task.sleep(for: .milliseconds(20))
+        #expect(await admissionIterator.next() == .queued)
 
         #expect(await exchange.sentCount() == 1)
         await exchange.releaseFirst()
@@ -1089,12 +1187,15 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
 
     @Test("cancelled queued audio never reaches the transport")
     func cancelledQueuedAudio() async throws {
+        let admissions = TransportAdmissionProbe()
+        var admissionIterator = admissions.makeAsyncIterator()
         let session = OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: 100,
                 minimumUniqueBytesBeforeSilence: 100,
                 trailingSilenceBytesRequired: 2),
-            maxUnresolvedItems: 2)
+            maxUnresolvedItems: 2,
+            onTransportAdmission: { admissions.record($0) })
         let exchange = BlockingRealtimeSend()
 
         let first = Task {
@@ -1103,6 +1204,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 session: session,
                 send: { await exchange.send($0) })
         }
+        #expect(await admissionIterator.next() == .immediate)
         await exchange.waitForSentCount(1)
 
         let cancelled = Task {
@@ -1111,6 +1213,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 session: session,
                 send: { await exchange.send($0) })
         }
+        #expect(await admissionIterator.next() == .queued)
         cancelled.cancel()
         await exchange.releaseFirst()
 
@@ -1183,12 +1286,15 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
 
     @Test("finish waits for an in-flight append transaction")
     func finishSerializesWithAudio() async throws {
+        let admissions = TransportAdmissionProbe()
+        var admissionIterator = admissions.makeAsyncIterator()
         let session = OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: 100,
                 minimumUniqueBytesBeforeSilence: 100,
                 trailingSilenceBytesRequired: 2),
-            maxUnresolvedItems: 2)
+            maxUnresolvedItems: 2,
+            onTransportAdmission: { admissions.record($0) })
         let exchange = BlockingRealtimeSend()
         let finishCompletion = AsyncStartProbe()
 
@@ -1198,6 +1304,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
                 session: session,
                 send: { await exchange.send($0) })
         }
+        #expect(await admissionIterator.next() == .immediate)
         await exchange.waitForSentCount(1)
 
         let finish = Task {
@@ -1207,7 +1314,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             await finishCompletion.markStarted()
             return result
         }
-        try await Task.sleep(for: .milliseconds(20))
+        #expect(await admissionIterator.next() == .queued)
         #expect(!(await finishCompletion.hasStarted()))
 
         await exchange.releaseFirst()
@@ -1341,23 +1448,59 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         }
     }
 
-    private func makeOrchestrationSession() -> OpenAIRealtimeCommitSession {
+    private func makeOrchestrationSession(
+        onTransportAdmission:
+            OpenAIRealtimeCommitSession.TransportAdmissionObserver? = nil
+    ) -> OpenAIRealtimeCommitSession {
         OpenAIRealtimeCommitSession(
             policy: RealtimeCommitPolicy(
                 maximumUniqueBytes: 8,
                 minimumUniqueBytesBeforeSilence: 8,
                 trailingSilenceBytesRequired: 2),
-            maxUnresolvedItems: 2)
+            maxUnresolvedItems: 2,
+            onTransportAdmission: onTransportAdmission)
+    }
+
+    private func finishPolish(
+        raw: String,
+        polished: String
+    ) async throws -> String {
+        let session = makeOrchestrationSession()
+        let exchange = InteractiveRealtimeExchange()
+        _ = try await session.appendSucceeded(
+            byteCount: 8,
+            containsSpeech: true)
+        let finish = Task {
+            try await OpenAIStreamingProvider.finishRealtimeSession(
+                session: session,
+                send: { await exchange.send($0) })
+        }
+
+        await exchange.waitForCommitCount(1)
+        try await acknowledge(sequence: 0, session: session)
+        try await session.apply(
+            .completed(
+                serverEventID: "terminal-0",
+                itemID: "item-0",
+                contentIndex: 0,
+                transcript: raw))
+        await exchange.waitForSentCount(3)
+        try await session.completeResponseText(polished)
+        try await session.completeResponse()
+        return try await finish.value
     }
 
     private func startObservedFinish(
         transcript: String,
-        onEvidence: @escaping OpenAIStreamingProvider.EvidenceObserver
+        onEvidence: @escaping OpenAIStreamingProvider.EvidenceObserver,
+        onTransportAdmission:
+            OpenAIRealtimeCommitSession.TransportAdmissionObserver? = nil
     ) async throws -> (
         OpenAIRealtimeCommitSession,
         Task<String, any Error>
     ) {
-        let session = makeOrchestrationSession()
+        let session = makeOrchestrationSession(
+            onTransportAdmission: onTransportAdmission)
         let exchange = InteractiveRealtimeExchange()
         _ = try await session.appendSucceeded(
             byteCount: 8,
@@ -1563,6 +1706,29 @@ private actor InteractiveRealtimeExchange {
         for receiver in receivers {
             receiver.resume(throwing: ExchangeFailure.closed)
         }
+    }
+}
+
+private struct TransportAdmissionProbe: Sendable {
+    typealias Admission = OpenAIRealtimeCommitSession.TransportAdmission
+
+    private let stream: AsyncStream<Admission>
+    private let continuation: AsyncStream<Admission>.Continuation
+
+    init() {
+        let pair = AsyncStream.makeStream(
+            of: Admission.self,
+            bufferingPolicy: .unbounded)
+        stream = pair.stream
+        continuation = pair.continuation
+    }
+
+    func record(_ admission: Admission) {
+        continuation.yield(admission)
+    }
+
+    func makeAsyncIterator() -> AsyncStream<Admission>.Iterator {
+        stream.makeAsyncIterator()
     }
 }
 

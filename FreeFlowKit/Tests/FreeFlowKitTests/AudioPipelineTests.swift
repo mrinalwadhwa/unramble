@@ -27,6 +27,25 @@ final class AudioPipelineTests: XCTestCase {
         apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]
     }
 
+    private func activateAndWaitForCapture(
+        _ pipeline: DictationPipeline,
+        audioProvider: MockAudioProvider
+    ) async throws {
+        let previousReadyCount = audioProvider.captureReadyCount
+        guard await pipeline.activate() != nil else {
+            XCTFail("Pipeline activation was rejected")
+            return
+        }
+
+        for _ in 0..<10_000 {
+            if audioProvider.captureReadyCount > previousReadyCount {
+                return
+            }
+            await Task.yield()
+        }
+        XCTFail("Audio capture did not become ready")
+    }
+
     /// Run all scenarios that have audio files.
     func testAllScenariosWithAudio() async throws {
         guard let apiKey, !apiKey.isEmpty else {
@@ -41,8 +60,7 @@ final class AudioPipelineTests: XCTestCase {
         // Build providers.
         let streamingProvider = OpenAIStreamingProvider(apiKey: apiKey)
         let batchProvider = OpenAIFileTranscriber(
-            apiKey: apiKey,
-            language: "en")
+            apiKey: apiKey)
 
         var passed = 0
         var mismatched = 0
@@ -93,14 +111,18 @@ final class AudioPipelineTests: XCTestCase {
             let pipeline = DictationPipeline(
                 audioProvider: audio,
                 contextProvider: MockAppContextProvider(),
-                batchProvider: batchProvider,
+                backend: .cloud(
+                    realtime: streamingProvider,
+                    fallback: batchProvider),
                 textInjector: injector,
-                coordinator: coordinator,
-                streamingProvider: streamingProvider
+                coordinator: coordinator
             )
+            await pipeline.setLanguage("en")
 
             // Activate and feed audio.
-            await pipeline.activate()
+            try await activateAndWaitForCapture(
+                pipeline,
+                audioProvider: audio)
 
             // Feed the parsed PCM payload in 4096-byte chunks.
             let pcm = fixture.pcm

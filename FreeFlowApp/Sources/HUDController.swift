@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import Darwin
 import Foundation
 import FreeFlowKit
 
@@ -18,11 +19,10 @@ final class HUDController {
     private weak var coordinator: RecordingCoordinator?
     private weak var pipeline: DictationPipeline?
     private var audioDeviceProvider: (any AudioDeviceProviding)?
-    private var transcriptBuffer: TranscriptBuffer?
-    private var textInjector: (any TextInjecting)?
     private var messageService: InAppMessageService?
 
     private var visualStateObservation: Task<Void, Never>?
+    private var sessionOwnershipObservation: Task<Void, Never>?
     private var localEscapeMonitor: Any?
     private var globalEscapeMonitor: Any?
     private var globalClickMonitor: Any?
@@ -30,10 +30,27 @@ final class HUDController {
     private var globalPasteMonitor: Any?
     private var localHandsfreeMonitor: Any?
     private var globalHandsfreeMonitor: Any?
+    private var currentSessionID: DictationSessionID?
+    private var latestSessionUpdate: RecordingStateUpdate?
+    private var sessionObservationRevision: UInt64 = 0
+    private var pendingHeldModeSessionID: DictationSessionID?
+    private var handsFreeActivationTask: Task<DictationSessionID?, Never>?
+    private var handsFreeActivationToken: UUID?
+    private var handsFreeOwnedSessionID: DictationSessionID?
+    private var handsFreeReleaseBoundary: AudioCaptureReleaseBoundary?
+    private var hotkeyHeldSession: HotkeyHeldSession?
+    private var heldSessionTransferPending = false
+    private var heldSessionTransferToken: UUID?
 
     /// Called when the user dismisses a session-expired HUD to replace the
     /// credential while retaining the failed dictation's recovery audio.
     var onSessionExpired: (() -> Void)?
+
+    /// Transfer a push-to-talk session to hands-free ownership before the
+    /// shared physical key release reaches the input driver.
+    var onTransferHeldHotkeySession:
+        ((@escaping @Sendable (HotkeyHeldSession?) -> Void)
+            -> AudioCaptureReleaseBoundary?)?
 
     // MARK: - Init
 
@@ -54,15 +71,11 @@ final class HUDController {
         pipeline: DictationPipeline? = nil,
         audioDeviceProvider: (any AudioDeviceProviding)? = nil,
         audioProvider: (any AudioProviding)? = nil,
-        transcriptBuffer: TranscriptBuffer? = nil,
-        textInjector: (any TextInjecting)? = nil,
         messageService: InAppMessageService? = nil
     ) {
         self.coordinator = coordinator
         self.pipeline = pipeline
         self.audioDeviceProvider = audioDeviceProvider
-        self.transcriptBuffer = transcriptBuffer
-        self.textInjector = textInjector
         self.messageService = messageService
         viewModel.setMessageService(messageService)
 
@@ -78,6 +91,44 @@ final class HUDController {
         }
 
         viewModel.observe(coordinator: coordinator)
+        sessionOwnershipObservation?.cancel()
+        sessionOwnershipObservation = Task { [weak self] in
+            for await update in await coordinator.sessionStateStream {
+                guard !Task.isCancelled else { break }
+                guard let self else { break }
+                self.sessionObservationRevision &+= 1
+                let observationRevision = self.sessionObservationRevision
+                self.latestSessionUpdate = update
+
+                if update.state == .idle,
+                    let sessionID = update.sessionID
+                {
+                    self.sessionEnded(sessionID)
+                } else if let sessionID = update.sessionID {
+                    self.currentSessionID = sessionID
+                    self.applyPendingHeldModeIfCurrentRecording(update)
+                }
+
+                guard update.state == .dictationFailed,
+                    let pipeline = self.pipeline,
+                    let sessionID = update.sessionID,
+                    await pipeline.currentSessionID == sessionID
+                else {
+                    self.viewModel.setDictationRetryAvailable(false)
+                    continue
+                }
+
+                let canRetry = await pipeline.canRetryDictation(
+                    sessionID: sessionID)
+                if self.sessionObservationRevision == observationRevision,
+                    self.latestSessionUpdate == update,
+                    await pipeline.currentSessionID == sessionID,
+                    await pipeline.state == .dictationFailed
+                {
+                    self.viewModel.setDictationRetryAvailable(canRetry)
+                }
+            }
+        }
         ensureWindow()
 
         installEscapeMonitors()
@@ -141,12 +192,37 @@ final class HUDController {
 
     /// Stop observing and remove the HUD from screen.
     func stop() {
+        let pendingActivation = handsFreeActivationTask
+        let pendingActivationPipeline = pipeline
+        handsFreeReleaseBoundary?.publish(releaseHostTime: mach_absolute_time())
+        hotkeyHeldSession?.releaseBoundary.publish(
+            releaseHostTime: mach_absolute_time())
+        pendingActivation?.cancel()
+        if let pendingActivation, let pendingActivationPipeline {
+            Task {
+                if let sessionID = await pendingActivation.value {
+                    await pendingActivationPipeline.cancel(sessionID: sessionID)
+                }
+            }
+        }
         visualStateObservation?.cancel()
         visualStateObservation = nil
+        sessionOwnershipObservation?.cancel()
+        sessionOwnershipObservation = nil
         removeEscapeMonitors()
         removeClickMonitor()
         removePasteShortcutMonitors()
         removeHandsfreeShortcutMonitors()
+        handsFreeActivationToken = nil
+        handsFreeActivationTask = nil
+        handsFreeOwnedSessionID = nil
+        handsFreeReleaseBoundary = nil
+        hotkeyHeldSession = nil
+        pendingHeldModeSessionID = nil
+        latestSessionUpdate = nil
+        sessionObservationRevision &+= 1
+        invalidateHeldSessionTransfer()
+        currentSessionID = nil
         viewModel.stop()
         hudWindow?.orderOut(nil)
         hudWindow = nil
@@ -154,9 +230,81 @@ final class HUDController {
 
     // MARK: - Activation helpers
 
-    /// Call when push-to-talk recording begins (hotkey held).
-    func hotkeyHeld() {
+    /// Hint that the input driver accepted this exact push-to-talk session.
+    /// The coordinator stream remains authoritative: a delayed hint is applied
+    /// only while the same session is visibly recording.
+    func hotkeySessionAccepted(_ heldSession: HotkeyHeldSession) {
+        let sessionID = heldSession.sessionID
+        guard !heldSessionTransferPending,
+            handsFreeOwnedSessionID == nil,
+            handsFreeActivationTask == nil
+        else { return }
+        hotkeyHeldSession = heldSession
+
+        guard let latestSessionUpdate else {
+            pendingHeldModeSessionID = sessionID
+            return
+        }
+
+        if latestSessionUpdate.state == .recording,
+            latestSessionUpdate.sessionID == sessionID
+        {
+            pendingHeldModeSessionID = nil
+            currentSessionID = sessionID
+            viewModel.hotkeyHeld()
+        } else if latestSessionUpdate.state == .idle,
+            latestSessionUpdate.sessionID != sessionID
+        {
+            pendingHeldModeSessionID = sessionID
+        } else if pendingHeldModeSessionID == sessionID {
+            pendingHeldModeSessionID = nil
+        }
+    }
+
+    private func applyPendingHeldModeIfCurrentRecording(
+        _ update: RecordingStateUpdate
+    ) {
+        guard let pendingSessionID = pendingHeldModeSessionID else { return }
+        guard update.state == .recording,
+            update.sessionID == pendingSessionID,
+            !heldSessionTransferPending,
+            handsFreeOwnedSessionID == nil,
+            handsFreeActivationTask == nil
+        else {
+            pendingHeldModeSessionID = nil
+            return
+        }
+        pendingHeldModeSessionID = nil
         viewModel.hotkeyHeld()
+    }
+
+    func sessionEnded(_ sessionID: DictationSessionID) {
+        if pendingHeldModeSessionID == sessionID {
+            pendingHeldModeSessionID = nil
+        }
+        let endedOwnedSession = currentSessionID == sessionID
+            || handsFreeOwnedSessionID == sessionID
+        if currentSessionID == sessionID {
+            currentSessionID = nil
+        }
+        if handsFreeOwnedSessionID == sessionID {
+            handsFreeOwnedSessionID = nil
+        }
+        if hotkeyHeldSession?.sessionID == sessionID {
+            hotkeyHeldSession = nil
+        }
+        if endedOwnedSession {
+            handsFreeReleaseBoundary = nil
+        }
+        if endedOwnedSession {
+            invalidateHeldSessionTransfer()
+            viewModel.setDictationRetryAvailable(false)
+        }
+    }
+
+    private func invalidateHeldSessionTransfer() {
+        heldSessionTransferToken = nil
+        heldSessionTransferPending = false
     }
 
     // MARK: - Pipeline actions
@@ -176,42 +324,99 @@ final class HUDController {
     /// Cancel the current pipeline operation. Called from ✕ buttons and Escape.
     func cancelPipeline() {
         guard let pipeline else { return }
+        publishOwnedReleaseBoundary()
+        invalidateHeldSessionTransfer()
+        pendingHeldModeSessionID = nil
+        let capturedSessionID = viewModel.pipelineSessionID ?? currentSessionID
+        let activationTask = handsFreeActivationTask
+        activationTask?.cancel()
+        handsFreeActivationTask = nil
+        handsFreeActivationToken = nil
+        handsFreeReleaseBoundary = nil
         Task {
-            await pipeline.cancel()
+            var sessionID = capturedSessionID
+            if sessionID == nil {
+                sessionID = await activationTask?.value
+            }
+            guard let sessionID else { return }
+            await pipeline.cancel(sessionID: sessionID)
+            if self.currentSessionID == sessionID {
+                self.currentSessionID = nil
+            }
+            if self.handsFreeOwnedSessionID == sessionID {
+                self.handsFreeOwnedSessionID = nil
+            }
         }
     }
 
     /// Complete the current recording. Called from the ■ stop button.
     func completePipeline() {
         guard let pipeline else { return }
+        let releaseHostTime = mach_absolute_time()
+        publishOwnedReleaseBoundary(atHostTime: releaseHostTime)
+        invalidateHeldSessionTransfer()
+        let capturedSessionID = viewModel.pipelineSessionID ?? currentSessionID
+        let activationTask = handsFreeActivationTask
+        handsFreeActivationTask = nil
+        handsFreeActivationToken = nil
+        handsFreeReleaseBoundary = nil
         Task {
-            await pipeline.complete()
+            var sessionID = capturedSessionID
+            if sessionID == nil {
+                sessionID = await activationTask?.value
+            }
+            guard let sessionID else { return }
+            await pipeline.complete(
+                sessionID: sessionID,
+                releaseHostTime: releaseHostTime)
+            let remainingSessionID = await pipeline.currentSessionID
+            if remainingSessionID != sessionID,
+                self.currentSessionID == sessionID
+            {
+                self.currentSessionID = nil
+            }
+            if self.handsFreeOwnedSessionID == sessionID {
+                self.handsFreeOwnedSessionID = nil
+            }
         }
     }
 
     /// Dismiss the no-target state and return to minimized.
     func dismissNoTarget() {
-        viewModel.dismissNoTarget()
-        guard let coordinator else { return }
+        guard let pipeline, let sessionID = viewModel.pipelineSessionID else {
+            return
+        }
         Task {
-            await coordinator.reset()
+            await pipeline.dismissInjectionFailure(sessionID: sessionID)
+            if await pipeline.currentSessionID != sessionID {
+                self.sessionEnded(sessionID)
+            }
         }
     }
 
     /// Re-attempt batch transcription of the saved complete recording.
     func retryDictation() {
-        guard let pipeline else { return }
+        guard let pipeline, let sessionID = viewModel.pipelineSessionID else {
+            return
+        }
         Task {
-            await pipeline.retryDictation()
+            await pipeline.retryDictation(sessionID: sessionID)
+            if await pipeline.currentSessionID != sessionID {
+                self.sessionEnded(sessionID)
+            }
         }
     }
 
     /// Discard the saved complete recording and return to minimized.
     func dismissDictationFailure() {
-        viewModel.dismissDictationFailure()
-        guard let pipeline else { return }
+        guard let pipeline, let sessionID = viewModel.pipelineSessionID else {
+            return
+        }
         Task {
-            await pipeline.dismissDictationFailure()
+            await pipeline.dismissDictationFailure(sessionID: sessionID)
+            if await pipeline.currentSessionID != sessionID {
+                self.sessionEnded(sessionID)
+            }
         }
     }
 
@@ -259,10 +464,34 @@ final class HUDController {
 
     /// Start hands-free dictation from a click on the minimized/ready HUD.
     private func startHandsFreeFromClick() {
+        guard handsFreeActivationTask == nil,
+            handsFreeOwnedSessionID == nil,
+            currentSessionID == nil
+        else { return }
         viewModel.clickedToStartHandsFree()
         guard let pipeline else { return }
-        Task {
-            await pipeline.activate()
+        let token = UUID()
+        let releaseBoundary = AudioCaptureReleaseBoundary()
+        handsFreeActivationToken = token
+        handsFreeReleaseBoundary = releaseBoundary
+        currentSessionID = nil
+        let activationTask = Task {
+            await pipeline.activate(releaseBoundary: releaseBoundary)
+        }
+        handsFreeActivationTask = activationTask
+        Task { [weak self] in
+            let sessionID = await activationTask.value
+            guard let self, self.handsFreeActivationToken == token else {
+                return
+            }
+            self.handsFreeActivationTask = nil
+            self.handsFreeActivationToken = nil
+            if let sessionID {
+                self.currentSessionID = sessionID
+                self.handsFreeOwnedSessionID = sessionID
+            } else if self.handsFreeReleaseBoundary === releaseBoundary {
+                self.handsFreeReleaseBoundary = nil
+            }
         }
     }
 
@@ -357,12 +586,52 @@ final class HUDController {
             // The hotkey provider started push-to-talk because the
             // handsfree combo shares a modifier with the dictate key.
             // Switch to hands-free so the user can release the keys.
+            let transferToken = UUID()
+            heldSessionTransferToken = transferToken
+            heldSessionTransferPending = true
+            pendingHeldModeSessionID = nil
             viewModel.clickedToStartHandsFree()
+            let pipeline = pipeline
+            let transferredBoundary = onTransferHeldHotkeySession? {
+                [weak self, pipeline] transferredSession in
+                Task { @MainActor in
+                    guard let self,
+                        self.heldSessionTransferToken == transferToken
+                    else { return }
+                    guard let transferredSession, let pipeline else {
+                        self.invalidateHeldSessionTransfer()
+                        return
+                    }
+                    let sessionID = transferredSession.sessionID
+                    let isStillOwned = await pipeline.currentSessionID
+                        == sessionID
+                    guard self.heldSessionTransferToken == transferToken else {
+                        return
+                    }
+                    self.invalidateHeldSessionTransfer()
+                    guard isStillOwned else { return }
+                    self.currentSessionID = sessionID
+                    self.handsFreeOwnedSessionID = sessionID
+                    self.hotkeyHeldSession = transferredSession
+                }
+            }
+            guard let transferredBoundary else {
+                invalidateHeldSessionTransfer()
+                return
+            }
+            handsFreeReleaseBoundary = transferredBoundary
         case .listeningHandsFree:
             completePipeline()
         default:
             break
         }
+    }
+
+    private func publishOwnedReleaseBoundary(
+        atHostTime hostTime: UInt64 = mach_absolute_time()
+    ) {
+        handsFreeReleaseBoundary?.publish(releaseHostTime: hostTime)
+        hotkeyHeldSession?.releaseBoundary.publish(releaseHostTime: hostTime)
     }
 
     // MARK: - Paste shortcut handling
@@ -417,33 +686,15 @@ final class HUDController {
 
     /// Paste the buffered transcript into the currently focused text field.
     private func handlePasteShortcut() {
-        guard let transcriptBuffer, let textInjector else { return }
-
-        // Dismiss the no-target hint if it is showing.
-        if viewModel.visualState == .noTarget {
-            viewModel.dismissNoTarget()
-            guard let coordinator else { return }
-            Task {
-                await coordinator.reset()
-            }
-        }
+        guard let pipeline else { return }
+        let capturedSessionID = currentSessionID
 
         Task {
-            guard let transcript = await transcriptBuffer.consume() else {
-                Log.debug("[HUD] ⌃⌥V pressed but no transcript in buffer")
-                return
-            }
-
-            // Read fresh context at the moment of paste.
-            let context = await AXAppContextProvider().readContext()
-
-            do {
-                try await textInjector.inject(text: transcript, into: context)
-                Log.debug("[HUD] ⌃⌥V pasted transcript (\(transcript.count) chars)")
-            } catch {
-                Log.debug("[HUD] ⌃⌥V paste failed: \(error)")
-                // Re-store so the user can try again.
-                await transcriptBuffer.store(transcript)
+            await pipeline.pasteBufferedTranscript()
+            if let capturedSessionID,
+                await pipeline.currentSessionID != capturedSessionID
+            {
+                self.sessionEnded(capturedSessionID)
             }
         }
     }

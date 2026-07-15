@@ -11,6 +11,37 @@ public protocol AudioProviding: Sendable {
     /// Throws if the microphone is unavailable or permission has not been granted.
     func startRecording() async throws
 
+    /// Begin capture and publish the exact point at which audio is live.
+    ///
+    /// The callback must run after capture can produce PCM and before this method
+    /// performs any unrelated post-start work. The pipeline uses it to close the
+    /// key-release boundary without reading provider state that may be locked by
+    /// a slow engine start.
+    func startRecording(
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws
+
+    /// Begin capture for one physical press. Audio callbacks consult the shared
+    /// boundary directly, so key-up takes effect before asynchronous pipeline
+    /// completion reaches the provider.
+    func startRecording(
+        releaseBoundary: AudioCaptureReleaseBoundary,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws
+
+    /// Close the current recording's callback publication boundary.
+    ///
+    /// This method must synchronously publish the audio sample timestamp at
+    /// which capture ends. A callback queued across that boundary may retain
+    /// samples timestamped before release, but must exclude samples at or after
+    /// release. The PCM stream remains available until asynchronous stop drains
+    /// every callback that can still contain a pre-release prefix.
+    func closeRecordingBoundary()
+
+    /// Close capture at a host timestamp recorded by the physical input event.
+    /// Host time must use the same mach absolute clock as `AVAudioTime.hostTime`.
+    func closeRecordingBoundary(atHostTime releaseHostTime: UInt64)
+
     /// Stop capturing and return the recorded audio.
     ///
     /// Returns the audio captured since `startRecording()` was called,
@@ -80,16 +111,33 @@ public protocol AudioProviding: Sendable {
     /// resources can use the default no-op implementation.
     func shutdown()
 
-    /// Force-reset the audio engine after a timeout.
+    /// Terminally invalidate the current audio capture after a failure or timeout.
     ///
-    /// When `startRecording()` hangs (e.g. BT SCO negotiation blocking
-    /// `engine.start()`), it holds the lock. This method stops the
-    /// engine without waiting for the lock, unblocking the hung call
-    /// so the next session can start fresh.
+    /// This method must be safe to call from outside a blocked recording
+    /// operation and must prevent an invalidated start from later publishing
+    /// capture readiness. It must also close the current publication boundary,
+    /// finish retained streams as teardown unwinds, and leave the provider able
+    /// to admit a fresh recording. Repeated calls must be safe.
+    ///
+    /// Unlike `shutdown()`, reset is part of the pipeline's failure ownership
+    /// contract. Every provider must implement it explicitly.
     func forceReset()
 }
 
 extension AudioProviding {
+    public func startRecording(
+        releaseBoundary: AudioCaptureReleaseBoundary,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await startRecording(onCaptureReady: onCaptureReady)
+    }
+
+    /// Providers without sample-time fencing fall back to their synchronous
+    /// callback boundary.
+    public func closeRecordingBoundary(atHostTime releaseHostTime: UInt64) {
+        closeRecordingBoundary()
+    }
+
     /// Default: gain 1.0 (no amplification).
     public var gainFactor: Float { 1.0 }
 
@@ -113,7 +161,4 @@ extension AudioProviding {
 
     /// Default implementation is a no-op.
     public func shutdown() {}
-
-    /// Default implementation is a no-op.
-    public func forceReset() {}
 }

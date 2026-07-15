@@ -87,12 +87,41 @@ public protocol StreamingDictationProviding: Sendable {
     ///
     /// Safe to call if no session is open (no-op in that case).
     func cancelStreaming() async
+
+    /// Session-scoped variants used by the production pipeline. Implementations
+    /// should reject stale IDs without touching the current session.
+    func startStreaming(
+        sessionID: DictationSessionID,
+        context: AppContext,
+        language: String?,
+        micProximity: MicProximity
+    ) async throws
+    func sendAudio(_ pcmData: Data, sessionID: DictationSessionID) async throws
+    func finishStreaming(sessionID: DictationSessionID) async throws -> String
+    func cancelStreaming(sessionID: DictationSessionID) async
 }
 
-/// Default implementations so conforming types only need to implement
-/// the methods they support. `setChunkHandler` is a no-op by default,
-/// so providers that do not support rolling chunks are transparent to
-/// callers that try to set a handler.
+/// Reprocess an exact retained local capture through the same bounded unit
+/// policy used during live dictation.
+///
+/// Recovery owns a fresh provider session identified by `sessionID`. The
+/// implementation must consume every PCM byte once, in order, and return one
+/// complete unpublished result. Cancellation is performed through the
+/// session-scoped `cancelStreaming` requirement inherited from
+/// `StreamingDictationProviding`.
+public protocol LocalAudioReplayProviding: StreamingDictationProviding {
+
+    func replayCapturedAudio(
+        _ pcmData: Data,
+        sessionID: DictationSessionID,
+        context: AppContext,
+        language: String?,
+        micProximity: MicProximity,
+        silenceThreshold: Float
+    ) async throws -> String
+}
+
+/// Shared defaults for provider policy and optional rolling publication.
 extension StreamingDictationProviding {
 
     public var finishStreamingWatchdog: TimeInterval { 30 }

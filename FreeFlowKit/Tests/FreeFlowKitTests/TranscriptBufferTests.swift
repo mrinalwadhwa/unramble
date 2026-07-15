@@ -146,4 +146,71 @@ struct TranscriptBufferTests {
         #expect(secondTimestamp != nil)
         #expect(secondTimestamp! >= firstTimestamp!)
     }
+
+    @Test("Failed consumption restores when no newer transcript exists")
+    func restoreUncontendedConsumption() async {
+        let buffer = TranscriptBuffer()
+        await buffer.store("Retry me")
+
+        let consumption = await buffer.consumeForInjection()
+        let restored = await buffer.restoreAfterFailedInjection(consumption!)
+
+        #expect(restored)
+        #expect(await buffer.lastTranscript == "Retry me")
+    }
+
+    @Test("Failed consumption cannot overwrite a newer transcript")
+    func staleConsumptionDoesNotOverwriteNewerTranscript() async {
+        let buffer = TranscriptBuffer()
+        await buffer.store("Older transcript")
+        let staleConsumption = await buffer.consumeForInjection()
+
+        await buffer.store("Newer transcript")
+        let restored = await buffer.restoreAfterFailedInjection(staleConsumption!)
+
+        #expect(!restored)
+        #expect(await buffer.lastTranscript == "Newer transcript")
+    }
+
+    @Test("Exact-session read does not return another session's transcript")
+    func exactSessionRead() async {
+        let buffer = TranscriptBuffer()
+        let owningSession = DictationSessionID()
+        let otherSession = DictationSessionID()
+
+        await buffer.store("Owned transcript", sessionID: owningSession)
+
+        #expect(await buffer.transcript(for: owningSession) == "Owned transcript")
+        #expect(await buffer.transcript(for: otherSession) == nil)
+    }
+
+    @Test("Exact-session consumption leaves another session's transcript intact")
+    func exactSessionConsumptionRefusesAnotherOwner() async {
+        let buffer = TranscriptBuffer()
+        let owningSession = DictationSessionID()
+        let otherSession = DictationSessionID()
+
+        await buffer.store("Owned transcript", sessionID: owningSession)
+
+        let consumption = await buffer.consumeForInjection(sessionID: otherSession)
+
+        #expect(consumption == nil)
+        #expect(await buffer.transcript(for: owningSession) == "Owned transcript")
+    }
+
+    @Test("Failed injection restoration preserves transcript session ownership")
+    func restorationPreservesSessionOwnership() async {
+        let buffer = TranscriptBuffer()
+        let owningSession = DictationSessionID()
+        let otherSession = DictationSessionID()
+        await buffer.store("Retry me", sessionID: owningSession)
+
+        let consumption = await buffer.consumeForInjection(sessionID: owningSession)
+        let restored = await buffer.restoreAfterFailedInjection(consumption!)
+
+        #expect(consumption?.sessionID == owningSession)
+        #expect(restored)
+        #expect(await buffer.transcript(for: owningSession) == "Retry me")
+        #expect(await buffer.transcript(for: otherSession) == nil)
+    }
 }

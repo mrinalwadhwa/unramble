@@ -8,8 +8,13 @@ public final class MockAudioProvider: AudioProviding, @unchecked Sendable {
     private let lock = NSLock()
 
     private var _isRecording = false
+    private var _recordingBoundaryIsOpen = false
     private var _startCallCount = 0
+    private var _captureReadyCount = 0
     private var _stopCallCount = 0
+    private var _releaseHostTimes: [UInt64] = []
+    private var _captureReleaseBoundaries: [AudioCaptureReleaseBoundary] = []
+    private var resetGeneration: UInt64 = 0
 
     /// The audio buffer returned by `stopRecording()`. Defaults to a short
     /// non-silent buffer so the silence gate does not reject it.
@@ -49,9 +54,24 @@ public final class MockAudioProvider: AudioProviding, @unchecked Sendable {
         lock.withLock { _startCallCount }
     }
 
+    /// Number of capture-ready boundaries published by `startRecording()`.
+    public var captureReadyCount: Int {
+        lock.withLock { _captureReadyCount }
+    }
+
     /// Number of times `stopRecording()` has been called.
     public var stopCallCount: Int {
         lock.withLock { _stopCallCount }
+    }
+
+    /// Physical release timestamps received from the pipeline.
+    public var releaseHostTimes: [UInt64] {
+        lock.withLock { _releaseHostTimes }
+    }
+
+    /// Per-activation boundaries installed by the pipeline.
+    public var captureReleaseBoundaries: [AudioCaptureReleaseBoundary] {
+        lock.withLock { _captureReleaseBoundaries }
     }
 
     public init(stubbedBuffer: AudioBuffer? = nil) {
@@ -109,6 +129,31 @@ public final class MockAudioProvider: AudioProviding, @unchecked Sendable {
     }
 
     public func startRecording() async throws {
+        try await startRecording(onCaptureReady: {})
+    }
+
+    public func startRecording(
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await startRecordingOwned(
+            releaseBoundary: nil,
+            onCaptureReady: onCaptureReady)
+    }
+
+    public func startRecording(
+        releaseBoundary: AudioCaptureReleaseBoundary,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await startRecordingOwned(
+            releaseBoundary: releaseBoundary,
+            onCaptureReady: onCaptureReady)
+    }
+
+    private func startRecordingOwned(
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        let startGeneration = lock.withLock { resetGeneration }
         if stubbedStartDelay > 0 {
             try await Task.sleep(
                 nanoseconds: UInt64(stubbedStartDelay * 1_000_000_000))
@@ -116,23 +161,46 @@ public final class MockAudioProvider: AudioProviding, @unchecked Sendable {
         if let error = stubbedStartError {
             throw error
         }
-        lock.withLock {
+        let didStart = lock.withLock {
+            guard resetGeneration == startGeneration else { return false }
             _isRecording = true
+            _recordingBoundaryIsOpen = true
             _startCallCount += 1
+            if let releaseBoundary {
+                _captureReleaseBoundaries.append(releaseBoundary)
+            }
 
             if enablePCMStream {
                 let (stream, continuation) = AsyncStream<Data>.makeStream()
                 _pcmAudioStream = stream
                 pcmContinuation = continuation
             }
+            onCaptureReady()
+            _captureReadyCount += 1
+            return true
         }
+        guard didStart else { throw CancellationError() }
     }
 
     /// Emit a PCM chunk to the `pcmAudioStream`. Only works when
     /// `enablePCMStream` is true and recording is active.
     public func emitPCMChunk(_ data: Data) {
         lock.withLock {
+            guard _recordingBoundaryIsOpen else { return }
             pcmContinuation?.yield(data)
+        }
+    }
+
+    public func closeRecordingBoundary() {
+        lock.withLock {
+            _recordingBoundaryIsOpen = false
+        }
+    }
+
+    public func closeRecordingBoundary(atHostTime releaseHostTime: UInt64) {
+        lock.withLock {
+            _releaseHostTimes.append(releaseHostTime)
+            _recordingBoundaryIsOpen = false
         }
     }
 
@@ -153,6 +221,7 @@ public final class MockAudioProvider: AudioProviding, @unchecked Sendable {
     public func stopRecording() async throws -> AudioBuffer {
         let buffer = lock.withLock { () -> AudioBuffer in
             _isRecording = false
+            _recordingBoundaryIsOpen = false
             _stopCallCount += 1
             pcmContinuation?.finish()
             pcmContinuation = nil
@@ -160,5 +229,16 @@ public final class MockAudioProvider: AudioProviding, @unchecked Sendable {
             return stubbedBuffer
         }
         return buffer
+    }
+
+    public func forceReset() {
+        lock.withLock {
+            resetGeneration &+= 1
+            _isRecording = false
+            _recordingBoundaryIsOpen = false
+            pcmContinuation?.finish()
+            pcmContinuation = nil
+            _pcmAudioStream = nil
+        }
     }
 }

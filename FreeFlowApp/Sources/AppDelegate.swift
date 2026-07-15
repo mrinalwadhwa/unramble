@@ -11,8 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = RecordingCoordinator()
     private let permissionProvider = MicrophonePermissionProvider()
     private let hotkeyProvider = CGEventTapHotkeyProvider()
+    private var hotkeyPipelineDriver: HotkeyPipelineDriver?
+    private var hotkeyPipelineIdentity: ObjectIdentifier?
     private let transcriptBuffer = TranscriptBuffer()
-    private let textInjector = AppTextInjector()
+    private let textInjector = SerializedTextInjector(base: AppTextInjector())
     private let audioDeviceProvider = CoreAudioDeviceProvider()
     private let soundFeedbackProvider = SoundFeedbackProvider()
     private var pipeline: DictationPipeline?
@@ -108,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pipelineRebuildQueue.invalidate()
         pipelineRebuildTask?.cancel()
         localModelPreloadTask?.cancel()
-        hotkeyProvider.unregister()
+        unregisterHotkey()
         hudController?.stop()
         menuBarController?.stop()
         permissionController?.stop()
@@ -164,8 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onRegisterHotkey = { [weak self] in
             // Rebuild the pipeline so it picks up the API key or
             // dictation mode the user just configured in onboarding.
-            self?.rebuildPipeline()
-            self?.startOnboardingDictationObserver()
+            self?.rebuildPipeline { [weak self] in
+                self?.startOnboardingDictationObserver()
+            }
         }
 
         controller.onComplete = { [weak self] in
@@ -204,7 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Observe coordinator state changes during onboarding to push
     /// dictation results to the try-it screen via the bridge.
     ///
-    /// Uses `stateStream` instead of polling so no transitions are missed.
+    /// Uses `sessionStateStream` instead of polling so no transitions are
+    /// missed or rebound to a later pipeline session.
     /// The transcript buffer is populated before injection starts, so
     /// reading it on any exit from `.injecting` (success or failure)
     /// reliably captures the result.
@@ -214,19 +218,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopOnboardingDictationObserver()
         let coord = coordinator
         let buffer = transcriptBuffer
+        let pipeline = pipeline
         onboardingDictationTask = Task { [weak self] in
-            var previousState: RecordingState = .idle
-            for await state in await coord.stateStream {
+            var previousUpdate = RecordingStateUpdate(
+                state: .idle,
+                sessionID: nil)
+            for await update in await coord.sessionStateStream {
                 if Task.isCancelled { break }
+                let state = update.state
 
                 // Trigger on any exit from .injecting: the transcript
                 // buffer was written before the injecting transition,
                 // so it is available whether injection succeeded (.idle)
                 // or failed (.injectionFailed).
-                if previousState == .injecting
-                    && (state == .idle || state == .injectionFailed)
+                if previousUpdate.state == .injecting
+                    && (state == .idle || state == .injectionFailed),
+                    let injectingSessionID = previousUpdate.sessionID
                 {
-                    let text = await buffer.lastTranscript
+                    let text = await buffer.transcript(for: injectingSessionID)
                     if let text, !text.isEmpty {
                         await MainActor.run {
                             self?.onboardingController?.onDictationResult?(text)
@@ -235,11 +244,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // During onboarding the system injection target is
                     // the app itself, so .injectionFailed is expected.
                     // Reset to idle to dismiss the no-target HUD hint.
-                    if state == .injectionFailed {
-                        await coord.finishInjecting()
+                    if state == .injectionFailed,
+                        update.sessionID == previousUpdate.sessionID,
+                        let pipeline
+                    {
+                        await pipeline.dismissInjectionFailure(
+                            sessionID: injectingSessionID)
                     }
                 }
-                previousState = state
+                previousUpdate = update
             }
         }
     }
@@ -314,8 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioDeviceProvider.setAudioCaptureProvider(audioProvider)
 
         let language = Settings.shared.language.languageCode
-        let batchProvider: (any BatchDictationProviding)?
-        let streamingProvider: (any StreamingDictationProviding)?
+        let backend: DictationBackend
         let onSessionExpired: (@Sendable () -> Void)?
 
         if Settings.shared.dictationMode == .local {
@@ -363,7 +375,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let runtime = LocalModelRuntime(
                 sttEngine: sttEngine, llmEngine: llmEngine)
             localModelRuntime = runtime
-            batchProvider = nil
             // Allow overriding the streaming cycle interval for tuning.
             let cycleInterval: TimeInterval = {
                 if let raw = ProcessInfo.processInfo.environment[
@@ -371,10 +382,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     value > 0 { return value }
                 return 3
             }()
-            streamingProvider = LocalStreamingProvider(
-                sttEngine: sttEngine, polishChatClient: polisher,
-                cycleInterval: cycleInterval,
-                loadSTT: { try await runtime.loadSTT() })
+            backend = .local(
+                streaming: LocalStreamingProvider(
+                    sttEngine: sttEngine, polishChatClient: polisher,
+                    cycleInterval: cycleInterval,
+                    loadSTT: { try await runtime.loadSTT() }))
             onSessionExpired = nil
 
             startModelPreload(runtime)
@@ -383,11 +395,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #endif
         } else {
             // Cloud mode: OpenAI STT + cloud polish.
-            batchProvider = OpenAIFileTranscriber(
-                apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
-                language: Settings.shared.language.languageCode)
-            streamingProvider = OpenAIStreamingProvider(
-                apiKey: ServiceConfig.shared.openAIAPIKey ?? "")
+            backend = .cloud(
+                realtime: OpenAIStreamingProvider(
+                    apiKey: ServiceConfig.shared.openAIAPIKey ?? ""),
+                fallback: OpenAIFileTranscriber(
+                    apiKey: ServiceConfig.shared.openAIAPIKey ?? ""))
             onSessionExpired = { [weak self] in
                 Task { @MainActor in self?.beginSessionRecovery() }
             }
@@ -398,21 +410,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newPipeline = DictationPipeline(
             audioProvider: audioProvider,
             contextProvider: AXAppContextProvider(),
-            batchProvider: batchProvider,
+            backend: backend,
             textInjector: textInjector,
             coordinator: coordinator,
             transcriptBuffer: transcriptBuffer,
-            streamingProvider: streamingProvider,
+            language: language,
             onSessionExpired: onSessionExpired,
-            micDiagnosticStore: micDiagnosticStore,
-            localMode: isLocal
+            micDiagnosticStore: micDiagnosticStore
         )
         pipeline = newPipeline
-
-        // Apply the persisted language setting.
-        Task {
-            await newPipeline.setLanguage(language)
-        }
     }
 
     private func startModelPreload(_ runtime: LocalModelRuntime) {
@@ -445,12 +451,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator: coordinator,
             pipeline: pipeline,
             audioProvider: audioProvider,
-            transcriptBuffer: transcriptBuffer,
-            textInjector: textInjector,
             messageService: inAppMessageService
         )
         controller.onSessionExpired = { [weak self] in
             self?.beginSessionRecovery()
+        }
+        controller.onTransferHeldHotkeySession = { [weak self] completion in
+            guard let driver = self?.hotkeyPipelineDriver else {
+                completion(nil)
+                return nil
+            }
+            return driver.transferHeldSession(completion)
         }
         controller.viewModel.isPrivateMode = Settings.shared.dictationMode == .local
         hudController = controller
@@ -466,7 +477,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator: coordinator,
             pipeline: pipeline,
             transcriptBuffer: transcriptBuffer,
-            textInjector: textInjector,
             audioDeviceProvider: audioDeviceProvider,
             updaterService: updaterService,
             micDiagnosticStore: micDiagnosticStore,
@@ -577,7 +587,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pipelineRebuildTask = pipelineRebuildQueue.submit(
             cleanup: {
                 await oldGeneration.drain()
-                await coordinator.reset()
+                let reset = await coordinator.reset()
+                if !reset {
+                    Log.debug(
+                        "[AppDelegate] Coordinator reset rejected after generation drain")
+                }
             },
             replacement: {}
         )
@@ -597,7 +611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Log.debug("[AppDelegate] Beginning API key recovery")
         pendingSessionRecoveryPipeline = pipeline
-        hotkeyProvider.unregister()
+        unregisterHotkey()
         menuBarController?.setHotkeyRegistered(false)
         keychain.deleteOpenAIAPIKey()
 
@@ -637,12 +651,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Re-register the hotkey after settings change.
     private func reRegisterHotkey() {
-        hotkeyProvider.unregister()
+        unregisterHotkey()
         registerHotkey()
     }
 
     /// Rebuild the pipeline after dictation mode changes.
-    private func rebuildPipeline() {
+    private func rebuildPipeline(
+        afterReplacement: (@MainActor @Sendable () -> Void)? = nil
+    ) {
         Log.debug("[AppDelegate] Rebuilding pipeline for mode: \(Settings.shared.dictationMode.rawValue)")
         pendingSessionRecoveryPipeline = nil
 
@@ -651,6 +667,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             cleanup: { await oldGeneration.drain() },
             replacement: { [weak self] in
                 self?.finishPipelineRebuild()
+                afterReplacement?()
             }
         )
     }
@@ -658,7 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func detachPipelineGeneration() -> DetachedPipelineGeneration {
         // Fence input synchronously. Cleanup and replacement are serialized
         // because model teardown must finish before a new generation loads.
-        hotkeyProvider.unregister()
+        unregisterHotkey()
         menuBarController?.setHotkeyRegistered(false)
         hudController?.stop()
         hudController = nil
@@ -706,10 +723,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Hotkey
 
+    private func unregisterHotkey() {
+        hotkeyPipelineDriver?.invalidate()
+        hotkeyPipelineDriver = nil
+        hotkeyPipelineIdentity = nil
+        hotkeyProvider.unregister()
+    }
+
     private func registerHotkey() {
         guard let pipeline else {
             Log.debug("[AppDelegate] Pipeline not initialized, cannot register hotkey")
             return
+        }
+        let pipelineIdentity = ObjectIdentifier(pipeline)
+        if hotkeyPipelineDriver != nil {
+            guard hotkeyPipelineIdentity != pipelineIdentity else {
+                Log.debug(
+                    "[AppDelegate] Hotkey already registered for current pipeline")
+                return
+            }
+            unregisterHotkey()
         }
 
         // Create the HUD on first hotkey registration.
@@ -720,24 +753,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pipelineRef = pipeline
         let hudRef = hudController
         let menuRef = menuBarController
+        let driver = HotkeyPipelineDriver(
+            pipeline: pipelineRef,
+            heldSessionAccepted: { [weak hudRef] heldSession in
+                await MainActor.run {
+                    hudRef?.hotkeySessionAccepted(heldSession)
+                }
+            },
+            sessionEnded: { [weak hudRef] sessionID in
+                await MainActor.run {
+                    hudRef?.sessionEnded(sessionID)
+                }
+            })
 
         do {
-            try hotkeyProvider.register { event in
-                Task { @MainActor in
-                    switch event {
-                    case .pressed:
-                        hudRef?.hotkeyHeld()
-                        Task {
-                            await pipelineRef.activate()
-                        }
-                    case .released:
-                        Task { await pipelineRef.complete() }
-                    }
-                }
+            try hotkeyProvider.registerTimestamped { event, hostTime in
+                driver.submit(event, hostTime: hostTime)
             }
+            hotkeyPipelineDriver = driver
+            hotkeyPipelineIdentity = pipelineIdentity
             menuRef?.setHotkeyRegistered(true)
             Log.debug("[AppDelegate] Global hotkey registered (Right Option)")
         } catch {
+            driver.invalidate()
+            hotkeyPipelineDriver = nil
+            hotkeyPipelineIdentity = nil
+            hotkeyProvider.unregister()
             Log.debug("[AppDelegate] Failed to register hotkey: \(error)")
             menuRef?.setHotkeyRegistered(false)
             Task { @MainActor in

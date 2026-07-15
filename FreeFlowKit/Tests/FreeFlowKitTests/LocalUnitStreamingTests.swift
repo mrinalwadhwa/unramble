@@ -60,6 +60,7 @@ struct LocalUnitStreamingTests {
         let provider = LocalStreamingProvider(
             sttEngine: recognizer,
             polishChatClient: EchoPolishClient(),
+            cycleInterval: 100.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
                 hardPauseSilenceBytes: 80, maximumUnitBytes: 1_000_000),
@@ -67,7 +68,13 @@ struct LocalUnitStreamingTests {
 
         // speech, hard pause, speech, hard pause: two units, two resets.
         let audio = speech(200) + silence(100) + speech(200) + silence(100)
-        let result = try await provider.replay(audio: audio, stepBytes: 100)
+        let result = try await provider.replayCapturedAudio(
+            audio,
+            sessionID: DictationSessionID(),
+            context: .empty,
+            language: nil,
+            micProximity: .farField,
+            silenceThreshold: 0.01)
 
         // One fresh session per hard pause, plus the initial session. Discarding
         // the old sessions is what bounds memory on a long dictation.
@@ -83,6 +90,7 @@ struct LocalUnitStreamingTests {
         let provider = LocalStreamingProvider(
             sttEngine: recognizer,
             polishChatClient: EchoPolishClient(),
+            cycleInterval: 100.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 2, softPauseSilenceBytes: 2,
                 hardPauseSilenceBytes: 4, maximumUnitBytes: 100),
@@ -90,8 +98,13 @@ struct LocalUnitStreamingTests {
 
         // Continuous speech, no pause: units close at the size cap, which is
         // not a safe reset point, so the session is never rebuilt.
-        let result = try await provider.replay(
-            audio: speech(400), stepBytes: 100)
+        let result = try await provider.replayCapturedAudio(
+            speech(400),
+            sessionID: DictationSessionID(),
+            context: .empty,
+            language: nil,
+            micProximity: .farField,
+            silenceThreshold: 0.01)
 
         #expect(recognizer.sessionCount == 1)
         #expect(result.lowercased().contains("charlie"))

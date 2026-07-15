@@ -10,9 +10,10 @@ private let audioLevelSmoothing: Float = 0.6
 
 /// Derive `HUDVisualState` from pipeline state and UI-local signals.
 ///
-/// The view model observes `RecordingCoordinator.stateStream` and combines it
-/// with hover, activation mode, and slow-processing timer to produce the
-/// current `HUDVisualState`. SwiftUI views observe the published properties.
+/// The view model observes `RecordingCoordinator.sessionStateStream` and
+/// combines it with hover, activation mode, and slow-processing timer to
+/// produce the current `HUDVisualState`. SwiftUI views observe the published
+/// properties.
 ///
 /// Action closures (`onCancel`, `onStop`, `onDismiss`, `onClickToRecord`) are
 /// set by the `HUDController` and invoked by SwiftUI button actions. This
@@ -25,6 +26,7 @@ final class HUDViewModel: ObservableObject {
     @Published private(set) var visualState: HUDVisualState = .minimized
     @Published private(set) var isHovering: Bool = false
     @Published var isPrivateMode: Bool = false
+    @Published private(set) var isDictationRetryAvailable: Bool = false
 
     /// Current audio input level (0.0 to 1.0) for driving the waveform bars.
     /// Smoothed to avoid jittery animation. Reset to 0 when not recording.
@@ -88,6 +90,7 @@ final class HUDViewModel: ObservableObject {
     // MARK: - Pipeline references
 
     private var pipelineState: RecordingState = .idle
+    private(set) var pipelineSessionID: DictationSessionID?
 
     // MARK: - Audio level
 
@@ -134,9 +137,9 @@ final class HUDViewModel: ObservableObject {
     func observe(coordinator: RecordingCoordinator) {
         observationTask?.cancel()
         observationTask = Task { [weak self] in
-            for await state in await coordinator.stateStream {
+            for await update in await coordinator.sessionStateStream {
                 guard !Task.isCancelled else { break }
-                self?.handlePipelineState(state)
+                self?.handlePipelineState(update)
             }
         }
     }
@@ -155,6 +158,7 @@ final class HUDViewModel: ObservableObject {
         micCalloutTask = nil
         stopAudioLevelObservation()
         pipelineState = .idle
+        pipelineSessionID = nil
         breathingFired = false
         slowProcessingFired = false
         inAppMessage = nil
@@ -191,36 +195,26 @@ final class HUDViewModel: ObservableObject {
     /// Called when the user clicks the minimized HUD to start hands-free dictation.
     func clickedToStartHandsFree() {
         isHandsFree = true
+        recalculate()
     }
 
     /// Called when push-to-talk recording begins (hotkey held).
     func hotkeyHeld() {
         isHandsFree = false
+        recalculate()
     }
 
-    /// Called when the user dismisses the no-target state (✕ or Escape).
-    func dismissNoTarget() {
-        // The coordinator should transition to idle; this handles the UI side
-        // in case the dismiss happens before the coordinator round-trip.
-        if pipelineState == .injectionFailed {
-            // The controller will call coordinator.reset() — we just
-            // anticipate the visual change.
-            visualState = .minimized
-        }
-    }
-
-    /// Called when the user dismisses the dictation failed state.
-    func dismissDictationFailure() {
-        if pipelineState == .dictationFailed {
-            visualState = .minimized
-        }
+    func setDictationRetryAvailable(_ isAvailable: Bool) {
+        isDictationRetryAvailable = isAvailable
     }
 
     // MARK: - Pipeline state handling
 
-    private func handlePipelineState(_ state: RecordingState) {
+    private func handlePipelineState(_ update: RecordingStateUpdate) {
+        let state = update.state
         let previous = pipelineState
         pipelineState = state
+        pipelineSessionID = state == .idle ? nil : update.sessionID
         let t = CFAbsoluteTimeGetCurrent()
         Log.debug("[HUD] State changed: \(previous) → \(state) at \(t)")
 

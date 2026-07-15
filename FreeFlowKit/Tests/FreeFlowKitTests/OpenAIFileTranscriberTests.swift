@@ -239,10 +239,10 @@ struct OpenAIFileTranscriberStubbedTests {
         }
         let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            language: "fr",
             session: session)
 
-        _ = try await provider.dictate(audio: silentWAV(), context: .empty)
+        _ = try await provider.dictate(
+            audio: silentWAV(), context: .empty, language: "fr")
 
         let request = try #require(recorder.snapshot)
         let body = try #require(requestBody(request))
@@ -250,9 +250,8 @@ struct OpenAIFileTranscriberStubbedTests {
         #expect(body.range(of: Data("\r\n\r\nfr\r\n".utf8)) != nil)
     }
 
-    @Test("reads the current language when constructing each request")
-    func refreshedLanguageField() async throws {
-        let language = MutableString("en")
+    @Test("uses the explicit language for each request")
+    func explicitLanguageField() async throws {
         let recorder = RequestRecorder()
         let session = stubbedSession { request in
             recorder.record(request)
@@ -263,11 +262,10 @@ struct OpenAIFileTranscriberStubbedTests {
         }
         let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            language: language.value,
             session: session)
-        language.value = "fr"
 
-        _ = try await provider.dictate(audio: silentWAV(), context: .empty)
+        _ = try await provider.dictate(
+            audio: silentWAV(), context: .empty, language: "fr")
 
         let request = try #require(recorder.snapshot)
         let body = try #require(requestBody(request))
@@ -482,8 +480,27 @@ struct OpenAIFileTranscriberStubbedTests {
             apiKey: "k",
             session: session)
         let result = try await provider.dictate(
-            audio: silentWAV(), context: AppContext.empty)
+            audio: silentWAV(), context: AppContext.empty, language: "en")
         #expect(result == "Hello, world")
+    }
+
+    @Test("Auto-language fallback preserves words with English filler spellings")
+    func autoLanguageTranscriptPreservation() async throws {
+        let session = stubbedSession { request in
+            let body = #"{"text":"um dez minutos no total"}"#
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil)!
+            return (response, body.data(using: .utf8)!)
+        }
+        let provider = OpenAIFileTranscriber(
+            apiKey: "k",
+            session: session)
+
+        let result = try await provider.dictate(
+            audio: silentWAV(), context: AppContext.empty, language: nil)
+
+        #expect(result == "um dez minutos no total")
     }
 
     @Test("non-English fallback preserves words that resemble English fillers")
@@ -497,11 +514,10 @@ struct OpenAIFileTranscriberStubbedTests {
         }
         let provider = OpenAIFileTranscriber(
             apiKey: "k",
-            language: "de",
             session: session)
 
         let result = try await provider.dictate(
-            audio: silentWAV(), context: AppContext.empty)
+            audio: silentWAV(), context: AppContext.empty, language: "de")
 
         #expect(result == "um zehn Uhr")
     }
