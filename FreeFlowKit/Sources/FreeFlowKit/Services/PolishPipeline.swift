@@ -297,6 +297,11 @@ public enum PolishPipeline {
         // Strip pure filler sounds (um, uh, ah, hmm, etc.).
         result = stripFillerSounds(result)
 
+        // Convert spoken clock times ("at three thirty" → "at 3:30") before the
+        // model, which otherwise misconverts them (e.g. to "3:00"). Runs before
+        // number-word conversion so the minute words are still spelled.
+        result = convertSpokenTime(result)
+
         // Convert "X point Y million/billion/thousand" to decimal form
         // before the model sees it. Prevents hallucinated conversions
         // like "one point two million" → "200,000".
@@ -484,6 +489,86 @@ public enum PolishPipeline {
         ("fifty", 50), ("sixty", 60), ("seventy", 70),
         ("eighty", 80), ("ninety", 90),
     ]
+
+    /// Spelled hours ("one".."twelve") for spoken-time conversion.
+    private static let hourWords: [String: Int] = [
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+        "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    ]
+
+    /// Minute words 10-19 (plus ten/eleven/twelve).
+    private static let minuteTeens: [String: Int] = [
+        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+        "nineteen": 19,
+    ]
+
+    /// Minute tens words (20-50); 60+ is not a valid minute.
+    private static let minuteTens: [String: Int] = [
+        "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    ]
+
+    private static func parseHour(_ token: String) -> Int? {
+        let t = token.lowercased()
+        if let v = hourWords[t] { return v }
+        if let v = Int(t), (0...23).contains(v) { return v }
+        return nil
+    }
+
+    /// Parse a spoken minute phrase (lowercased words) to 0-59, or nil.
+    private static func parseMinute(_ words: [String]) -> Int? {
+        guard let first = words.first else { return nil }
+        if first == "o'clock" || first == "oclock" {
+            return words.count == 1 ? 0 : nil
+        }
+        if first == "oh", words.count == 2, let v = onesValues[words[1]] {
+            return v
+        }
+        if words.count == 1, let v = minuteTeens[first] { return v }
+        if let t = minuteTens[first] {
+            if words.count == 1 { return t }
+            if words.count == 2, let o = onesValues[words[1]] { return t + o }
+        }
+        return nil
+    }
+
+    /// Convert a spoken clock time to `H:MM` before the model sees it, so the
+    /// 0.6B does not misconvert it (e.g. "three thirty" -> "3:00"). Conservative:
+    /// fires only on an hour+minute run introduced by a time preposition
+    /// ("at three thirty"), and the minute grammar excludes scale words, so
+    /// "around twelve thousand" and "about nine hundred" are left untouched.
+    static func convertSpokenTime(_ text: String) -> String {
+        let prep = "at|around|by|before|after|until|from"
+        let hour = "one|two|three|four|five|six|seven|eight|nine|ten|eleven"
+            + "|twelve|\\d{1,2}"
+        let minute = "o'?clock|oh\\s+(?:one|two|three|four|five|six|seven|eight"
+            + "|nine)|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen"
+            + "|seventeen|eighteen|nineteen|(?:twenty|thirty|forty|fifty)"
+            + "(?:\\s+(?:one|two|three|four|five|six|seven|eight|nine))?"
+        let pattern = "(?i)\\b(\(prep))\\s+(\(hour))\\s+(\(minute))"
+            + "(?=\\s|[.,!?;:]|$)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return text
+        }
+        var result = text
+        let matches = regex.matches(
+            in: result, range: NSRange(result.startIndex..., in: result))
+        for match in matches.reversed() {
+            guard let full = Range(match.range, in: result),
+                let prepR = Range(match.range(at: 1), in: result),
+                let hourR = Range(match.range(at: 2), in: result),
+                let minR = Range(match.range(at: 3), in: result),
+                let h = parseHour(String(result[hourR])),
+                let m = parseMinute(
+                    String(result[minR]).lowercased()
+                        .split(separator: " ").map(String.init))
+            else { continue }
+            result.replaceSubrange(
+                full,
+                with: "\(result[prepR]) \(h):\(String(format: "%02d", m))")
+        }
+        return result
+    }
 
     private static let teens: [(String, Int)] = [
         ("thirteen", 13), ("fourteen", 14), ("fifteen", 15),

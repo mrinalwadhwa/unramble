@@ -1236,6 +1236,47 @@ struct StripFillerSoundsTests {
     }
 }
 
+@Suite("PolishPipeline – convertSpokenTime")
+struct ConvertSpokenTimeTests {
+
+    @Test("Preposition-led spoken times convert to H:MM")
+    func spokenTimesConvert() {
+        #expect(PolishPipeline.convertSpokenTime("the review is at three thirty")
+            == "the review is at 3:30")
+        #expect(PolishPipeline.convertSpokenTime("standup at nine forty five today")
+            == "standup at 9:45 today")
+        #expect(PolishPipeline.convertSpokenTime("let's meet at ten fifteen")
+            == "let's meet at 10:15")
+        #expect(PolishPipeline.convertSpokenTime("by twelve thirty")
+            == "by 12:30")
+        #expect(PolishPipeline.convertSpokenTime("call around eight twenty")
+            == "call around 8:20")
+        #expect(PolishPipeline.convertSpokenTime("at nine oh five")
+            == "at 9:05")
+        #expect(PolishPipeline.convertSpokenTime("starts at three o'clock")
+            == "starts at 3:00")
+    }
+
+    @Test("Scale words and non-times are left untouched")
+    func nonTimesUntouched() {
+        // A time preposition before a scale-word number is not a time.
+        #expect(PolishPipeline.convertSpokenTime("around twelve thousand dollars")
+            == "around twelve thousand dollars")
+        #expect(PolishPipeline.convertSpokenTime("from about nine hundred milliseconds")
+            == "from about nine hundred milliseconds")
+        // No time preposition.
+        #expect(PolishPipeline.convertSpokenTime("we made three hires")
+            == "we made three hires")
+        #expect(PolishPipeline.convertSpokenTime("ship it in two weeks")
+            == "ship it in two weeks")
+        // Preposition not followed by an hour, or hour with no minute.
+        #expect(PolishPipeline.convertSpokenTime("one area at a time")
+            == "one area at a time")
+        #expect(PolishPipeline.convertSpokenTime("let's talk at three")
+            == "let's talk at three")
+    }
+}
+
 @Suite("PolishPipeline – convertNumberWords")
 struct ConvertNumberWordsTests {
 
