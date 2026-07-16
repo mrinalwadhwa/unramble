@@ -1272,6 +1272,8 @@ public enum PolishPipeline {
                         polished: cleaned, preprocessed: stripped) != nil)
                     || (stripModelBreaks && guardAgainstFabrication(
                         polished: cleaned, preprocessed: stripped) != nil)
+                    || (stripModelBreaks && guardAgainstDuplication(
+                        polished: cleaned, preprocessed: stripped) != nil)
                     || (stripModelBreaks && guardAgainstNumberChange(
                         polished: cleaned, preprocessed: stripped) != nil)
                 if !guardFires {
@@ -1816,14 +1818,96 @@ public enum PolishPipeline {
     /// Returns the preprocessed text as fallback, or nil if no fabrication.
     static func guardAgainstFabrication(
         polished: String, preprocessed: String,
-        maximumNovelWords: Int = 3
+        maximumNovelWords: Int = 3,
+        maximumNovelRun: Int = 1
     ) -> String? {
-        let inputWords = Set(contentWords(preprocessed))
-        let novel = Set(contentWords(polished)).subtracting(inputWords)
-        if novel.count > maximumNovelWords {
+        // Drop function words so a preposition swap ("waiting on" -> "waiting
+        // for") is not counted as inserted content, and so a novel pair split
+        // by one ("tightened OUR brakes") reads as adjacent.
+        let inputContent = contentWords(preprocessed)
+            .filter { !functionWords.contains($0) }
+        let outputContent = contentWords(polished)
+            .filter { !functionWords.contains($0) }
+        let inputWords = Set(inputContent)
+        let novel = Set(outputContent).subtracting(inputWords)
+        // Longest contiguous run of novel content words, in output order. A
+        // legitimate single-word repair ("scenarios" -> "scanners") is a lone
+        // novel word between input anchors (run 1); an invented phrase ("a good
+        // idea", "tightened our brakes") is a run of 2+ the count misses.
+        var longestRun = 0
+        var run = 0
+        for word in outputContent {
+            if inputWords.contains(word) {
+                run = 0
+            } else {
+                run += 1
+                longestRun = max(longestRun, run)
+            }
+        }
+        // A novel word inserted without a matching input word dropped is an
+        // addition (content count grows), not a substitution ("green" inserted
+        // vs "scenarios" -> "scanners" which keeps the count flat).
+        let netInserted = outputContent.count - inputContent.count
+        if novel.count > maximumNovelWords
+            || longestRun > maximumNovelRun
+            || (!novel.isEmpty && netInserted >= 1)
+        {
             Log.debug(
-                "[FABRICATION_GUARD] novel=\(novel.count)"
-                + " — falling back to preprocessed")
+                "[FABRICATION_GUARD] novel=\(novel.count) run=\(longestRun)"
+                + " inserted=\(netInserted) — falling back to preprocessed"
+                + " | novel=\(novel.sorted())"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
+            return preprocessed
+        }
+        return nil
+    }
+
+    /// Common function words the fabrication run treats as transparent — they
+    /// pass the `contentWords` length filter but carry no content, so a novel
+    /// word on either side is still adjacent for run purposes.
+    private static let functionWords: Set<String> = [
+        "the", "and", "for", "but", "nor", "yet", "our", "your", "his", "her",
+        "hers", "its", "their", "they", "them", "you", "she", "him", "was",
+        "were", "are", "has", "have", "had", "been", "being", "will", "with",
+        "that", "this", "these", "those", "not", "any", "all", "who", "whom",
+        "from", "into", "than", "then", "would", "could", "should", "can",
+    ]
+
+    /// Detect when polish duplicated content the input states once — a phrase
+    /// repeated across a seam or a segmentation boundary (e.g. "we're two weeks
+    /// out" emitted for two different areas). The fabrication guard misses this
+    /// because the repeated words are already in the input, so they are not
+    /// novel. Counts, per content word present in the input, how many extra
+    /// times it appears in the output; a repeated phrase shows as excess on two
+    /// or more words. Number normalization is excluded (contentWords drops
+    /// number words). Returns the preprocessed text as fallback, or nil.
+    static func guardAgainstDuplication(
+        polished: String, preprocessed: String,
+        maximumExcess: Int = 1
+    ) -> String? {
+        var inputCounts: [String: Int] = [:]
+        for word in contentWords(preprocessed) {
+            inputCounts[word, default: 0] += 1
+        }
+        var outputCounts: [String: Int] = [:]
+        for word in contentWords(polished) {
+            outputCounts[word, default: 0] += 1
+        }
+        var excess = 0
+        for (word, outputCount) in outputCounts {
+            // Only words the input actually contains — novel words are the
+            // fabrication guard's job, not duplication.
+            if let inputCount = inputCounts[word], inputCount >= 1 {
+                excess += max(0, outputCount - inputCount)
+            }
+        }
+        if excess > maximumExcess {
+            Log.debug(
+                "[DUPLICATION_GUARD] excess=\(excess)"
+                + " — falling back to preprocessed"
+                + " | polished=\"\(polished)\""
+                + " | preprocessed=\"\(preprocessed)\"")
             return preprocessed
         }
         return nil

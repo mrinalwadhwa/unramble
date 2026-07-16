@@ -157,6 +157,95 @@ struct PolishContentGuardTests {
         #expect(PolishPipeline.guardAgainstContentLoss(
             polished: polished, preprocessed: raw) == raw)
     }
+
+    // A short invented phrase (2-3 words) slips under the distinct-novel-word
+    // threshold; the contiguous-novel-run check catches it, while still sparing
+    // a single-word repair.
+
+    @Test("a short invented phrase falls back even under the novel-word count")
+    func shortFabricatedPhraseFallsBack() {
+        // "good idea" is only two novel words — under maximumNovelWords — but a
+        // contiguous novel run of two, so it is an invented phrase.
+        let raw = "on a newsletter open rates are holding steady"
+        let polished = "On a newsletter, it's a good idea open rates are "
+            + "holding steady."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == raw)
+    }
+
+    @Test("a single-word repair is not fabrication")
+    func singleWordRepairPasses() {
+        // A lone novel content word between input anchors ("scenarios" misheard,
+        // repaired to "scanners") is a run of one — a legitimate fix.
+        let raw = "on the warehouse the new scenarios are working great"
+        let polished = "On the warehouse, the new scanners are working great."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == nil)
+    }
+
+    @Test("a verb-tense repair is not fabrication")
+    func verbTenseRepairPasses() {
+        let raw = "on the front end we finally ship the redesign"
+        let polished = "On the front end, we finally shipped the redesign."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == nil)
+    }
+
+    @Test("a phrase duplicated across a boundary falls back")
+    func duplicatedPhraseFallsBack() {
+        // "two weeks out" belongs to the first area; the model repeated it for
+        // the second area and dropped that area's real content.
+        let raw = "we're two weeks out on the machine learning models accuracy "
+            + "is up on the dashboards leadership finally has what they need"
+        let polished = "We're two weeks out. On the machine learning model, "
+            + "we're two weeks out. On the dashboards, leadership finally has "
+            + "what they need."
+        #expect(PolishPipeline.guardAgainstDuplication(
+            polished: polished, preprocessed: raw) == raw)
+    }
+
+    @Test("faithful segmentation is not duplication")
+    func faithfulSegmentationNoDuplication() {
+        let raw = "on the front end we finally ship the redesign on the back "
+            + "end we're still chasing a memory leak"
+        let polished = "On the front end, we finally shipped the redesign. On "
+            + "the back end, we're still chasing a memory leak."
+        #expect(PolishPipeline.guardAgainstDuplication(
+            polished: polished, preprocessed: raw) == nil)
+    }
+
+    @Test("a novel pair split by a function word is still a run")
+    func functionWordDoesNotMaskRun() {
+        // "tightened" and "brakes" are separated by "our" (a function word in
+        // the input) — without treating it as transparent the run stays at one
+        // and the invented clause slips.
+        let raw = "on reliability we hit our uptime goal on local"
+        let polished = "On reliability, we hit our uptime goal. On local, we "
+            + "tightened our brakes."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == raw)
+    }
+
+    @Test("a single inserted word falls back")
+    func singleInsertedWordFallsBack() {
+        // "green" is one novel word, but it is added (content count grows), not
+        // substituted for an input word — an insertion.
+        let raw = "on error rates a little elevated but nothing serious"
+        let polished = "On error rates, green a little elevated but nothing "
+            + "serious."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == raw)
+    }
+
+    @Test("a preposition swap is not an insertion")
+    func prepositionSwapPasses() {
+        // "waiting on" -> "waiting for" swaps one function word for another;
+        // content count is unchanged, so it is not a fabricated insertion.
+        let raw = "on procurement we're waiting on one approval"
+        let polished = "On procurement, we're waiting for one approval."
+        #expect(PolishPipeline.guardAgainstFabrication(
+            polished: polished, preprocessed: raw) == nil)
+    }
 }
 
 /// Echoes the input but deletes a middle clause, simulating a model that
