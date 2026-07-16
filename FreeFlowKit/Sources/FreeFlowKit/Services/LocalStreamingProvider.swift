@@ -408,9 +408,15 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         let combined: String
         var finalPolished = ""
         if finalUnit.isEmpty {
-            // No new speech; commit the held sentence as it already stands.
+            // No new speech; commit the held sentence as it already stands. The
+            // carry can hold un-normalized text (a raw seam fragment carried for
+            // the next unit to complete) and there is no next unit to re-polish
+            // it, so normalize casing/formatting before it is injected.
             combined = ""
-            finalPolished = snapshot.carry
+            let casual = PolishPipeline.toneLabel(
+                for: snapshot.context.bundleID) == "casual"
+            finalPolished = PolishPipeline.normalizeFormatting(
+                snapshot.carry, casual: casual)
         } else if snapshot.carry.isEmpty {
             combined = finalUnit
         } else {
@@ -425,7 +431,10 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         }
         try requireCurrentSession(generation)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
-        let full = Self.joinPolished(snapshot.committed, finalPolished)
+        // A lone "i" is always the pronoun "I"; guarantee it on the final text
+        // regardless of which internal path produced each piece.
+        let full = Self.capitalizePronounI(
+            Self.joinPolished(snapshot.committed, finalPolished))
 
         let published = lock.withLock {
             guard sessionGeneration == generation, !Task.isCancelled else {
@@ -613,7 +622,31 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
 
         // Commit every sentence but the last; hold the last until the next unit
         // (or finish) confirms it is complete.
-        let (commit, newCarry) = Self.splitTrailingSentence(polished)
+        let (commit, splitCarry) = Self.splitTrailingSentence(polished)
+        var newCarry = splitCarry
+
+        // Seam guard: when a unit boundary falls mid-sentence, `combined` ends in
+        // an un-terminated fragment. The per-unit polish sometimes drops that
+        // fragment — wholly (a fresh clause, e.g. "We're now") or just its tail
+        // (a long clause it partly kept, e.g. "...senior roles and to revisit
+        // the") — and the content-loss guard misses it when the words are
+        // low-content, losing it at the seam because only terminated sentences
+        // carry forward. Recover the dropped suffix and carry it so the next unit
+        // prepends and completes it. (A pre-polish strip of the fragment was
+        // tried and reverted: it made polish trim now-trailing hedges — "so bear
+        // with me", "I think" — a worse, content-dropping regression.)
+        let inputTail = Self.splitTrailingSentence(combined).carry
+            .trimmingCharacters(in: .whitespaces)
+        if Self.isUnterminatedFragment(inputTail),
+            let drop = Self.droppedTailSuffix(
+                inputTail: inputTail, polished: polished) {
+            // A dropped suffix that continues the kept sentence rejoins it (the
+            // premature terminator is stripped); a wholly dropped clause is a new
+            // sentence appended after the carry.
+            newCarry = drop.continuation
+                ? Self.joinPolished(Self.stripTerminator(newCarry), drop.suffix)
+                : Self.joinPolished(newCarry, drop.suffix)
+        }
 
         // A hard pause is a safe point to reset recognition and shed the audio
         // already recognized, bounding memory across a long dictation. Build
@@ -698,6 +731,71 @@ public final class LocalStreamingProvider: StreamingDictationProviding,
         guard let last = matches.last else { return ("", text) }
         let split = last.range.location + last.range.length
         return (ns.substring(to: split), ns.substring(from: split))
+    }
+
+    /// Capitalize the standalone pronoun "i" ("i think" -> "I think", "i'll" ->
+    /// "I'll"). A lone "i" is never correct in dictated prose.
+    private static func capitalizePronounI(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: "\\bi\\b", with: "I", options: [.regularExpression])
+    }
+
+    /// True when `text` is a non-empty tail that does not end at a sentence
+    /// terminator — i.e. an incomplete fragment left when a unit boundary falls
+    /// mid-sentence, which must be carried rather than dropped.
+    private static func isUnterminatedFragment(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(
+            in: CharacterSet(charactersIn: " \t\"'”’)]"))
+        guard let last = trimmed.last else { return false }
+        return !".!?".contains(last)
+    }
+
+    /// Words that do not by themselves make a dropped fragment worth carrying: a
+    /// trailing bare connector polish trims when it terminates a kept fragment is
+    /// not a content loss.
+    private static let seamStopwords: Set<String> = [
+        "and", "but", "or", "so", "then", "now", "the", "a", "an", "on", "in",
+        "to", "of", "for", "with", "at", "by", "is", "are", "was", "were",
+        "be", "been", "it", "its",
+    ]
+
+    private static func seamNorm(_ s: Substring) -> String {
+        s.lowercased().trimmingCharacters(
+            in: CharacterSet(charactersIn: ".,!?;:\"'”’)]"))
+    }
+
+    /// Given the input's un-terminated trailing fragment and the polished output,
+    /// return the suffix of the fragment the polish dropped, plus whether it
+    /// continues the kept sentence (a partial-tail drop) rather than starting a
+    /// new one (a wholly dropped clause) — or nil when nothing meaningful was
+    /// dropped. The polish keeps a prefix of the fragment and drops a suffix, so
+    /// the drop begins at the first content word missing from the output. Keying
+    /// off the missing word (not the last output word) is robust to a polish that
+    /// completes the fragment by inventing a trailing word.
+    private static func droppedTailSuffix(
+        inputTail: String, polished: String
+    ) -> (suffix: String, continuation: Bool)? {
+        let tailWords = inputTail.split(separator: " ").map(String.init)
+        guard !tailWords.isEmpty else { return nil }
+        let polishedSet = Set(polished.split(separator: " ").map { seamNorm($0) })
+        // Walk the fragment; stop at the first CONTENT word missing from the
+        // output — that is where the drop begins. Stopwords are ignored (a
+        // trimmed trailing connector is not a drop). `lastKept` is -1 when polish
+        // kept none of the fragment (a wholly dropped clause).
+        var lastKept = -1
+        for (i, w) in tailWords.enumerated() {
+            let n = seamNorm(Substring(w))
+            if seamStopwords.contains(n) { continue }
+            if polishedSet.contains(n) { lastKept = i } else { break }
+        }
+        let suffixWords = Array(tailWords[(lastKept + 1)...])
+        guard !suffixWords.isEmpty, suffixWords.count <= 6 else { return nil }
+        // Only carry when the dropped suffix holds real content (a trailing bare
+        // connector polish trimmed is not a loss).
+        guard suffixWords.contains(where: {
+            !seamStopwords.contains(seamNorm(Substring($0)))
+        }) else { return nil }
+        return (suffixWords.joined(separator: " "), lastKept >= 0)
     }
 
     private static let trailingNewPattern = try! NSRegularExpression(
