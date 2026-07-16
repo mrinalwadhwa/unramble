@@ -102,14 +102,6 @@ private final class GatedLocalStreamingProvider: LocalAudioReplayProviding,
     var receivedAudio: [Data] { lock.withLock { _receivedAudio } }
 
     func startStreaming(
-        context: AppContext,
-        language: String?,
-        micProximity: MicProximity
-    ) async throws {
-        await startGate.waitForRelease()
-    }
-
-    func startStreaming(
         sessionID: DictationSessionID,
         context: AppContext,
         language: String?,
@@ -122,8 +114,6 @@ private final class GatedLocalStreamingProvider: LocalAudioReplayProviding,
         await startGate.waitForRelease()
     }
 
-    func sendAudio(_ pcmData: Data) async throws {}
-
     func sendAudio(
         _ pcmData: Data,
         sessionID: DictationSessionID
@@ -134,10 +124,6 @@ private final class GatedLocalStreamingProvider: LocalAudioReplayProviding,
             return true
         }
         guard accepted else { throw CancellationError() }
-    }
-
-    func finishStreaming() async throws -> String {
-        result
     }
 
     func finishStreaming(
@@ -153,11 +139,9 @@ private final class GatedLocalStreamingProvider: LocalAudioReplayProviding,
         return result
     }
 
-    func cancelStreaming() async {
-        lock.withLock {
-            _cancelCallCount += 1
-            activeSessionID = nil
-        }
+    func cancelActiveStreaming() async {
+        guard let sessionID = lock.withLock({ activeSessionID }) else { return }
+        await cancelStreaming(sessionID: sessionID)
     }
 
     func cancelStreaming(sessionID: DictationSessionID) async {

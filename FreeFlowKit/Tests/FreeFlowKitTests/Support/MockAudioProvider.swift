@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock AudioProviding implementation that returns stub data.
 ///
 /// Used in tests to exercise the pipeline without real audio capture hardware.

@@ -8,26 +8,20 @@ import Foundation
 /// is available almost immediately after the last chunk is sent.
 ///
 /// Lifecycle:
-///   1. Optionally `setChunkHandler(_:)` when the provider supports publishing
-///      intermediate text.
-///   2. `startStreaming(context:language:micProximity:)` — open a connection.
-///   3. `sendAudio(_:)` — call repeatedly with PCM chunks.
-///   4. `finishStreaming()` — signal end of audio and receive the provider's
-///      final unpublished text.
-///   5. `cancelStreaming()` — abort without waiting for a result.
-///
-/// A provider may commit or transcribe backend audio incrementally without
-/// publishing partial text. Providers that support rolling publication invoke
-/// the optional chunk handler for text they will omit from the final result.
-/// Providers without rolling publication ignore the handler and return one
-/// complete result from `finishStreaming()`.
+///   1. `startStreaming(sessionID:context:language:micProximity:)` opens a
+///      connection owned by a fresh dictation session ID.
+///   2. `sendAudio(_:sessionID:)` sends each PCM chunk for that session.
+///   3. `finishStreaming(sessionID:)` closes the session and returns one
+///      complete result for injection.
+///   4. `cancelStreaming(sessionID:)` aborts a known session, while
+///      `cancelActiveStreaming()` aborts whichever session is currently active.
 ///
 /// Implementations must be safe to call from any isolation context.
 /// A single streaming session is active at a time; calling
 /// `startStreaming` while a session is open is a programming error.
 public protocol StreamingDictationProviding: Sendable {
 
-    /// Pipeline watchdog for `finishStreaming()`, in seconds.
+    /// Pipeline watchdog for `finishStreaming(sessionID:)`, in seconds.
     ///
     /// The provider should include enough time for its own semantic timeout
     /// and teardown. When this deadline expires, the pipeline closes the
@@ -42,14 +36,6 @@ public protocol StreamingDictationProviding: Sendable {
     /// covers the largest supported session and does not change during it.
     var maximumFinishStreamingWatchdog: TimeInterval { get }
 
-    /// Register a handler to receive intermediate published text for the next
-    /// session. Call before `startStreaming`. Passing `nil` clears the handler.
-    ///
-    /// A provider that supports rolling publication invokes the handler from
-    /// an unspecified executor with polished text that it will not return from
-    /// `finishStreaming`. Other providers use the default no-op implementation.
-    func setChunkHandler(_ handler: (@Sendable (String) async -> Void)?)
-
     /// Open a streaming transcription session.
     ///
     /// - Parameters:
@@ -59,8 +45,12 @@ public protocol StreamingDictationProviding: Sendable {
     ///     far-field (built-in laptop mic). The server uses this to
     ///     configure noise reduction on the transcription backend.
     /// - Throws: If the connection cannot be established.
-    func startStreaming(context: AppContext, language: String?, micProximity: MicProximity)
-        async throws
+    func startStreaming(
+        sessionID: DictationSessionID,
+        context: AppContext,
+        language: String?,
+        micProximity: MicProximity
+    ) async throws
 
     /// Send a chunk of raw PCM audio to the server.
     ///
@@ -70,34 +60,25 @@ public protocol StreamingDictationProviding: Sendable {
     ///
     /// - Parameter pcmData: Raw PCM bytes (no WAV header).
     /// - Throws: If the session is not open or the send fails.
-    func sendAudio(_ pcmData: Data) async throws
+    func sendAudio(_ pcmData: Data, sessionID: DictationSessionID) async throws
 
-    /// Signal the end of audio and receive the final unpublished transcript.
+    /// Signal the end of audio and receive the complete transcript.
     ///
     /// Block until the provider finishes transcription and cleanup, then return
-    /// the polished text ready for injection. This may be one unpublished tail
-    /// after rolling publication or one complete atomic result.
+    /// the polished text ready for one atomic injection.
     ///
     /// - Returns: The cleaned-up transcript, or an empty string if
     ///   no speech was detected.
     /// - Throws: On network errors or if the session is not open.
-    func finishStreaming() async throws -> String
+    func finishStreaming(sessionID: DictationSessionID) async throws -> String
 
     /// Abort the current streaming session without waiting for results.
     ///
     /// Safe to call if no session is open (no-op in that case).
-    func cancelStreaming() async
+    func cancelActiveStreaming() async
 
-    /// Session-scoped variants used by the production pipeline. Implementations
-    /// should reject stale IDs without touching the current session.
-    func startStreaming(
-        sessionID: DictationSessionID,
-        context: AppContext,
-        language: String?,
-        micProximity: MicProximity
-    ) async throws
-    func sendAudio(_ pcmData: Data, sessionID: DictationSessionID) async throws
-    func finishStreaming(sessionID: DictationSessionID) async throws -> String
+    /// Abort the identified session without affecting a newer active session.
+    /// Stale IDs are rejected as no-ops.
     func cancelStreaming(sessionID: DictationSessionID) async
 }
 
@@ -106,7 +87,7 @@ public protocol StreamingDictationProviding: Sendable {
 ///
 /// Recovery owns a fresh provider session identified by `sessionID`. The
 /// implementation must consume every PCM byte once, in order, and return one
-/// complete unpublished result. Cancellation is performed through the
+/// complete result. Cancellation is performed through the
 /// session-scoped `cancelStreaming` requirement inherited from
 /// `StreamingDictationProviding`.
 public protocol LocalAudioReplayProviding: StreamingDictationProviding {
@@ -121,13 +102,11 @@ public protocol LocalAudioReplayProviding: StreamingDictationProviding {
     ) async throws -> String
 }
 
-/// Shared defaults for provider policy and optional rolling publication.
+/// Shared defaults for provider policy.
 extension StreamingDictationProviding {
 
     public var finishStreamingWatchdog: TimeInterval { 30 }
     public var maximumFinishStreamingWatchdog: TimeInterval {
         finishStreamingWatchdog
     }
-
-    public func setChunkHandler(_ handler: (@Sendable (String) async -> Void)?) {}
 }

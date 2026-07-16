@@ -116,6 +116,12 @@ struct OpenAIFileTranscriberStubbedTests {
 
         #expect(configuration.timeoutIntervalForRequest == 60)
         #expect(configuration.timeoutIntervalForResource == 60)
+        #expect(configuration.requestCachePolicy == .reloadIgnoringLocalCacheData)
+        #expect(configuration.urlCache == nil)
+        #expect(!configuration.httpShouldSetCookies)
+        #expect(configuration.httpCookieAcceptPolicy == .never)
+        #expect(configuration.httpCookieStorage == nil)
+        #expect(configuration.urlCredentialStorage == nil)
     }
 
     @Test("POST to audio/transcriptions endpoint")

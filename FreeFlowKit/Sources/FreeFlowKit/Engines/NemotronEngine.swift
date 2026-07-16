@@ -54,7 +54,6 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
     static let vocabSize = 1024
     static let blankID = 1024
     static let maxSymbolsPerStep = 10
-    static let maxPreprocessorSamples = 480_000
     static let cacheChannelShape: [NSNumber] = [1, 24, 70, 1024]
     static let cacheTimeShape: [NSNumber] = [1, 24, 1024, 8]
 
@@ -162,139 +161,6 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         Log.debug("[NemotronEngine] Unloaded")
     }
 
-    // MARK: - Transcribe
-
-    public func transcribe(audio: Data) async throws -> String {
-        guard isReady else { throw LocalModelError.modelNotLoaded }
-
-        // Diagnostic (flag-gated, zero cost otherwise): capture per-emission
-        // top-1/top-2 logits so writeConfidenceLog can report per-word
-        // recognition confidence and the runner-up alternative.
-        confidenceCapturing = FileManager.default.fileExists(
-            atPath: "/tmp/freeflow-stt-confidence")
-        emissionLog = []
-
-        let samples = try decodeWAV(audio)
-        guard samples.count > 160 else { return "" }
-
-        var allTokens: [Int] = []
-        var offset = 0
-
-        while offset < samples.count {
-            let remaining = samples.count - offset
-            let windowSize = min(remaining, Self.maxPreprocessorSamples)
-            let window = Array(samples[offset..<offset + windowSize])
-
-            let tokens = try transcribeWindow(window)
-            allTokens.append(contentsOf: tokens)
-
-            offset += windowSize
-        }
-
-        let vocab = lock.withLock { vocabulary! }
-        let text = allTokens
-            .filter { $0 >= 0 && $0 < vocab.count }
-            .map { vocab[$0] }
-            .joined()
-            .replacingOccurrences(of: "\u{2581}", with: " ")
-            .trimmingCharacters(in: .whitespaces)
-
-        if confidenceCapturing {
-            writeConfidenceLog(vocab: vocab)
-            confidenceCapturing = false
-        }
-        return text
-    }
-
-    // MARK: - Single Window
-
-    private func transcribeWindow(_ samples: [Float]) throws -> [Int] {
-        let (prep, enc, dec, jnt) = lock.withLock {
-            (preprocessor!, encoder!, decoder!, joint!)
-        }
-
-        let (mel, melFrameCount) = try runPreprocessor(
-            prep, samples: samples)
-
-        var cacheChannel = try zeroArray(
-            shape: Self.cacheChannelShape)
-        var cacheTime = try zeroArray(shape: Self.cacheTimeShape)
-        var cacheLenArr = try zeroArray(shape: [1], dataType: .int32)
-
-        let decoderShape: [NSNumber] = [
-            Self.decoderLayers as NSNumber,
-            1,
-            Self.decoderHidden as NSNumber,
-        ]
-        var hState = try zeroArray(shape: decoderShape)
-        var cState = try zeroArray(shape: decoderShape)
-
-        var lastToken = Self.blankID
-        var allTokens: [Int] = []
-
-        var (decoderOut, hNew, cNew) = try runDecoder(
-            decoder: dec, token: lastToken,
-            hState: hState, cState: cState)
-        hState = hNew
-        cState = cNew
-
-        var melOffset = 0
-        while melOffset < melFrameCount {
-            let chunkSize = min(
-                Self.chunkMelFrames, melFrameCount - melOffset)
-
-            let melInput = try buildEncoderMelInput(
-                mel: mel, melOffset: melOffset, chunkSize: chunkSize)
-            let melLenInput = try MLMultiArray(
-                shape: [1], dataType: .int32)
-            melLenInput[0] = NSNumber(
-                value: Int32(Self.preEncodeCache + chunkSize))
-
-            let encInput = try MLDictionaryFeatureProvider(
-                dictionary: [
-                    "mel": MLFeatureValue(multiArray: melInput),
-                    "mel_length": MLFeatureValue(
-                        multiArray: melLenInput),
-                    "cache_channel": MLFeatureValue(
-                        multiArray: cacheChannel),
-                    "cache_time": MLFeatureValue(
-                        multiArray: cacheTime),
-                    "cache_len": MLFeatureValue(
-                        multiArray: cacheLenArr),
-                ])
-            let encOutput = try enc.prediction(from: encInput)
-
-            let encoded = encOutput.featureValue(
-                for: "encoded")!.multiArrayValue!
-            let encodedLen = encOutput.featureValue(
-                for: "encoded_length")!.multiArrayValue!
-            cacheChannel = encOutput.featureValue(
-                for: "cache_channel_out")!.multiArrayValue!
-            cacheTime = encOutput.featureValue(
-                for: "cache_time_out")!.multiArrayValue!
-            cacheLenArr = encOutput.featureValue(
-                for: "cache_len_out")!.multiArrayValue!
-
-            let numFrames = encodedLen[0].intValue
-
-            let chunkTokens = try rnntDecode(
-                encoded: encoded,
-                numFrames: numFrames,
-                decoder: dec,
-                joint: jnt,
-                decoderOut: &decoderOut,
-                hState: &hState,
-                cState: &cState,
-                lastToken: &lastToken)
-            allTokens.append(contentsOf: chunkTokens)
-
-            if allTokens.count >= 500 { break }
-            melOffset += chunkSize
-        }
-
-        return allTokens
-    }
-
     // MARK: - Preprocessor
 
     private func runPreprocessor(
@@ -325,63 +191,6 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         let frameCount = melLen[0].intValue
 
         return (mel, frameCount)
-    }
-
-    // MARK: - Encoder Mel Input
-
-    /// Build [1, 128, 65] mel input for the encoder.
-    ///
-    /// Prepend 9 zero frames as pre-encode cache (the encoder manages
-    /// its own attention/convolution caches across chunks).
-    private func buildEncoderMelInput(
-        mel: MLMultiArray,
-        melOffset: Int,
-        chunkSize: Int
-    ) throws -> MLMultiArray {
-        let result = try zeroArray(
-            shape: [
-                1,
-                Self.melBins as NSNumber,
-                Self.totalMelFrames as NSNumber,
-            ])
-
-        let dstPtr = result.dataPointer.assumingMemoryBound(
-            to: Float.self)
-        let dstStrides = result.strides.map { $0.intValue }
-
-        let srcStrides = mel.strides.map { $0.intValue }
-
-        if mel.dataType == .float16 {
-            let srcPtr = mel.dataPointer.assumingMemoryBound(
-                to: UInt16.self)
-            for bin in 0..<Self.melBins {
-                for frame in 0..<chunkSize {
-                    let srcFrame = melOffset + frame
-                    let srcIdx = bin * srcStrides[1]
-                        + srcFrame * srcStrides[2]
-                    let dstFrame = Self.preEncodeCache + frame
-                    let dstIdx = bin * dstStrides[1]
-                        + dstFrame * dstStrides[2]
-                    dstPtr[dstIdx] = Self.float16ToFloat32(srcPtr[srcIdx])
-                }
-            }
-        } else {
-            let srcPtr = mel.dataPointer.assumingMemoryBound(
-                to: Float.self)
-            for bin in 0..<Self.melBins {
-                for frame in 0..<chunkSize {
-                    let srcFrame = melOffset + frame
-                    let srcIdx = bin * srcStrides[1]
-                        + srcFrame * srcStrides[2]
-                    let dstFrame = Self.preEncodeCache + frame
-                    let dstIdx = bin * dstStrides[1]
-                        + dstFrame * dstStrides[2]
-                    dstPtr[dstIdx] = srcPtr[srcIdx]
-                }
-            }
-        }
-
-        return result
     }
 
     // MARK: - RNNT Decode
@@ -489,12 +298,6 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         let logits = output.featureValue(
             for: "logits")!.multiArrayValue!
 
-        if confidenceCapturing {
-            let (top, topVal, runner, runnerVal) = argmaxTop2(
-                logits, count: Self.vocabSize + 1)
-            emissionLog.append((top, topVal, runner, runnerVal))
-            return top
-        }
         return argmax(logits, count: Self.vocabSize + 1)
     }
 
@@ -632,76 +435,6 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         return bestIdx
     }
 
-    // MARK: - Confidence probe (diagnostic, flag-gated)
-
-    private var confidenceCapturing = false
-    private var emissionLog: [(Int, Float, Int, Float)] = []
-
-    /// Top-1 and top-2 token indices with their logits, found in one scan.
-    private func argmaxTop2(
-        _ logits: MLMultiArray, count: Int
-    ) -> (Int, Float, Int, Float) {
-        var i1 = 0, i2 = -1
-        var v1: Float = -.infinity, v2: Float = -.infinity
-        func consider(_ i: Int, _ v: Float) {
-            if v > v1 {
-                i2 = i1; v2 = v1; i1 = i; v1 = v
-            } else if v > v2 {
-                i2 = i; v2 = v
-            }
-        }
-        if logits.dataType == .float16 {
-            let ptr = logits.dataPointer.assumingMemoryBound(to: UInt16.self)
-            for i in 0..<count { consider(i, Self.float16ToFloat32(ptr[i])) }
-        } else {
-            let ptr = logits.dataPointer.assumingMemoryBound(to: Float.self)
-            for i in 0..<count { consider(i, ptr[i]) }
-        }
-        return (i1, v1, i2, v2)
-    }
-
-    /// Append per-word recognition confidence and the runner-up alternative to
-    /// `/tmp/freeflow-stt-confidence.log`. Confidence is the 2-way softmax of the
-    /// top-1 vs top-2 logits (0.5 = a coin flip, 1.0 = certain). Non-blank
-    /// emissions are grouped into words by the leading-space marker; a word
-    /// takes its least-confident subword and that subword's alternative.
-    private func writeConfidenceLog(vocab: [String]) {
-        let marker = "\u{2581}"
-        struct Sub { let conf: Double; let alt: String }
-        var words: [(text: String, subs: [Sub])] = []
-        for (tok, v1, i2, v2) in emissionLog where tok != Self.blankID {
-            let text = (tok >= 0 && tok < vocab.count) ? vocab[tok] : "?"
-            let conf = 1.0 / (1.0 + exp(Double(v2 - v1)))
-            let altRaw = (i2 >= 0 && i2 < vocab.count) ? vocab[i2] : "?"
-            let sub = Sub(
-                conf: conf,
-                alt: altRaw.replacingOccurrences(of: marker, with: ""))
-            if text.hasPrefix(marker) || words.isEmpty {
-                words.append((text, [sub]))
-            } else {
-                words[words.count - 1].text += text
-                words[words.count - 1].subs.append(sub)
-            }
-        }
-        var lines: [String] = []
-        for w in words {
-            let wtext = w.text.replacingOccurrences(of: marker, with: "")
-            guard let worst = w.subs.min(by: { $0.conf < $1.conf }) else { continue }
-            let conf = String(format: "%.2f", worst.conf)
-            let altConf = String(format: "%.2f", 1.0 - worst.conf)
-            lines.append("  \(conf)  \(wtext)   (alt: \(worst.alt) \(altConf))")
-        }
-        let block = lines.joined(separator: "\n") + "\n"
-        let url = URL(fileURLWithPath: "/tmp/freeflow-stt-confidence.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(Data(block.utf8))
-            try? handle.close()
-        } else {
-            try? block.write(to: url, atomically: true, encoding: .utf8)
-        }
-    }
-
     static func float16ToFloat32(_ bits: UInt16) -> Float {
         let sign = UInt32(bits & 0x8000) << 16
         let exponent = Int((bits >> 10) & 0x1f)
@@ -747,23 +480,6 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         return arr
     }
 
-    private func decodeWAV(_ data: Data) throws -> [Float] {
-        guard data.count > WAVEncoder.headerSize else {
-            throw LocalModelError.transcriptionFailed("Audio too short")
-        }
-        let pcmData = data.subdata(
-            in: WAVEncoder.headerSize..<data.count)
-        let sampleCount = pcmData.count / 2
-        var samples = [Float](repeating: 0, count: sampleCount)
-        pcmData.withUnsafeBytes { raw in
-            let int16s = raw.bindMemory(to: Int16.self)
-            for i in 0..<sampleCount {
-                samples[i] = Float(int16s[i]) / 32768.0
-            }
-        }
-        return samples
-    }
-
     /// Detokenize RNNT output IDs to text.
     fileprivate func detokenize(_ tokens: [Int], vocab: [String]) -> String {
         tokens
@@ -777,15 +493,11 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
 
 // MARK: - Incremental Streaming
 
-/// Mutable state for an incremental Nemotron transcription session.
+/// Mutable state for one incremental Nemotron transcription session.
 ///
 /// Carries the encoder and decoder streaming caches across audio chunks
-/// so a long utterance is transcribed continuously, instead of being
-/// re-processed in fixed windows with the caches reset. Create one with
-/// `NemotronEngine.makeStreamingState()`, feed audio with
-/// `NemotronEngine.feed(_:into:)`, and read the running transcript with
-/// `NemotronEngine.transcript(_:)`.
-public final class NemotronStreamingState: @unchecked Sendable {
+/// so a long utterance is transcribed continuously.
+fileprivate final class NemotronStreamingState: @unchecked Sendable {
     fileprivate var cacheChannel: MLMultiArray
     fileprivate var cacheTime: MLMultiArray
     fileprivate var cacheLen: MLMultiArray
@@ -822,7 +534,7 @@ extension NemotronEngine {
 
     /// Open a new incremental streaming session. Requires the models to
     /// be loaded.
-    public func makeStreamingState() throws -> NemotronStreamingState {
+    fileprivate func makeStreamingState() throws -> NemotronStreamingState {
         guard isReady else { throw LocalModelError.modelNotLoaded }
         let dec = lock.withLock { decoder! }
 
@@ -847,7 +559,7 @@ extension NemotronEngine {
 
     /// Feed audio samples. Complete chunks are transcribed immediately;
     /// a partial remainder is buffered for the next call or `finish`.
-    public func feed(
+    fileprivate func feed(
         _ samples: [Float], into state: NemotronStreamingState
     ) throws {
         guard isReady else { throw LocalModelError.modelNotLoaded }
@@ -861,7 +573,7 @@ extension NemotronEngine {
 
     /// Flush any buffered remainder (zero-padded to a full chunk) and
     /// return the final transcript.
-    public func finishStreaming(
+    fileprivate func finishStreaming(
         _ state: NemotronStreamingState
     ) throws -> String {
         guard isReady else { throw LocalModelError.modelNotLoaded }
@@ -878,20 +590,9 @@ extension NemotronEngine {
     }
 
     /// The running transcript for everything committed so far.
-    public func transcript(_ state: NemotronStreamingState) -> String {
+    fileprivate func transcript(_ state: NemotronStreamingState) -> String {
         let vocab = lock.withLock { vocabulary! }
         return detokenize(state.tokens, vocab: vocab)
-    }
-
-    /// Transcribe a complete WAV through the streaming path in one call.
-    /// Equivalent to feeding the audio incrementally, since chunking is
-    /// driven by the internal buffer, not the call boundaries.
-    public func transcribeStreaming(audio: Data) throws -> String {
-        guard isReady else { throw LocalModelError.modelNotLoaded }
-        let samples = try decodeWAV(audio)
-        let state = try makeStreamingState()
-        try feed(samples, into: state)
-        return try finishStreaming(state)
     }
 
     // MARK: - Chunk Processing

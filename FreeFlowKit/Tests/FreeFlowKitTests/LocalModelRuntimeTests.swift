@@ -329,7 +329,6 @@ private final class GatedCancellationStreamingProvider:
     private let trace: EventTrace
     private var cancellations = 0
     private var activeSessionID: DictationSessionID?
-    private var compatibilitySessionID: DictationSessionID?
 
     init(cancellationGate: AsyncGate, trace: EventTrace) {
         self.cancellationGate = cancellationGate
@@ -337,23 +336,6 @@ private final class GatedCancellationStreamingProvider:
     }
 
     var cancelCallCount: Int { lock.withLock { cancellations } }
-
-    func startStreaming(
-        context: AppContext,
-        language: String?,
-        micProximity: MicProximity
-    ) async throws {
-        let sessionID = DictationSessionID()
-        try await startStreaming(
-            sessionID: sessionID,
-            context: context,
-            language: language,
-            micProximity: micProximity)
-        lock.withLock {
-            guard activeSessionID == sessionID else { return }
-            compatibilitySessionID = sessionID
-        }
-    }
 
     func startStreaming(
         sessionID: DictationSessionID,
@@ -370,13 +352,6 @@ private final class GatedCancellationStreamingProvider:
         trace.record("streaming.start")
     }
 
-    func sendAudio(_ pcmData: Data) async throws {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        try await sendAudio(pcmData, sessionID: sessionID)
-    }
-
     func sendAudio(
         _ pcmData: Data,
         sessionID: DictationSessionID
@@ -385,43 +360,27 @@ private final class GatedCancellationStreamingProvider:
         guard accepted else { throw CancellationError() }
     }
 
-    func finishStreaming() async throws -> String {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        return try await finishStreaming(sessionID: sessionID)
-    }
-
     func finishStreaming(
         sessionID: DictationSessionID
     ) async throws -> String {
         let finished = lock.withLock {
             guard activeSessionID == sessionID else { return false }
             activeSessionID = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
             return true
         }
         guard finished else { throw CancellationError() }
         return ""
     }
 
-    func cancelStreaming() async {
-        lock.withLock {
-            activeSessionID = nil
-            compatibilitySessionID = nil
-        }
-        await performCancellation()
+    func cancelActiveStreaming() async {
+        guard let sessionID = lock.withLock({ activeSessionID }) else { return }
+        await cancelStreaming(sessionID: sessionID)
     }
 
     func cancelStreaming(sessionID: DictationSessionID) async {
         let owned = lock.withLock {
             guard activeSessionID == sessionID else { return false }
             activeSessionID = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
             return true
         }
         guard owned else { return }

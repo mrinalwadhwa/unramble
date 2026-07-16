@@ -63,7 +63,8 @@ struct PipelineReplay {
                 contentsOf: dir.appendingPathComponent(name))
             guard wav.count > 44 else { continue }
 
-            let raw = try await nemotron.transcribe(audio: wav)
+            let raw = try LocalRecognitionFixtureSupport.recognize(
+                wavData: wav, using: nemotron)
             let polished = PolishPipeline.stripTrailingFiller(
                 await PolishPipeline.polish(raw, chatClient: client))
 

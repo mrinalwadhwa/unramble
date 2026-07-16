@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock text injector that records injection calls for testing.
 ///
 /// Used in tests to exercise the full pipeline without requiring

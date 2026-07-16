@@ -1,11 +1,9 @@
 import Foundation
 
-/// Transcribe audio locally using an on-device speech-to-text model.
+/// Lifecycle for an on-device speech-to-text model.
 ///
 /// Implementations wrap a specific ML runtime (ONNX Runtime, Core ML,
-/// etc.) and expose a simple batch transcription interface. The engine
-/// must be loaded before use; callers check `isReady` or call `load()`
-/// to ensure the model is in memory.
+/// The engine must be loaded before a streaming recognizer creates a session.
 public protocol LocalSTTEngine: Sendable {
 
     /// Display name for diagnostics (e.g. "Nemotron Speech 0.6B").
@@ -23,11 +21,10 @@ public protocol LocalSTTEngine: Sendable {
     /// Unload the model and release memory.
     func unload() async
 
-    /// Transcribe complete WAV audio (16 kHz, 16-bit mono).
-    ///
-    /// - Parameter audio: A complete WAV file (RIFF header + PCM data).
-    /// - Returns: The raw transcript text.
-    func transcribe(audio: Data) async throws -> String
+}
+
+extension LocalSTTEngine {
+    public func unload() async {}
 }
 
 /// One stateful, incremental local speech-recognition session.
@@ -51,11 +48,6 @@ public protocol LocalRecognitionSession: AnyObject {
 }
 
 /// A local recognizer that creates independent incremental sessions.
-public protocol LocalStreamingRecognizer: Sendable {
-
-    var name: String { get }
-    var isReady: Bool { get }
-
-    func load() async throws
+public protocol LocalStreamingRecognizer: LocalSTTEngine {
     func makeRecognitionSession() throws -> any LocalRecognitionSession
 }

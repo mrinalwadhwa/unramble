@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock audio device provider that returns stub devices for testing.
 ///
 /// Used in tests to exercise mic enumeration and selection without

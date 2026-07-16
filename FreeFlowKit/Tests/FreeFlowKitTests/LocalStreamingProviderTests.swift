@@ -27,6 +27,19 @@ struct LocalStreamingProviderTests {
         samples.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
+    private func startSession(
+        _ provider: LocalStreamingProvider,
+        context: AppContext = .empty
+    ) async throws -> DictationSessionID {
+        let sessionID = DictationSessionID()
+        try await provider.startStreaming(
+            sessionID: sessionID,
+            context: context,
+            language: nil,
+            micProximity: .farField)
+        return sessionID
+    }
+
     // MARK: - Audio accumulation
 
     @Test("Feeds all accumulated PCM to one incremental session")
@@ -35,11 +48,12 @@ struct LocalStreamingProviderTests {
         engine.stubbedTranscription = "accumulated"
         let (provider, _, _) = makeProvider(sttEngine: engine)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(samples: [-32_768, 0]))
-        try await provider.sendAudio(makePCM(samples: [16_384, 32_767]))
-        _ = try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(samples: [-32_768, 0]), sessionID: sessionID)
+        try await provider.sendAudio(
+            makePCM(samples: [16_384, 32_767]), sessionID: sessionID)
+        _ = try await provider.finishStreaming(sessionID: sessionID)
 
         #expect(engine.finishCallCount == 1)
         #expect(engine.fedSampleCounts == [4])
@@ -54,10 +68,12 @@ struct LocalStreamingProviderTests {
     func replayFeedsSlicesInOrder() async throws {
         let engine = ScriptedRecognizer(transcription: "ordered")
         let provider = LocalStreamingProvider(
-            sttEngine: engine, polishChatClient: nil)
+            sttEngine: engine,
+            polishChatClient: nil,
+            cycleInterval: 4 / Double(LocalUnitPolicy.sourceBytesPerSecond))
         let audio = makePCM(samples: [-32_768, -16_384, 0, 16_384, 32_767])
 
-        _ = try await provider.replay(audio: audio, stepBytes: 4)
+        _ = try await provider.replayForTesting(audio)
 
         #expect(engine.fedSampleCounts == [2, 2, 1])
         #expect(engine.fedSamples.flatMap { $0 } == [
@@ -71,19 +87,34 @@ struct LocalStreamingProviderTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine, polishChatClient: nil)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM())
-        let first = try await provider.finishStreaming()
+        let firstSessionID = try await startSession(provider)
+        try await provider.sendAudio(makePCM(), sessionID: firstSessionID)
+        let first = try await provider.finishStreaming(sessionID: firstSessionID)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM())
-        let second = try await provider.finishStreaming()
+        let secondSessionID = try await startSession(provider)
+        try await provider.sendAudio(makePCM(), sessionID: secondSessionID)
+        let second = try await provider.finishStreaming(sessionID: secondSessionID)
 
         #expect(engine.sessionCreationCount == 2)
         #expect(first == "First.")
         #expect(second == "First.")
+    }
+
+    @Test("Successful finish clears prior session content")
+    func finishClearsSessionContent() async throws {
+        let engine = ScriptedRecognizer(transcription: "private words")
+        let provider = LocalStreamingProvider(
+            sttEngine: engine, polishChatClient: nil)
+
+        let firstSessionID = try await startSession(provider)
+        try await provider.sendAudio(makePCM(), sessionID: firstSessionID)
+        let first = try await provider.finishStreaming(sessionID: firstSessionID)
+        #expect(first.lowercased().contains("private words"))
+
+        let secondSessionID = try await startSession(provider)
+        #expect(
+            try await provider.finishStreaming(sessionID: secondSessionID)
+                == "")
     }
 
     // MARK: - Cancel clears buffer
@@ -94,15 +125,15 @@ struct LocalStreamingProviderTests {
         engine.stubbedTranscription = "should not appear"
         let (provider, _, _) = makeProvider(sttEngine: engine)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 100))
-        await provider.cancelStreaming()
+        let cancelledSessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 100), sessionID: cancelledSessionID)
+        await provider.cancelStreaming(sessionID: cancelledSessionID)
 
         // Start a new session — buffer should be empty from the cancel.
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        let result = try await provider.finishStreaming()
+        let replacementSessionID = try await startSession(provider)
+        let result = try await provider.finishStreaming(
+            sessionID: replacementSessionID)
 
         // No audio to transcribe — should return empty.
         #expect(result == "")
@@ -158,9 +189,8 @@ struct LocalStreamingProviderTests {
         let engine = ScriptedRecognizer()
         let (provider, _, _) = makeProvider(sttEngine: engine)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        let result = try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        let result = try await provider.finishStreaming(sessionID: sessionID)
 
         #expect(result == "")
         #expect(engine.finishCallCount == 0)
@@ -175,8 +205,7 @@ struct LocalStreamingProviderTests {
         engine.stubbedTranscription = "loaded"
         let (provider, _, _) = makeProvider(sttEngine: engine)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
+        _ = try await startSession(provider)
 
         #expect(engine.loadCallCount == 1)
     }
@@ -190,15 +219,19 @@ struct LocalStreamingProviderTests {
             polishChatClient: nil,
             loadSTT: { await load.run() })
 
+        let cancelledSessionID = DictationSessionID()
         let startTask = Task {
             try await provider.startStreaming(
-                context: .empty, language: nil, micProximity: .farField)
+                sessionID: cancelledSessionID,
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
         }
         await load.waitUntilStarted()
 
         let cancelFinished = LockedFlag()
         let cancel = Task {
-            await provider.cancelStreaming()
+            await provider.cancelStreaming(sessionID: cancelledSessionID)
             cancelFinished.set()
         }
         for _ in 0..<100 where !cancelFinished.value {
@@ -213,15 +246,15 @@ struct LocalStreamingProviderTests {
             try await startTask.value
         }
         await #expect(throws: CancellationError.self) {
-            try await provider.sendAudio(makePCM())
+            try await provider.sendAudio(
+                makePCM(), sessionID: cancelledSessionID)
         }
         #expect(engine.sessionCreationCount == 0)
 
         engine.stubbedIsReady = true
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
+        let replacementSessionID = try await startSession(provider)
         #expect(engine.sessionCreationCount == 1)
-        await provider.cancelStreaming()
+        await provider.cancelStreaming(sessionID: replacementSessionID)
     }
 
     @Test("Concurrent scoped start is rejected while model load is pending")
@@ -295,58 +328,17 @@ struct LocalStreamingProviderTests {
         #expect(engine.sessionCreationCount == 0)
     }
 
-    @Test("Concurrent legacy start cannot steal the active owner")
-    func concurrentLegacyStartCannotStealActiveOwner() async throws {
-        let engine = ScriptedRecognizer(isReady: false)
-        let load = ControlledLoad()
-        let provider = LocalStreamingProvider(
-            sttEngine: engine,
-            polishChatClient: nil,
-            loadSTT: { await load.run() })
-
-        let firstStart = Task {
-            try await provider.startStreaming(
-                context: .empty,
-                language: nil,
-                micProximity: .farField)
-        }
-        await load.waitUntilStarted()
-
-        await #expect(throws: CancellationError.self) {
-            try await provider.startStreaming(
-                context: .empty,
-                language: nil,
-                micProximity: .farField)
-        }
-        #expect(await load.callCount() == 1)
-
-        let cancelFinished = LockedFlag()
-        let cancel = Task {
-            await provider.cancelStreaming()
-            cancelFinished.set()
-        }
-        for _ in 0..<100 where !cancelFinished.value {
-            await Task.yield()
-        }
-        #expect(!cancelFinished.value)
-
-        await load.release()
-        await cancel.value
-        await #expect(throws: CancellationError.self) {
-            try await firstStart.value
-        }
-    }
-
     @Test("Surfaces an incremental feed failure without retrying the session")
     func backgroundFeedFailureIsTerminal() async throws {
         let engine = ScriptedRecognizer(
             feedError: LocalModelError.transcriptionFailed("feed failed"))
         let provider = LocalStreamingProvider(
-            sttEngine: engine, polishChatClient: nil, cycleInterval: 0.05)
+            sttEngine: engine,
+            polishChatClient: nil,
+            cycleInterval: 1)
 
         await #expect(throws: LocalModelError.self) {
-            _ = try await provider.replay(
-                audio: makePCM(bytes: 32_000), stepBytes: 32_000)
+            _ = try await provider.replayForTesting(makePCM(bytes: 32_000))
         }
         #expect(engine.feedCallCount == 1)
         #expect(engine.finishCallCount == 0)
@@ -358,10 +350,14 @@ struct LocalStreamingProviderTests {
             makeSessionError: LocalModelError.modelNotLoaded)
         let provider = LocalStreamingProvider(
             sttEngine: engine, polishChatClient: nil)
+        let sessionID = DictationSessionID()
 
         await #expect(throws: LocalModelError.self) {
             try await provider.startStreaming(
-                context: .empty, language: nil, micProximity: .farField)
+                sessionID: sessionID,
+                context: .empty,
+                language: nil,
+                micProximity: .farField)
         }
         #expect(engine.sessionCreationCount == 1)
     }
@@ -373,14 +369,17 @@ struct LocalStreamingProviderTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine, polishChatClient: nil)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM())
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(makePCM(), sessionID: sessionID)
         await #expect(throws: LocalModelError.self) {
-            _ = try await provider.finishStreaming()
+            _ = try await provider.finishStreaming(sessionID: sessionID)
         }
         #expect(engine.finishCallCount == 1)
-        await provider.cancelStreaming()
+
+        let replacementSessionID = try await startSession(provider)
+        #expect(
+            try await provider.finishStreaming(sessionID: replacementSessionID)
+                == "")
     }
 
     @Test("Cancellation during polish does not publish or inject text")
@@ -396,18 +395,15 @@ struct LocalStreamingProviderTests {
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 2, softPauseSilenceBytes: 2,
                 hardPauseSilenceBytes: 4, maximumUnitBytes: 1000))
-        let collector = ChunkCollector()
-        provider.setChunkHandler { text in await collector.append(text) }
-
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 32_000))
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 32_000), sessionID: sessionID)
         await polishClient.waitUntilStarted()
-        await provider.cancelStreaming()
+        await provider.cancelStreaming(sessionID: sessionID)
 
-        #expect(await collector.all().isEmpty)
-        #expect(provider.lastPolishedTranscript.isEmpty)
-        #expect(try await provider.finishStreaming() == "")
+        await #expect(throws: CancellationError.self) {
+            _ = try await provider.finishStreaming(sessionID: sessionID)
+        }
     }
 
     @Test("Cancellation drains final polish and rejects another finish")
@@ -418,15 +414,16 @@ struct LocalStreamingProviderTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine, polishChatClient: polishClient)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM())
-        let finishTask = Task { try await provider.finishStreaming() }
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(makePCM(), sessionID: sessionID)
+        let finishTask = Task {
+            try await provider.finishStreaming(sessionID: sessionID)
+        }
         await polishClient.waitUntilStarted()
 
         let cancelReturned = LockedFlag()
         let cancelTask = Task {
-            await provider.cancelStreaming()
+            await provider.cancelStreaming(sessionID: sessionID)
             cancelReturned.set()
         }
         await polishClient.waitUntilCancelled()
@@ -436,7 +433,7 @@ struct LocalStreamingProviderTests {
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(!cancelReturned.value)
         await #expect(throws: CancellationError.self) {
-            _ = try await provider.finishStreaming()
+            _ = try await provider.finishStreaming(sessionID: sessionID)
         }
 
         await polishClient.release()
@@ -446,9 +443,9 @@ struct LocalStreamingProviderTests {
             _ = try await finishTask.value
         }
         #expect(cancelReturned.value)
-        #expect(provider.lastRawTranscript.isEmpty)
-        #expect(provider.lastPolishedTranscript.isEmpty)
-        #expect(try await provider.finishStreaming() == "")
+        await #expect(throws: CancellationError.self) {
+            _ = try await provider.finishStreaming(sessionID: sessionID)
+        }
     }
 
     @Test("Cancelling the finish caller cancels finalization")
@@ -458,10 +455,11 @@ struct LocalStreamingProviderTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine, polishChatClient: polishClient)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM())
-        let finishTask = Task { try await provider.finishStreaming() }
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(makePCM(), sessionID: sessionID)
+        let finishTask = Task {
+            try await provider.finishStreaming(sessionID: sessionID)
+        }
         await polishClient.waitUntilStarted()
 
         finishTask.cancel()
@@ -469,9 +467,7 @@ struct LocalStreamingProviderTests {
         await #expect(throws: CancellationError.self) {
             _ = try await finishTask.value
         }
-        #expect(provider.lastRawTranscript.isEmpty)
-        #expect(provider.lastPolishedTranscript.isEmpty)
-        await provider.cancelStreaming()
+        await provider.cancelStreaming(sessionID: sessionID)
     }
 
     // MARK: - Polish integration
@@ -485,10 +481,10 @@ struct LocalStreamingProviderTests {
         let (provider, _, _) = makeProvider(
             sttEngine: engine, polishClient: polishClient)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 64))
-        let result = try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 64), sessionID: sessionID)
+        let result = try await provider.finishStreaming(sessionID: sessionID)
 
         #expect(result == "Hello, world.")
         #expect(polishClient.completeCallCount == 1)
@@ -496,7 +492,7 @@ struct LocalStreamingProviderTests {
 
     // MARK: - One final transcript
 
-    @Test("Returns the whole transcript; a preview handler does not truncate it")
+    @Test("Returns the whole transcript as one final result")
     func returnsFullTranscript() async throws {
         let engine = ScriptedRecognizer(transcripts: [
             "Hi there.",
@@ -506,14 +502,10 @@ struct LocalStreamingProviderTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine,
             polishChatClient: nil,
-            cycleInterval: 0.05)
+            cycleInterval: 1)
 
-        // A preview handler is set, but it must not change the returned text.
-        let collector = ChunkCollector()
-        provider.setChunkHandler { text in await collector.append(text) }
-
-        let result = try await provider.replay(
-            audio: makePCM(bytes: 96_000), stepBytes: 32_000)
+        let result = try await provider.replayForTesting(
+            makePCM(bytes: 96_000))
 
         // The whole transcript comes back at once, nothing dropped.
         #expect(result.contains("Hi there"))
@@ -523,7 +515,7 @@ struct LocalStreamingProviderTests {
 
     // MARK: - Paragraph breaks
 
-    @Test("A committed chunk carries a paragraph break")
+    @Test("The final result carries a paragraph break")
     func paragraphBreakInChunk() async throws {
         let engine = ScriptedRecognizer(transcripts: [
             "Alpha bravo.",
@@ -531,22 +523,15 @@ struct LocalStreamingProviderTests {
             "Alpha bravo. new paragraph charlie delta. Echo foxtrot.",
         ])
         let provider = LocalStreamingProvider(
-            sttEngine: engine, polishChatClient: nil, cycleInterval: 0.05)
+            sttEngine: engine, polishChatClient: nil, cycleInterval: 1)
 
-        let collector = ChunkCollector()
-        provider.setChunkHandler { text in await collector.append(text) }
+        let result = try await provider.replayForTesting(
+            makePCM(bytes: 96_000))
 
-        let tail = try await provider.replay(
-            audio: makePCM(bytes: 96_000), stepBytes: 32_000)
-
-        let chunks = await collector.all()
-        let all = (chunks + [tail]).joined(separator: "|")
-        // "new paragraph" became a break, carried on a committed chunk,
-        // with no stray space before it.
-        #expect(all.contains("\n\n"),
-            "a chunk should carry the paragraph break: \(all)")
-        #expect(!all.contains(" \n\n"),
-            "no stray space before the break: \(all)")
+        #expect(result.contains("\n\n"),
+            "the result should carry the paragraph break: \(result)")
+        #expect(!result.contains(" \n\n"),
+            "no stray space before the break: \(result)")
     }
 
     // MARK: - Polish failure fallback
@@ -560,21 +545,13 @@ struct LocalStreamingProviderTests {
         let (provider, _, _) = makeProvider(
             sttEngine: engine, polishClient: polishClient)
 
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 64))
-        let result = try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 64), sessionID: sessionID)
+        let result = try await provider.finishStreaming(sessionID: sessionID)
 
         #expect(result == "Hello world")
     }
-}
-
-/// Collects chunks emitted through the streaming provider's chunk
-/// handler for assertions.
-private actor ChunkCollector {
-    private var chunks: [String] = []
-    func append(_ text: String) { chunks.append(text) }
-    func all() -> [String] { chunks }
 }
 
 // MARK: - StreamingMockPolishClient
@@ -849,12 +826,24 @@ struct LocalStreamingPreprocessingTests {
         Data(repeating: 0x42, count: bytes)
     }
 
+    private func startSession(
+        _ provider: LocalStreamingProvider
+    ) async throws -> DictationSessionID {
+        let sessionID = DictationSessionID()
+        try await provider.startStreaming(
+            sessionID: sessionID,
+            context: .empty,
+            language: nil,
+            micProximity: .farField)
+        return sessionID
+    }
+
     private func runPipeline(_ sttResult: String) async throws -> String {
         let (provider, _) = makeProvider(sttResult: sttResult)
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 64))
-        return try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 64), sessionID: sessionID)
+        return try await provider.finishStreaming(sessionID: sessionID)
     }
 
     private func runPipelineWithEchoModel(_ sttResult: String) async throws -> String {
@@ -863,10 +852,10 @@ struct LocalStreamingPreprocessingTests {
         let echoClient = EchoPolishClient()
         let provider = LocalStreamingProvider(
             sttEngine: engine, polishChatClient: echoClient)
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 64))
-        return try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 64), sessionID: sessionID)
+        return try await provider.finishStreaming(sessionID: sessionID)
     }
 
     @Test("Filler um is stripped in finishStreaming output")
@@ -920,9 +909,9 @@ struct LocalStreamingPreprocessingTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine,
             polishChatClient: nil,
-            cycleInterval: 0.05)
-        let result = try await provider.replay(
-            audio: makePCM(bytes: 64_000), stepBytes: 32_000)
+            cycleInterval: 1)
+        let result = try await provider.replayForTesting(
+            makePCM(bytes: 64_000))
         #expect(
             !result.contains("Um ") && !result.contains(" um "),
             "Filler should be stripped across cache boundary but got: \(result)")
@@ -936,9 +925,9 @@ struct LocalStreamingPreprocessingTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine,
             polishChatClient: nil,
-            cycleInterval: 0.05)
-        let result = try await provider.replay(
-            audio: makePCM(bytes: 32_000), stepBytes: 32_000)
+            cycleInterval: 1)
+        let result = try await provider.replayForTesting(
+            makePCM(bytes: 32_000))
         #expect(
             !result.contains(" um "),
             "Mid-sentence filler should be stripped but got: \(result)")
@@ -954,10 +943,10 @@ struct LocalStreamingPreprocessingTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine,
             polishChatClient: echoClient)
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 64))
-        let result = try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 64), sessionID: sessionID)
+        let result = try await provider.finishStreaming(sessionID: sessionID)
         print("[TEST] Filler with echo model: \"\(result)\"")
         #expect(
             !result.contains(" um "),
@@ -972,10 +961,10 @@ struct LocalStreamingPreprocessingTests {
         let provider = LocalStreamingProvider(
             sttEngine: engine,
             polishChatClient: echoClient)
-        try await provider.startStreaming(
-            context: .empty, language: nil, micProximity: .farField)
-        try await provider.sendAudio(makePCM(bytes: 64))
-        let result = try await provider.finishStreaming()
+        let sessionID = try await startSession(provider)
+        try await provider.sendAudio(
+            makePCM(bytes: 64), sessionID: sessionID)
+        let result = try await provider.finishStreaming(sessionID: sessionID)
         print("[TEST] Multiple fillers with echo: \"\(result)\"")
         #expect(
             !result.lowercased().contains(" um ") && !result.contains("Um "),

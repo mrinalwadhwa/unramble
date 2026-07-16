@@ -59,23 +59,23 @@ struct OpenAIStreamingBenchmarkTests {
 
         let pcm = silentPCM(seconds: 1.0)
         let chunks = chunked(pcm, chunkSizeMs: 100)
+        let sessionID = DictationSessionID()
 
         let t0 = Date()
         try await provider.startStreaming(
+            sessionID: sessionID,
             context: AppContext.empty,
             language: "en",
             micProximity: .nearField)
         let tStart = Date()
 
         for chunk in chunks {
-            try await provider.sendAudio(chunk)
+            try await provider.sendAudio(chunk, sessionID: sessionID)
         }
         let tSent = Date()
 
-        _ = try await provider.finishStreaming()
+        _ = try await provider.finishStreaming(sessionID: sessionID)
         let tFinish = Date()
-
-        await provider.cancelStreaming()
 
         print("""
             ── OpenAIStreamingProvider single session breakdown ──
@@ -107,22 +107,22 @@ struct OpenAIStreamingBenchmarkTests {
         var totalTimes: [Double] = []
 
         for _ in 0..<runs {
+            let sessionID = DictationSessionID()
             let t0 = Date()
             try await provider.startStreaming(
+                sessionID: sessionID,
                 context: AppContext.empty,
                 language: "en",
                 micProximity: .nearField)
             let tStart = Date()
 
             for chunk in chunks {
-                try await provider.sendAudio(chunk)
+                try await provider.sendAudio(chunk, sessionID: sessionID)
             }
             let tSent = Date()
 
-            _ = try await provider.finishStreaming()
+            _ = try await provider.finishStreaming(sessionID: sessionID)
             let tFinish = Date()
-
-            await provider.cancelStreaming()
 
             startTimes.append(tStart.timeIntervalSince(t0))
             sendTimes.append(tSent.timeIntervalSince(tStart))
@@ -177,19 +177,21 @@ struct OpenAIStreamingBenchmarkTests {
                 try await Task.sleep(nanoseconds: 1_500_000_000)
             }
 
+            let sessionID = DictationSessionID()
             let t0 = Date()
             try await provider.startStreaming(
+                sessionID: sessionID,
                 context: AppContext.empty,
                 language: "en",
                 micProximity: .nearField)
             let tStart = Date()
 
             for chunk in chunks {
-                try await provider.sendAudio(chunk)
+                try await provider.sendAudio(chunk, sessionID: sessionID)
             }
             let tSent = Date()
 
-            _ = try await provider.finishStreaming()
+            _ = try await provider.finishStreaming(sessionID: sessionID)
             let tFinish = Date()
 
             startTimes.append(tStart.timeIntervalSince(t0))

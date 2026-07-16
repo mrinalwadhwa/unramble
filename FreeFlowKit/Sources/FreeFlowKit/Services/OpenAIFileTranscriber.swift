@@ -37,10 +37,18 @@ public struct OpenAIFileTranscriber: BatchDictationProviding {
 
     /// Bound both inactivity and total transfer time so the pipeline's cloud
     /// recovery reserve cannot be consumed indefinitely by a trickling body.
+    /// The exact WAV request must not enter persistent cache, cookie, or
+    /// credential stores.
     static func defaultSessionConfiguration() -> URLSessionConfiguration {
-        let configuration = URLSessionConfiguration.default
+        let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 60
         configuration.timeoutIntervalForResource = 60
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpCookieStorage = nil
+        configuration.urlCredentialStorage = nil
         return configuration
     }
 

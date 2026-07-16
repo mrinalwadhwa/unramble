@@ -131,7 +131,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     ) async -> Void
     struct RealtimeFinishResult: Sendable {
         let response: String
-        let evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot
+        let evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot?
     }
     private let evidenceObserver: EvidenceObserver?
     typealias TransportFactory = @Sendable (
@@ -166,7 +166,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     /// the active task.
     private var setupTask: Task<Void, Error>?
     private var activeSessionID: DictationSessionID?
-    private var compatibilitySessionID: DictationSessionID?
     private var currentTimingSessionID: DictationSessionID?
     private var chunkReaderSessionID: DictationSessionID?
 
@@ -198,7 +197,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         var transcriptCompletedAt: Date?
         var polishKind: PolishKind = .pending
         var endedAt: Date?
-        var error: String?
+        var failure: FailureKind?
 
         enum SetupKind: String {
             case pending
@@ -211,6 +210,18 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             case pending
             case skip = "skip"
             case realtimeOK = "realtime-ok"
+        }
+
+        enum FailureKind: String {
+            case cancelled
+            case emptyAudio = "empty-audio"
+            case audioTooLarge = "audio-too-large"
+            case authentication
+            case rateLimited = "rate-limited"
+            case request
+            case invalidResponse = "invalid-response"
+            case network
+            case unknown
         }
     }
 
@@ -362,22 +373,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     }
 
     // MARK: - StreamingDictationProviding
-
-    public func startStreaming(
-        context: AppContext, language: String?, micProximity: MicProximity
-    ) async throws {
-        let sessionID = DictationSessionID()
-        try await startStreaming(
-            sessionID: sessionID,
-            context: context,
-            language: language,
-            micProximity: micProximity)
-        lock.withLock {
-            if activeSessionID == sessionID {
-                compatibilitySessionID = sessionID
-            }
-        }
-    }
 
     public func startStreaming(
         sessionID: DictationSessionID,
@@ -538,8 +533,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     receive: { try await transport.receiveText() },
                     onTranscriptCompleted: { [weak self] transcript in
                         Log.debug(
-                            "[RealtimeResponse] transcript:"
-                                + " \"\(transcript.prefix(200))\"")
+                            "[RealtimeResponse] transcript completed"
+                                + " (\(transcript.utf8.count) bytes)")
                         self?.lock.withLock {
                             guard self?.currentTimingSessionID == sessionID else { return }
                             self?.currentTiming?.transcriptCompletedAt = Date()
@@ -566,13 +561,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             return true
         }
         if !readerInstalled { reader.cancel() }
-    }
-
-    public func sendAudio(_ pcmData: Data) async throws {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        try await sendAudio(pcmData, sessionID: sessionID)
     }
 
     public func sendAudio(
@@ -623,19 +611,12 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         } catch {
             lock.withLock {
                 guard self.currentTimingSessionID == sessionID else { return }
-                if self.currentTiming?.error == nil {
-                    self.currentTiming?.error = error.localizedDescription
+                if self.currentTiming?.failure == nil {
+                    self.currentTiming?.failure = Self.failureKind(for: error)
                 }
             }
             throw error
         }
-    }
-
-    public func finishStreaming() async throws -> String {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        return try await finishStreaming(sessionID: sessionID)
     }
 
     public func finishStreaming(
@@ -646,8 +627,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         func fail(_ error: Error) async -> Error {
             lock.withLock {
                 guard self.currentTimingSessionID == sessionID else { return }
-                if self.currentTiming?.error == nil {
-                    self.currentTiming?.error = error.localizedDescription
+                if self.currentTiming?.failure == nil {
+                    self.currentTiming?.failure = Self.failureKind(for: error)
                 }
                 self.currentTiming?.endedAt = Date()
             }
@@ -695,6 +676,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                     try await Self.finishRealtimeSessionResult(
                         session: commitSession,
                         send: { try await transport.send($0) },
+                        includeEvidence: evidenceObserver != nil,
                         onAppendSent: { [self] _, submittedBytes in
                             lock.withLock {
                                 guard currentTimingSessionID == sessionID else { return }
@@ -747,7 +729,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             self.currentTiming?.endedAt = Date()
         }
         emitSessionSummary(sessionID: sessionID)
-        Log.debug("[Pipeline] realtime-polished: \"\(polished)\"")
+        Log.debug("[Pipeline] realtime polish completed (\(polished.utf8.count) bytes)")
         return polished
     }
 
@@ -773,10 +755,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         }
     }
 
-    public func cancelStreaming() async {
-        guard let sessionID = lock.withLock({
-            compatibilitySessionID ?? activeSessionID
-        }) else { return }
+    public func cancelActiveStreaming() async {
+        guard let sessionID = lock.withLock({ activeSessionID }) else { return }
         await cancelStreaming(sessionID: sessionID)
     }
 
@@ -785,8 +765,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             guard self.currentTimingSessionID == sessionID else { return }
             if self.currentTiming != nil {
                 self.currentTiming?.endedAt = Date()
-                if self.currentTiming?.error == nil {
-                    self.currentTiming?.error = "cancelled"
+                if self.currentTiming?.failure == nil {
+                    self.currentTiming?.failure = .cancelled
                 }
             }
         }
@@ -886,11 +866,36 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         if let end = t.endedAt {
             parts.append("total=\(fmt(end.timeIntervalSince(t.startedAt)))")
         }
-        if let error = t.error {
-            parts.append("error=\"\(error.replacingOccurrences(of: "\"", with: "'"))\"")
+        if let failure = t.failure {
+            parts.append("failure=\(failure.rawValue)")
         }
 
         return parts.joined(separator: " ")
+    }
+
+    static func failureKind(for error: Error) -> SessionTiming.FailureKind {
+        if error is CancellationError {
+            return .cancelled
+        }
+        guard let dictationError = error as? DictationError else {
+            return error is URLError ? .network : .unknown
+        }
+        switch dictationError {
+        case .emptyAudio:
+            return .emptyAudio
+        case .audioTooLarge:
+            return .audioTooLarge
+        case .authenticationFailed:
+            return .authentication
+        case .rateLimited:
+            return .rateLimited
+        case .requestFailed:
+            return .request
+        case .invalidResponse:
+            return .invalidResponse
+        case .networkError:
+            return .network
+        }
     }
 
     // MARK: - Backup connection
@@ -1289,9 +1294,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             teardownOperation = nil
             guard activeSessionID == sessionID else { return }
             activeSessionID = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
         }
     }
 
@@ -1342,7 +1344,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             "type": "session.update",
             "session": session,
         ])
-        Log.debug("[RealtimeResponse] session.update JSON: \(json.prefix(500))")
+        Log.debug("[RealtimeResponse] session configuration encoded")
         return json
     }
 
@@ -1569,7 +1571,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 return .protocolError("Malformed \(type) event")
             }
         case "response.done":
-            Log.debug("[RealtimeResponse] raw response.done: \(text.prefix(1000))")
+            Log.debug("[RealtimeResponse] response.done received")
             guard let response = obj["response"] as? [String: Any] else {
                 return .error("response.done missing response")
             }
@@ -1620,7 +1622,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 return .protocolError("Malformed \(type) event")
             }
         default:
-            Log.debug("[RealtimeResponse] event type=\(type)")
+            Log.debug("[RealtimeResponse] ignored unknown event")
             return .other
         }
     }
@@ -1828,6 +1830,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             session: session,
             send: send,
             eventID: eventID,
+            includeEvidence: onEvidence != nil,
             onAppendSent: onAppendSent,
             onCommitSent: onCommitSent)
         try await notifyEvidenceObserver(onEvidence, evidence: result.evidence)
@@ -1836,9 +1839,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     private static func notifyEvidenceObserver(
         _ observer: EvidenceObserver?,
-        evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot
+        evidence: OpenAIRealtimeCommitSession.EvidenceSnapshot?
     ) async throws {
-        if let observer {
+        if let observer, let evidence {
             await observer(evidence)
         }
         try Task.checkCancellation()
@@ -1848,6 +1851,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         session: OpenAIRealtimeCommitSession,
         send: @escaping @Sendable (String) async throws -> Void,
         eventID: @escaping @Sendable () -> String = { UUID().uuidString },
+        includeEvidence: Bool = false,
         onAppendSent: (@Sendable (Int, Int) -> Void)? = nil,
         onCommitSent: (@Sendable () -> Void)? = nil
     ) async throws -> RealtimeFinishResult {
@@ -1865,7 +1869,8 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                 onCommitSent: onCommitSent)
             try await session.sealCapture()
             let transcript = try await session.waitForRawTranscript()
-            let evidence = try await session.resolvedEvidenceSnapshot()
+            let evidence = includeEvidence
+                ? try await session.resolvedEvidenceSnapshot() : nil
             if transcript.isEmpty {
                 await session.releaseTransportTurn()
                 return RealtimeFinishResult(

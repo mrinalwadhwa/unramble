@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock hotkey provider that simulates key events for testing.
 ///
 /// Instead of registering a real CGEventTap, this mock stores the callback

@@ -59,7 +59,6 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
     private var _sendAudioDidHang: Bool = false
     private var sessionCancelled = false
     private var activeSessionID: DictationSessionID?
-    private var compatibilitySessionID: DictationSessionID?
 
     var startCallCount: Int { lock.withLock { _startCallCount } }
     var finishCallCount: Int { lock.withLock { _finishCallCount } }
@@ -107,21 +106,6 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
 
     // --- StreamingDictationProviding ---
 
-    func startStreaming(context: AppContext, language: String?, micProximity: MicProximity)
-        async throws
-    {
-        let sessionID = DictationSessionID()
-        try await startStreaming(
-            sessionID: sessionID,
-            context: context,
-            language: language,
-            micProximity: micProximity)
-        lock.withLock {
-            guard activeSessionID == sessionID else { return }
-            compatibilitySessionID = sessionID
-        }
-    }
-
     func startStreaming(
         sessionID: DictationSessionID,
         context _: AppContext,
@@ -157,13 +141,6 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
         }
     }
 
-    func sendAudio(_ pcmData: Data) async throws {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        try await sendAudio(pcmData, sessionID: sessionID)
-    }
-
     func sendAudio(
         _ pcmData: Data,
         sessionID: DictationSessionID
@@ -193,13 +170,6 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
                 }
             }
         }
-    }
-
-    func finishStreaming() async throws -> String {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        return try await finishStreaming(sessionID: sessionID)
     }
 
     func finishStreaming(
@@ -240,19 +210,14 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
         let stillOwned = lock.withLock {
             guard activeSessionID == sessionID else { return false }
             activeSessionID = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
             return true
         }
         guard stillOwned else { throw CancellationError() }
         return result
     }
 
-    func cancelStreaming() async {
-        guard let sessionID = lock.withLock({
-            activeSessionID ?? compatibilitySessionID
-        }) else { return }
+    func cancelActiveStreaming() async {
+        guard let sessionID = lock.withLock({ activeSessionID }) else { return }
         await cancelStreaming(sessionID: sessionID)
     }
 
@@ -266,9 +231,6 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
             _cancelCallCount += 1
             sessionCancelled = true
             activeSessionID = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
             let continuations = (
                 startContinuation, finishContinuation, sendAudioContinuation)
             startContinuation = nil

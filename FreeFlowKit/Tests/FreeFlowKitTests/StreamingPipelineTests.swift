@@ -5067,7 +5067,7 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertNil(streaming.receivedLanguages.first ?? "not nil")
     }
 
-    // MARK: - Chunk handler wiring
+    // MARK: - Atomic streaming result
 
     func testCloudPipelinePublishesOnlyOneFinalResult() async {
         let streaming = MockStreamingProvider(stubbedText: "Complete cloud result")
@@ -5077,49 +5077,12 @@ final class StreamingPipelineTests: XCTestCase {
         await pipeline.activate()
         let didStart = await waitUntil { streaming.startCallCount == 1 }
         XCTAssertTrue(didStart)
-
-        XCTAssertFalse(
-            streaming.hasChunkHandler,
-            "Cloud providers must not publish irreversible intermediate text")
-        await streaming.emitChunk("Untrusted intermediate text")
         XCTAssertEqual(injector.injectionCount, 0)
 
         await pipeline.complete()
 
         XCTAssertEqual(injector.injectionCount, 1)
         XCTAssertEqual(injector.lastInjectedText, "Complete cloud result")
-    }
-
-    func testLocalPipelineDoesNotSetChunkHandler() async {
-        let streaming = MockStreamingProvider()
-        let (pipeline, _, _, _, _, _, _) = makeStreamingPipeline(
-            streamingProvider: streaming,
-            localMode: true)
-
-        await pipeline.activate()
-        let didStart = await waitUntil { streaming.startCallCount == 1 }
-        XCTAssertTrue(didStart)
-        XCTAssertFalse(
-            streaming.hasChunkHandler,
-            "Local assembles one final result and does not inject mid-stream")
-        await pipeline.cancel()
-    }
-
-    // MARK: - Chunk handler cleared after complete
-
-    func testChunkHandlerClearedAfterComplete() async {
-        let (pipeline, audio, _, _, streaming, _, _) = makeStreamingPipeline(localMode: true)
-
-        await pipeline.activate()
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        XCTAssertFalse(
-            streaming.hasChunkHandler,
-            "Chunk handler must be cleared after complete() to prevent late injection")
     }
 
     // MARK: - Cancel always cancels streaming

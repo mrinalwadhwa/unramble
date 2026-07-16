@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock dictation provider that returns configurable results for testing.
 ///
 /// Track call counts and recorded arguments to verify pipeline behavior

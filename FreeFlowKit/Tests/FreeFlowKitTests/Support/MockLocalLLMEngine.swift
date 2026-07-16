@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock LLM engine that returns configurable results for testing.
 ///
 /// Track call counts and recorded prompts to verify polish client

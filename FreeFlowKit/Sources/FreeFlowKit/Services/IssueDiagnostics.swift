@@ -4,8 +4,8 @@ import Foundation
     import AppKit
 #endif
 
-/// Collects system information, recent log history, and mic diagnostics
-/// into a pre-filled GitHub issue URL for one-click error reporting.
+/// Collects system information and bounded mic diagnostics into a pre-filled
+/// GitHub issue URL for one-click error reporting.
 ///
 /// Used by the "Report an Issue..." menu item and the "Report this issue"
 /// link on error screens. Follows the same pattern as "Contribute Mic Data"
@@ -20,8 +20,6 @@ public enum IssueDiagnostics {
     /// - Parameters:
     ///   - title: A short summary for the issue title. Defaults to empty
     ///     so the user fills it in.
-    ///   - errorMessage: An optional error message to highlight at the top
-    ///     of the issue body (e.g. from a "Something went wrong" screen).
     ///   - micDiagnostics: Formatted mic diagnostic string from
     ///     `MicDiagnosticStore.formattedDiagnostics()`. Pass nil to omit.
     /// Result of building an issue URL with diagnostics.
@@ -38,15 +36,11 @@ public enum IssueDiagnostics {
     ///   and informing the user.
     public static func issueURL(
         title: String = "",
-        errorMessage: String? = nil,
         micDiagnostics: String? = nil
     ) -> IssueReport? {
-        let fullDiagnostics = buildFullDiagnostics(
-            errorMessage: errorMessage,
-            micDiagnostics: micDiagnostics
-        )
+        let fullDiagnostics = buildFullDiagnostics(micDiagnostics: micDiagnostics)
 
-        let body = buildURLBody(errorMessage: errorMessage)
+        let body = buildURLBody()
 
         guard var components = URLComponents(string: repoURL) else {
             return nil
@@ -63,17 +57,8 @@ public enum IssueDiagnostics {
     // MARK: - Body
 
     /// Build a short body for the URL (stays under GitHub's URL length limit).
-    private static func buildURLBody(errorMessage: String?) -> String {
+    private static func buildURLBody() -> String {
         var sections: [String] = []
-
-        // Error message (if reporting from an error screen).
-        if let errorMessage, !errorMessage.isEmpty {
-            sections.append(
-                """
-                **Error:**
-                > \(errorMessage)
-                """)
-        }
 
         // What happened (user fills in).
         sections.append(
@@ -96,7 +81,7 @@ public enum IssueDiagnostics {
         sections.append(
             """
             **Diagnostics:**
-            <!-- Full diagnostics have been copied to your clipboard. Paste (⌘V) below this line. Review before posting — diagnostics may include window titles and URLs. -->
+            <!-- Diagnostics have been copied to your clipboard. Paste (⌘V) below this line and review before posting. -->
 
             """)
 
@@ -105,28 +90,12 @@ public enum IssueDiagnostics {
 
     /// Build the full diagnostics string for the clipboard.
     private static func buildFullDiagnostics(
-        errorMessage: String?,
         micDiagnostics: String?
     ) -> String {
         var sections: [String] = []
 
         sections.append("**System info:**")
         sections.append("```\n\(systemInfo())\n```")
-
-        // Recent log history.
-        let history = Log.formattedHistory()
-        if history != "No log entries recorded." {
-            sections.append(
-                """
-                <details>
-                <summary>Recent log (\(Log.entryCount) entries)</summary>
-
-                ```
-                \(history)
-                ```
-                </details>
-                """)
-        }
 
         // Mic diagnostics (if available).
         if let micDiagnostics, micDiagnostics != "No dictation sessions recorded yet." {

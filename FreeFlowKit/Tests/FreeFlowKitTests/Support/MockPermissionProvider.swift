@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A configurable mock to test code that depends on system permissions.
 ///
 /// All permission states default to `.granted` so tests that don't care about

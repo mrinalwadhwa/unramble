@@ -1592,8 +1592,7 @@ public enum PolishPipeline {
 
         Log.debug(
             "[ECHO_GUARD] Stripped echoed preceding text"
-            + " (\(trimmed.count) chars)"
-            + " | remainder=\"\(remainder.prefix(80))\"")
+            + " (\(trimmed.count) chars)")
         return String(remainder)
     }
 
@@ -1619,9 +1618,7 @@ public enum PolishPipeline {
                 "[TRUNCATION_GUARD] ratio=\(String(format: "%.0f", ratio * 100))%"
                 + " polished=\(polished.count)chars"
                 + " input=\(preprocessed.count)chars"
-                + " — falling back to preprocessed"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                + " — falling back to preprocessed")
             return preprocessed
         }
 
@@ -1636,9 +1633,7 @@ public enum PolishPipeline {
                 + " ratio=\(String(format: "%.0f", ratio * 100))%"
                 + " polished=\(polished.count)chars"
                 + " input=\(preprocessed.count)chars"
-                + " — falling back to preprocessed"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                + " — falling back to preprocessed")
             return preprocessed
         }
 
@@ -1664,9 +1659,7 @@ public enum PolishPipeline {
                 "[HALLUCINATION_GUARD] length inflation"
                 + " input=\(preprocessed.count)chars"
                 + " output=\(polished.count)chars"
-                + " — falling back to preprocessed"
-                + " | polished=\"\(polished.prefix(200))\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                + " — falling back to preprocessed")
             return preprocessed
         }
         if preprocessed.count < 20 && polished.count > preprocessed.count * 4 {
@@ -1674,9 +1667,7 @@ public enum PolishPipeline {
                 "[HALLUCINATION_GUARD] length explosion"
                 + " input=\(preprocessed.count)chars"
                 + " output=\(polished.count)chars"
-                + " — falling back to preprocessed"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                + " — falling back to preprocessed")
             return preprocessed
         }
 
@@ -1715,9 +1706,7 @@ public enum PolishPipeline {
         if longestMissingRun > maxConsecutiveMissing {
             Log.debug(
                 "[CONTENT_GUARD] dropped run=\(longestMissingRun)"
-                + " — falling back to preprocessed"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                + " — falling back to preprocessed")
             return preprocessed
         }
         return nil
@@ -1741,10 +1730,7 @@ public enum PolishPipeline {
         if novel.count > maximumNovelWords {
             Log.debug(
                 "[FABRICATION_GUARD] novel=\(novel.count)"
-                + " — falling back to preprocessed"
-                + " | novel=\(novel.sorted())"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                + " — falling back to preprocessed")
             return preprocessed
         }
         return nil
@@ -1775,10 +1761,8 @@ public enum PolishPipeline {
         // dictated value and invents or duplicates another.
         if !dropped.isEmpty, !invented.isEmpty {
             Log.debug(
-                "[NUMBER_GUARD] dropped=\(dropped.sorted()) "
-                + "invented=\(invented.sorted()) — falling back to preprocessed"
-                + " | polished=\"\(polished)\""
-                + " | preprocessed=\"\(preprocessed)\"")
+                "[NUMBER_GUARD] dropped=\(dropped.count) "
+                + "invented=\(invented.count) — falling back to preprocessed")
             return preprocessed
         }
         return nil
@@ -2007,7 +1991,8 @@ public enum PolishPipeline {
             let suffix = preceding.count > 80
                 ? String(preceding.suffix(80)) : preceding
             prompt += "\nPreceding text: \(suffix)"
-            Log.debug("[PolishPipeline] preceding: \"\(suffix)\"")
+            Log.debug(
+                "[PolishPipeline] preceding context (\(suffix.count) chars)")
         }
         return prompt
     }

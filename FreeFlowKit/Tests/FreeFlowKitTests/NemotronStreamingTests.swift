@@ -3,10 +3,9 @@ import Testing
 
 @testable import FreeFlowKit
 
-// Compare batch transcription against the incremental streaming path on
-// real audio, to check the streaming rework preserves quality and is
-// faster. Uses only the Nemotron CoreML models (no MLX), so it runs
-// under `swift test`.
+// Check that real audio produces the same transcript when an incremental
+// recognition session receives all samples at once or across several feeds.
+// Uses only the Nemotron CoreML models (no MLX), so it runs under `swift test`.
 //
 // Enable: touch /tmp/freeflow-test-nemotron-streaming
 // Requires the Nemotron model installed and audio fixtures under
@@ -15,8 +14,8 @@ import Testing
 @Suite("Nemotron streaming")
 struct NemotronStreamingTests {
 
-    @Test("Streaming matches batch and is faster")
-    func compareStreamingToBatch() async throws {
+    @Test("Recognition is independent of feed boundaries")
+    func compareOnePieceToPiecewiseRecognition() async throws {
         guard FileManager.default.fileExists(
             atPath: "/tmp/freeflow-test-nemotron-streaming")
         else { return }
@@ -38,83 +37,38 @@ struct NemotronStreamingTests {
         }
 
         let log = StreamingEvalLog(path: "/tmp/freeflow-nemotron-streaming.log")
-        log.log("=== batch vs streaming (\(wavs.count) files) ===\n")
-
-        var totalErr = 0
-        var totalWords = 0
-        var totalBatchTime = 0.0
-        var totalStreamTime = 0.0
+        log.log("=== one-piece vs piecewise (\(wavs.count) files) ===\n")
 
         for url in wavs {
             let wav = try Data(contentsOf: url)
             guard wav.count > 44 else { continue }
 
-            let b0 = CFAbsoluteTimeGetCurrent()
-            let batch = try await engine.transcribe(audio: wav)
-            let bt = CFAbsoluteTimeGetCurrent() - b0
+            let onePieceStart = CFAbsoluteTimeGetCurrent()
+            let onePiece = try LocalRecognitionFixtureSupport.recognize(
+                wavData: wav, using: engine)
+            let onePieceTime = CFAbsoluteTimeGetCurrent() - onePieceStart
 
-            let s0 = CFAbsoluteTimeGetCurrent()
-            let stream = try engine.transcribeStreaming(audio: wav)
-            let st = CFAbsoluteTimeGetCurrent() - s0
-
-            let (err, words) = wer(reference: batch, hypothesis: stream)
-            totalErr += err
-            totalWords += words
-            totalBatchTime += bt
-            totalStreamTime += st
+            let piecewiseStart = CFAbsoluteTimeGetCurrent()
+            let piecewise = try LocalRecognitionFixtureSupport.recognize(
+                wavData: wav, using: engine, pieces: 5)
+            let piecewiseTime = CFAbsoluteTimeGetCurrent() - piecewiseStart
 
             log.log("[\(url.lastPathComponent)]")
             log.log(String(
-                format: "  batch  (%.2fs): %@", bt, batch))
+                format: "  one-piece (%.2fs): %@", onePieceTime, onePiece))
             log.log(String(
-                format: "  stream (%.2fs): %@", st, stream))
-            log.log("  word diff vs batch: \(err)/\(words)\n")
-        }
+                format: "  piecewise (%.2fs): %@", piecewiseTime, piecewise))
+            log.log("")
 
-        let divergence = totalWords > 0
-            ? 100.0 * Double(totalErr) / Double(totalWords) : 0
-        log.log("=== totals ===")
-        log.log(String(format: "  batch  total: %.2fs", totalBatchTime))
-        log.log(String(format: "  stream total: %.2fs", totalStreamTime))
-        log.log(String(
-            format: "  streaming divergence from batch: %.2f%%", divergence))
-
-        // Determinism: feeding in pieces equals one shot.
-        if let first = wavs.first {
-            let wav = try Data(contentsOf: first)
-            let oneShot = try engine.transcribeStreaming(audio: wav)
-            let piecewise = try transcribePiecewise(engine, wav: wav, pieces: 5)
-            #expect(oneShot == piecewise,
-                "Piecewise feeding must equal one-shot streaming")
+            #expect(
+                onePiece == piecewise,
+                "Feed boundaries changed \(url.lastPathComponent) recognition")
         }
 
         await engine.unload()
     }
 
     // MARK: - Helpers
-
-    /// Feed a WAV to the streaming session in `pieces` separate `feed`
-    /// calls to confirm chunk boundaries do not depend on call size.
-    private func transcribePiecewise(
-        _ engine: NemotronEngine, wav: Data, pieces: Int
-    ) throws -> String {
-        let pcm = wav.subdata(in: WAVEncoder.headerSize..<wav.count)
-        let sampleCount = pcm.count / 2
-        var samples = [Float](repeating: 0, count: sampleCount)
-        pcm.withUnsafeBytes { raw in
-            let i16 = raw.bindMemory(to: Int16.self)
-            for i in 0..<sampleCount { samples[i] = Float(i16[i]) / 32768.0 }
-        }
-        let session = try engine.makeRecognitionSession()
-        let step = max(1, sampleCount / pieces)
-        var offset = 0
-        while offset < sampleCount {
-            let end = min(offset + step, sampleCount)
-            try session.feed(Array(samples[offset..<end]))
-            offset = end
-        }
-        return try session.finish()
-    }
 
     private func findWAVs() -> [URL] {
         // Walk up to the repo root (the directory that contains .scratch).
@@ -141,35 +95,6 @@ struct NemotronStreamingTests {
         return result
     }
 
-    /// Word error rate between two transcripts (batch as reference).
-    private func wer(reference: String, hypothesis: String) -> (Int, Int) {
-        let norm = { (s: String) in
-            s.lowercased().unicodeScalars
-                .filter {
-                    CharacterSet.alphanumerics.contains($0)
-                        || CharacterSet.whitespaces.contains($0)
-                }
-                .map(String.init).joined()
-                .split(separator: " ").map(String.init)
-        }
-        let r = norm(reference)
-        let h = norm(hypothesis)
-        var d = Array(repeating: Array(repeating: 0, count: h.count + 1),
-            count: r.count + 1)
-        for i in 0...r.count { d[i][0] = i }
-        for j in 0...h.count { d[0][j] = j }
-        for i in 1...max(r.count, 1) where r.count > 0 {
-            for j in 1...max(h.count, 1) where h.count > 0 {
-                if r[i - 1] == h[j - 1] {
-                    d[i][j] = d[i - 1][j - 1]
-                } else {
-                    d[i][j] = min(
-                        d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + 1)
-                }
-            }
-        }
-        return (d[r.count][h.count], r.count)
-    }
 }
 
 /// Minimal skip signal for Swift Testing (no XCTSkip available).

@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock implementation of `AppContextProviding` that returns a configurable stub context.
 ///
 /// Used in tests to exercise the pipeline without real accessibility API calls

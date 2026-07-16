@@ -1,5 +1,7 @@
 import Foundation
 
+@testable import FreeFlowKit
+
 /// A mock streaming dictation provider that records calls for testing.
 ///
 /// Mirror the pattern of `MockDictationProvider`: configurable stubbed
@@ -134,51 +136,36 @@ public final class MockStreamingProvider: LocalAudioReplayProviding, @unchecked 
 
     // MARK: - StreamingDictationProviding
 
-    public func startStreaming(context: AppContext, language: String?, micProximity: MicProximity)
-        async throws
-    {
-        let (error, hook): (
-            (any Error)?, (@Sendable () async throws -> Void)?
-        ) = lock.withLock {
-            _startCallCount += 1
-            _receivedContexts.append(context)
-            _receivedLanguages.append(language)
-            return (stubbedStartError, startStreamingHook)
-        }
-
-        if let error { throw error }
-        try await hook?()
-    }
-
     public func startStreaming(
         sessionID: DictationSessionID,
         context: AppContext,
         language: String?,
         micProximity: MicProximity
     ) async throws {
-        let (error, hook): (
-            (any Error)?, (@Sendable () async throws -> Void)?
+        let (claimed, error, hook): (
+            Bool, (any Error)?, (@Sendable () async throws -> Void)?
         ) = lock.withLock {
+            guard _activeSessionID == nil else {
+                return (false, nil, nil)
+            }
             _startCallCount += 1
             _receivedContexts.append(context)
             _receivedLanguages.append(language)
             _activeSessionID = sessionID
-            return (stubbedStartError, startStreamingHook)
+            return (true, stubbedStartError, startStreamingHook)
         }
-
-        if let error { throw error }
-        try await hook?()
-    }
-
-    public func sendAudio(_ pcmData: Data) async throws {
-        let (error, hook): ((any Error)?, (@Sendable (Data) async throws -> Void)?) = lock.withLock {
-            _sendCallCount += 1
-            _receivedAudioChunks.append(pcmData)
-            return (stubbedSendError, sendAudioHook)
+        guard claimed else { throw CancellationError() }
+        do {
+            if let error { throw error }
+            try await hook?()
+            let stillOwned = lock.withLock { _activeSessionID == sessionID }
+            guard stillOwned else { throw CancellationError() }
+        } catch {
+            lock.withLock {
+                if _activeSessionID == sessionID { _activeSessionID = nil }
+            }
+            throw error
         }
-
-        if let error { throw error }
-        try await hook?(pcmData)
     }
 
     public func sendAudio(
@@ -200,16 +187,6 @@ public final class MockStreamingProvider: LocalAudioReplayProviding, @unchecked 
         try await hook?(pcmData)
     }
 
-    public func finishStreaming() async throws -> String {
-        let (error, text): ((any Error)?, String) = lock.withLock {
-            _finishCallCount += 1
-            return (stubbedFinishError, stubbedText)
-        }
-
-        if let error { throw error }
-        return text
-    }
-
     public func finishStreaming(
         sessionID: DictationSessionID
     ) async throws -> String {
@@ -218,6 +195,7 @@ public final class MockStreamingProvider: LocalAudioReplayProviding, @unchecked 
                 return (false, nil, "")
             }
             _finishCallCount += 1
+            _activeSessionID = nil
             return (true, stubbedFinishError, stubbedText)
         }
         guard accepted else { throw CancellationError() }
@@ -225,13 +203,9 @@ public final class MockStreamingProvider: LocalAudioReplayProviding, @unchecked 
         return text
     }
 
-    public func cancelStreaming() async {
-        let hook = lock.withLock {
-            _cancelAttemptCount += 1
-            _cancelCallCount += 1
-            return cancelStreamingHook
-        }
-        await hook?()
+    public func cancelActiveStreaming() async {
+        guard let sessionID = lock.withLock({ _activeSessionID }) else { return }
+        await cancelStreaming(sessionID: sessionID)
     }
 
     public func cancelStreaming(sessionID: DictationSessionID) async {
@@ -253,48 +227,38 @@ public final class MockStreamingProvider: LocalAudioReplayProviding, @unchecked 
         micProximity: MicProximity,
         silenceThreshold: Float
     ) async throws -> String {
-        let (error, hook, text): (
-            (any Error)?, (@Sendable () async throws -> Void)?, String
+        let (claimed, error, hook, text): (
+            Bool, (any Error)?, (@Sendable () async throws -> Void)?, String
         ) = lock.withLock {
+            guard _activeSessionID == nil else {
+                return (false, nil, nil, "")
+            }
             _replayCallCount += 1
             _replayedAudio.append(pcmData)
             _replaySessionIDs.append(sessionID)
             _replaySilenceThresholds.append(silenceThreshold)
             _activeSessionID = sessionID
-            return (stubbedReplayError, replayCapturedAudioHook, stubbedText)
+            return (
+                true, stubbedReplayError, replayCapturedAudioHook, stubbedText)
         }
-
-        if let error { throw error }
-        try await hook?()
-        try Task.checkCancellation()
-        let stillOwned = lock.withLock { () -> Bool in
-            guard _activeSessionID == sessionID else { return false }
-            _activeSessionID = nil
-            return true
+        guard claimed else { throw CancellationError() }
+        do {
+            if let error { throw error }
+            try await hook?()
+            try Task.checkCancellation()
+            let stillOwned = lock.withLock { () -> Bool in
+                guard _activeSessionID == sessionID else { return false }
+                _activeSessionID = nil
+                return true
+            }
+            guard stillOwned else { throw CancellationError() }
+            return text
+        } catch {
+            lock.withLock {
+                if _activeSessionID == sessionID { _activeSessionID = nil }
+            }
+            throw error
         }
-        guard stillOwned else { throw CancellationError() }
-        return text
-    }
-
-    // MARK: - Chunk handler recording
-
-    private var _chunkHandler: (@Sendable (String) async -> Void)?
-
-    /// The chunk handler set by the pipeline. The mock records it but
-    /// does not invoke it automatically — call `emitChunk(_:)` from
-    /// the test to simulate a committed chunk.
-    public var hasChunkHandler: Bool {
-        lock.withLock { _chunkHandler != nil }
-    }
-
-    public func setChunkHandler(_ handler: (@Sendable (String) async -> Void)?) {
-        lock.withLock { _chunkHandler = handler }
-    }
-
-    /// Simulate the provider delivering an intermediate chunk.
-    public func emitChunk(_ text: String) async {
-        let handler = lock.withLock { _chunkHandler }
-        await handler?(text)
     }
 
     /// Remove all recorded calls and reset counters.
@@ -313,7 +277,6 @@ public final class MockStreamingProvider: LocalAudioReplayProviding, @unchecked 
             _replaySessionIDs.removeAll()
             _replaySilenceThresholds.removeAll()
             _activeSessionID = nil
-            _chunkHandler = nil
             startStreamingHook = nil
             sendAudioHook = nil
             replayCapturedAudioHook = nil

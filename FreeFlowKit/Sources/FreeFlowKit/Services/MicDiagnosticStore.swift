@@ -1,32 +1,35 @@
 import Foundation
 
-/// A single dictation session's microphone diagnostic data.
-public struct MicDiagnosticEntry: Sendable {
-    public let timestamp: Date
-    public let deviceName: String
-    public let proximity: String  // "far_field" or "near_field"
+/// Closed outcomes retained by microphone diagnostics.
+public enum MicDiagnosticResult: String, Sendable, Equatable {
+    case silent
+    case empty
+    case successLocal = "ok_local"
+    case successRealtime = "ok_realtime"
+    case successHTTPFallback = "ok_http_fallback"
+}
+
+/// A single dictation session's content-free microphone diagnostic data.
+public struct MicDiagnosticEntry: Sendable, Equatable {
+    public let proximity: MicProximity
     public let ambientRMS: Float
     public let peakRMS: Float
     public let gain: Float
     public let threshold: Float
     public let duration: TimeInterval
     public let latency: TimeInterval  // total pipeline latency
-    public let result: String  // e.g. "ok_realtime", "ok_http_fallback", "silent"
+    public let result: MicDiagnosticResult
 
     public init(
-        timestamp: Date = Date(),
-        deviceName: String,
-        proximity: String,
+        proximity: MicProximity,
         ambientRMS: Float,
         peakRMS: Float,
         gain: Float,
         threshold: Float,
         duration: TimeInterval,
         latency: TimeInterval,
-        result: String
+        result: MicDiagnosticResult
     ) {
-        self.timestamp = timestamp
-        self.deviceName = deviceName
         self.proximity = proximity
         self.ambientRMS = ambientRMS
         self.peakRMS = peakRMS
@@ -42,15 +45,19 @@ public struct MicDiagnosticEntry: Sendable {
 /// Thread-safe via actor isolation.
 public actor MicDiagnosticStore {
 
+    /// Hard ceiling even when a test or future caller requests a larger ring.
+    public static let maximumCapacity = 10
+
     private var entries: [MicDiagnosticEntry] = []
     private let maxEntries: Int
 
     public init(maxEntries: Int = 10) {
-        self.maxEntries = maxEntries
+        self.maxEntries = min(max(0, maxEntries), Self.maximumCapacity)
     }
 
     /// Record a new session's diagnostics.
     public func record(_ entry: MicDiagnosticEntry) {
+        guard maxEntries > 0 else { return }
         entries.append(entry)
         if entries.count > maxEntries {
             entries.removeFirst(entries.count - maxEntries)
@@ -80,15 +87,14 @@ public actor MicDiagnosticStore {
             let n = i + 1
             lines.append(
                 "Session \(n): "
-                    + "device=\"\(entry.deviceName)\" "
-                    + "proximity=\(entry.proximity) "
+                    + "proximity=\(entry.proximity.rawValue) "
                     + "ambient=\(String(format: "%.6f", entry.ambientRMS)) "
                     + "peak=\(String(format: "%.6f", entry.peakRMS)) "
                     + "gain=\(String(format: "%.1f", entry.gain))x "
                     + "threshold=\(String(format: "%.6f", entry.threshold)) "
                     + "duration=\(String(format: "%.2f", entry.duration))s "
                     + "latency=\(String(format: "%.2f", entry.latency))s "
-                    + "result=\(entry.result)"
+                    + "result=\(entry.result.rawValue)"
             )
         }
 

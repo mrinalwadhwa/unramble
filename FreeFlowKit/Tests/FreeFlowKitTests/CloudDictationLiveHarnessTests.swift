@@ -44,23 +44,26 @@ struct CloudDictationLiveHarnessTests {
             commitPolicy: policy,
             maxUnresolvedItems: 2,
             evidenceObserver: { await recorder.record($0) })
+        let sessionID = DictationSessionID()
 
         let startedAt = Date()
         do {
             try await provider.startStreaming(
+                sessionID: sessionID,
                 context: scenario.context,
                 language: "en",
                 micProximity: .nearField)
             let startCallSeconds = Date().timeIntervalSince(startedAt)
 
             for chunk in fixture.pcm.chunks(maximumByteCount: 4_096) {
-                try await provider.sendAudio(chunk)
+                try await provider.sendAudio(chunk, sessionID: sessionID)
             }
             let audioSentAt = Date()
             let setupAndAudioSendSeconds =
                 audioSentAt.timeIntervalSince(startedAt) - startCallSeconds
 
-            let polished = try await provider.finishStreaming()
+            let polished = try await provider.finishStreaming(
+                sessionID: sessionID)
             let finishedAt = Date()
             let snapshots = await recorder.snapshots()
             await provider.disconnect()
@@ -172,10 +175,12 @@ struct CloudDictationLiveHarnessTests {
             commitPolicy: policy,
             maxUnresolvedItems: 2,
             evidenceObserver: { await recorder.record($0) })
+        let sessionID = DictationSessionID()
 
         let startedAt = Date()
         do {
             try await provider.startStreaming(
+                sessionID: sessionID,
                 context: .empty,
                 language: "en",
                 micProximity: .nearField)
@@ -184,7 +189,8 @@ struct CloudDictationLiveHarnessTests {
             if realTimePaced {
                 for part in sourceParts {
                     for chunk in part.chunks(maximumByteCount: 4_096) {
-                        try await provider.sendAudio(chunk)
+                        try await provider.sendAudio(
+                            chunk, sessionID: sessionID)
                         try await Task.sleep(
                             for: .seconds(
                                 Double(chunk.count)
@@ -193,14 +199,15 @@ struct CloudDictationLiveHarnessTests {
                 }
             } else {
                 for part in sourceParts {
-                    try await provider.sendAudio(part)
+                    try await provider.sendAudio(part, sessionID: sessionID)
                 }
             }
             let audioSentAt = Date()
             let setupAndAudioSendSeconds =
                 audioSentAt.timeIntervalSince(startedAt) - startCallSeconds
 
-            let polished = try await provider.finishStreaming()
+            let polished = try await provider.finishStreaming(
+                sessionID: sessionID)
             let finishedAt = Date()
             let snapshots = await recorder.snapshots()
             await provider.disconnect()

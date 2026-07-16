@@ -24,8 +24,8 @@ import Testing
 //   /tmp/freeflow-replay-only     contents: a WAV basename to replay alone
 //   /tmp/freeflow-replay-step-ms  contents: audio fed per cycle (default 3000)
 //
-// Output: /tmp/freeflow-streaming-replay.log — per-cycle committed chunks
-// (newlines made visible), the reconstructed editor text, and the raw STT.
+// Output: /tmp/freeflow-streaming-replay.log — the reconstructed editor text
+// and an independent whole-file raw STT baseline.
 
 #if FREEFLOW_MLX_TESTS
 
@@ -55,8 +55,8 @@ struct StreamingReplay {
         let dir = URL(fileURLWithPath: dirPath, isDirectory: true)
 
         let only = readFlag("/tmp/freeflow-replay-only")
-        let stepMS = Int(readFlag("/tmp/freeflow-replay-step-ms") ?? "") ?? 3000
-        let stepBytes = max(1, stepMS * 32)  // 16 kHz mono 16-bit = 32 bytes/ms
+        let stepMS = max(
+            1, Int(readFlag("/tmp/freeflow-replay-step-ms") ?? "") ?? 3000)
         let repeats = max(1, Int(
             readFlag("/tmp/freeflow-replay-repeat") ?? "") ?? 1)
         // Optional unit-size override, to A/B test the guard-trigger rate.
@@ -98,6 +98,8 @@ struct StreamingReplay {
             let wav = try Data(contentsOf: dir.appendingPathComponent(name))
             guard wav.count > 44 else { continue }
             let pcm = wav.subdata(in: WAVEncoder.headerSize..<wav.count)
+            let rawTranscript = try LocalRecognitionFixtureSupport.recognize(
+                wavData: wav, using: nemotron)
 
             // The recognizer is deterministic, so the raw STT is fixed; polish
             // is not, so repeat to measure its run-to-run error rate. Each run
@@ -106,9 +108,9 @@ struct StreamingReplay {
             for run in 0..<repeats {
                 let provider = LocalStreamingProvider(
                     sttEngine: nemotron, polishChatClient: client,
+                    cycleInterval: Double(stepMS) / 1000,
                     unitPolicy: policy)
-                let result = try await provider.replay(
-                    audio: pcm, stepBytes: stepBytes)
+                let result = try await provider.replayForTesting(pcm)
 
                 var editor = ""
                 Self.appendChunk(result, to: &editor)
@@ -117,7 +119,7 @@ struct StreamingReplay {
                 // One machine-parseable record per run for offline scoring.
                 let record = "{\"wav\":\"\(name)\",\"run\":\(run)"
                     + ",\"paras\":\(paragraphCount(editorText))"
-                    + ",\"stt\":\"\(jsonEscape(provider.lastRawTranscript))\""
+                    + ",\"stt\":\"\(jsonEscape(rawTranscript))\""
                     + ",\"out\":\"\(jsonEscape(editorText))\"}"
                 log.log("[[RUN]] \(record)")
             }

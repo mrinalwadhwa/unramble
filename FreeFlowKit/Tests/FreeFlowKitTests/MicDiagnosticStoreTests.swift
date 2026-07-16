@@ -6,21 +6,298 @@ import Testing
 @Suite("MicDiagnosticStore")
 struct MicDiagnosticStoreTests {
 
-    // MARK: - Helpers
+    @Test("Record, clear, and empty formatting")
+    func recordAndClear() async {
+        let store = MicDiagnosticStore()
+        #expect(await store.count == 0)
+        #expect(
+            await store.formattedDiagnostics()
+                == "No dictation sessions recorded yet.")
 
-    private func makeEntry(
-        deviceName: String = "MacBook Pro Microphone",
-        proximity: String = "far_field",
-        ambientRMS: Float = 0.000300,
-        peakRMS: Float = 0.045000,
-        gain: Float = 12.0,
-        threshold: Float = 0.001000,
-        duration: TimeInterval = 2.5,
-        latency: TimeInterval = 0.55,
-        result: String = "ok"
+        await store.record(entry())
+        await store.record(entry(result: .silent))
+        #expect(await store.count == 2)
+
+        await store.clear()
+        #expect(await store.count == 0)
+        #expect(
+            await store.formattedDiagnostics()
+                == "No dictation sessions recorded yet.")
+    }
+
+    @Test("Capacity is FIFO and capped at ten")
+    func boundedFIFO() async {
+        let store = MicDiagnosticStore(maxEntries: 10_000)
+        for index in 0..<15 {
+            await store.record(entry(peakRMS: Float(index) / 100))
+        }
+
+        #expect(await store.count == MicDiagnosticStore.maximumCapacity)
+        let report = await store.formattedDiagnostics()
+        #expect(!report.contains("peak=0.000000"))
+        #expect(!report.contains("peak=0.040000"))
+        #expect(report.contains("peak=0.050000"))
+        #expect(report.contains("peak=0.140000"))
+    }
+
+    @Test("Custom capacity keeps newest entries in order")
+    func customCapacity() async throws {
+        let store = MicDiagnosticStore(maxEntries: 3)
+        for peak: Float in [0.01, 0.02, 0.03, 0.04] {
+            await store.record(entry(peakRMS: peak))
+        }
+
+        #expect(await store.count == 3)
+        let report = await store.formattedDiagnostics()
+        #expect(!report.contains("peak=0.010000"))
+        let second = try #require(report.range(of: "peak=0.020000"))
+        let third = try #require(report.range(of: "peak=0.030000"))
+        let fourth = try #require(report.range(of: "peak=0.040000"))
+        #expect(second.lowerBound < third.lowerBound)
+        #expect(third.lowerBound < fourth.lowerBound)
+    }
+
+    @Test("Zero and negative capacities discard entries")
+    func nonpositiveCapacity() async {
+        let zero = MicDiagnosticStore(maxEntries: 0)
+        let negative = MicDiagnosticStore(maxEntries: -10)
+
+        await zero.record(entry())
+        await negative.record(entry())
+
+        #expect(await zero.count == 0)
+        #expect(await negative.count == 0)
+    }
+
+    @Test("Formatting contains only typed outcomes and numeric mic metadata")
+    func contentFreeFormatting() async {
+        let store = MicDiagnosticStore()
+        await store.record(
+            entry(
+                proximity: .farField,
+                ambientRMS: 0.0003,
+                peakRMS: 0.045,
+                gain: 12,
+                threshold: 0.001,
+                duration: 2.5,
+                latency: 0.55,
+                result: .successLocal))
+
+        let report = await store.formattedDiagnostics()
+        #expect(report.contains("(1 session)"))
+        #expect(report.contains("Session 1:"))
+        #expect(report.contains("proximity=far_field"))
+        #expect(report.contains("ambient=0.000300"))
+        #expect(report.contains("peak=0.045000"))
+        #expect(report.contains("gain=12.0x"))
+        #expect(report.contains("threshold=0.001000"))
+        #expect(report.contains("duration=2.50s"))
+        #expect(report.contains("latency=0.55s"))
+        #expect(report.contains("result=ok_local"))
+        #expect(!report.contains("device="))
+    }
+
+    @Test("Every diagnostic outcome has a stable wire label", arguments: [
+        (MicDiagnosticResult.silent, "silent"),
+        (.empty, "empty"),
+        (.successLocal, "ok_local"),
+        (.successRealtime, "ok_realtime"),
+        (.successHTTPFallback, "ok_http_fallback"),
+    ])
+    func resultLabels(result: MicDiagnosticResult, label: String) {
+        #expect(result.rawValue == label)
+    }
+
+    @Suite("Pipeline integration")
+    struct PipelineIntegrationTests {
+
+        @Test("Realtime success records the closed success outcome")
+        func realtimeSuccess() async {
+            let audio = configuredAudio()
+            let realtime = MockStreamingProvider()
+            realtime.stubbedText = "Hello world"
+            let store = MicDiagnosticStore()
+            let pipeline = makePipeline(
+                audio: audio,
+                realtime: realtime,
+                fallback: MockBatchProvider(stubbedText: "fallback"),
+                store: store)
+
+            await activateAndComplete(
+                pipeline, audio: audio, realtime: realtime)
+
+            let report = await store.formattedDiagnostics()
+            #expect(await store.count == 1)
+            #expect(report.contains("result=ok_realtime"))
+            #expect(report.contains("proximity=near_field"))
+        }
+
+        @Test("Silent capture records silent without sending content")
+        func silentCapture() async {
+            let audio = configuredAudio()
+            audio.stubbedPeakRMS = 0.0001
+            audio.stubbedAmbientRMS = 0.0001
+            audio.stubbedMicProximity = .farField
+            let realtime = MockStreamingProvider()
+            let store = MicDiagnosticStore()
+            let pipeline = makePipeline(
+                audio: audio,
+                realtime: realtime,
+                fallback: MockBatchProvider(),
+                store: store)
+
+            await activateAndComplete(
+                pipeline,
+                audio: audio,
+                realtime: realtime,
+                waitForStreaming: false)
+
+            let report = await store.formattedDiagnostics()
+            #expect(await store.count == 1)
+            #expect(report.contains("result=silent"))
+            #expect(realtime.sendCallCount == 0)
+        }
+
+        @Test("Empty realtime and fallback results record empty")
+        func emptyResult() async {
+            let audio = configuredAudio()
+            let realtime = MockStreamingProvider()
+            realtime.stubbedText = ""
+            let store = MicDiagnosticStore()
+            let pipeline = makePipeline(
+                audio: audio,
+                realtime: realtime,
+                fallback: MockBatchProvider(stubbedText: "   "),
+                store: store)
+
+            await activateAndComplete(
+                pipeline, audio: audio, realtime: realtime)
+
+            let report = await store.formattedDiagnostics()
+            #expect(await store.count >= 1)
+            #expect(report.contains("result=empty"))
+        }
+
+        @Test("HTTP fallback success records its distinct outcome")
+        func fallbackSuccess() async {
+            let audio = configuredAudio()
+            let realtime = MockStreamingProvider()
+            realtime.stubbedFinishError = DictationError.networkError("offline")
+            let store = MicDiagnosticStore()
+            let pipeline = makePipeline(
+                audio: audio,
+                realtime: realtime,
+                fallback: MockBatchProvider(stubbedText: "Recovered"),
+                store: store)
+
+            await activateAndComplete(
+                pipeline, audio: audio, realtime: realtime)
+
+            let report = await store.formattedDiagnostics()
+            #expect(await store.count == 1)
+            #expect(report.contains("result=ok_http_fallback"))
+        }
+
+        @Test("Pipeline without diagnostics store remains functional")
+        func noStore() async {
+            let audio = configuredAudio()
+            let realtime = MockStreamingProvider()
+            let pipeline = DictationPipeline(
+                audioProvider: audio,
+                contextProvider: MockAppContextProvider(),
+                backend: .cloud(
+                    realtime: realtime,
+                    fallback: MockBatchProvider(stubbedText: "safe")),
+                textInjector: MockTextInjector(),
+                coordinator: RecordingCoordinator())
+
+            await activateAndComplete(
+                pipeline, audio: audio, realtime: realtime)
+        }
+
+        private func configuredAudio() -> MockAudioProvider {
+            let audio = MockAudioProvider()
+            audio.enablePCMStream = true
+            audio.stubbedPeakRMS = 0.1
+            audio.stubbedAmbientRMS = 0.001
+            audio.stubbedMicProximity = .nearField
+            return audio
+        }
+
+        private func makePipeline(
+            audio: MockAudioProvider,
+            realtime: MockStreamingProvider,
+            fallback: MockBatchProvider,
+            store: MicDiagnosticStore
+        ) -> DictationPipeline {
+            DictationPipeline(
+                audioProvider: audio,
+                contextProvider: MockAppContextProvider(),
+                backend: .cloud(realtime: realtime, fallback: fallback),
+                textInjector: MockTextInjector(),
+                coordinator: RecordingCoordinator(),
+                micDiagnosticStore: store)
+        }
+
+        private func activateAndComplete(
+            _ pipeline: DictationPipeline,
+            audio: MockAudioProvider,
+            realtime: MockStreamingProvider,
+            waitForStreaming: Bool = true
+        ) async {
+            let readyCount = audio.captureReadyCount
+            guard await pipeline.activate() != nil else {
+                Issue.record("Pipeline activation was rejected")
+                return
+            }
+            for _ in 0..<10_000 where audio.captureReadyCount == readyCount {
+                await Task.yield()
+            }
+            guard audio.captureReadyCount > readyCount else {
+                Issue.record("Audio capture did not become ready")
+                return
+            }
+            guard waitForStreaming else {
+                await pipeline.complete()
+                return
+            }
+
+            let setupDeadline = ContinuousClock.now + .seconds(1)
+            while realtime.startCallCount == 0,
+                ContinuousClock.now < setupDeadline
+            {
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            guard realtime.startCallCount > 0 else {
+                Issue.record("Realtime setup did not start")
+                return
+            }
+            audio.emitPCMChunk(Data(repeating: 1, count: 320))
+            let forwardingDeadline = ContinuousClock.now + .seconds(1)
+            while realtime.sendCallCount == 0,
+                ContinuousClock.now < forwardingDeadline
+            {
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+            guard realtime.sendCallCount > 0 else {
+                Issue.record("Realtime audio forwarding did not start")
+                return
+            }
+            await pipeline.complete()
+        }
+    }
+
+    private func entry(
+        proximity: MicProximity = .nearField,
+        ambientRMS: Float = 0.001,
+        peakRMS: Float = 0.05,
+        gain: Float = 1,
+        threshold: Float = 0.005,
+        duration: TimeInterval = 1,
+        latency: TimeInterval = 0.5,
+        result: MicDiagnosticResult = .successRealtime
     ) -> MicDiagnosticEntry {
         MicDiagnosticEntry(
-            deviceName: deviceName,
             proximity: proximity,
             ambientRMS: ambientRMS,
             peakRMS: peakRMS,
@@ -28,725 +305,6 @@ struct MicDiagnosticStoreTests {
             threshold: threshold,
             duration: duration,
             latency: latency,
-            result: result
-        )
-    }
-
-    // MARK: - Recording
-
-    @Suite("record")
-    struct RecordTests {
-
-        private func makeEntry(
-            result: String = "ok"
-        ) -> MicDiagnosticEntry {
-            MicDiagnosticEntry(
-                deviceName: "Test Mic",
-                proximity: "near_field",
-                ambientRMS: 0.001,
-                peakRMS: 0.05,
-                gain: 1.0,
-                threshold: 0.005,
-                duration: 1.0,
-                latency: 0.5,
-                result: result
-            )
-        }
-
-        @Test("Empty store has zero count")
-        func emptyStore() async {
-            let store = MicDiagnosticStore()
-            let count = await store.count
-            #expect(count == 0)
-        }
-
-        @Test("Recording one entry increments count")
-        func recordOne() async {
-            let store = MicDiagnosticStore()
-            await store.record(makeEntry())
-            let count = await store.count
-            #expect(count == 1)
-        }
-
-        @Test("Recording multiple entries increments count")
-        func recordMultiple() async {
-            let store = MicDiagnosticStore()
-            await store.record(makeEntry(result: "ok"))
-            await store.record(makeEntry(result: "silent"))
-            await store.record(makeEntry(result: "empty"))
-            let count = await store.count
-            #expect(count == 3)
-        }
-
-        @Test("Clear removes all entries")
-        func clear() async {
-            let store = MicDiagnosticStore()
-            await store.record(makeEntry())
-            await store.record(makeEntry())
-            await store.clear()
-            let count = await store.count
-            #expect(count == 0)
-        }
-    }
-
-    // MARK: - Eviction
-
-    @Suite("eviction")
-    struct EvictionTests {
-
-        private func makeEntry(
-            deviceName: String = "Mic",
-            result: String = "ok"
-        ) -> MicDiagnosticEntry {
-            MicDiagnosticEntry(
-                deviceName: deviceName,
-                proximity: "near_field",
-                ambientRMS: 0.001,
-                peakRMS: 0.05,
-                gain: 1.0,
-                threshold: 0.005,
-                duration: 1.0,
-                latency: 0.5,
-                result: result
-            )
-        }
-
-        @Test("Default max is 10 entries")
-        func defaultMax() async {
-            let store = MicDiagnosticStore()
-            for i in 0..<15 {
-                await store.record(makeEntry(deviceName: "Mic \(i)"))
-            }
-            let count = await store.count
-            #expect(count == 10)
-        }
-
-        @Test("Oldest entries are evicted first")
-        func evictsOldest() async {
-            let store = MicDiagnosticStore(maxEntries: 3)
-            await store.record(makeEntry(deviceName: "First"))
-            await store.record(makeEntry(deviceName: "Second"))
-            await store.record(makeEntry(deviceName: "Third"))
-            await store.record(makeEntry(deviceName: "Fourth"))
-
-            let count = await store.count
-            #expect(count == 3)
-
-            let text = await store.formattedDiagnostics()
-            #expect(!text.contains("\"First\""))
-            #expect(text.contains("\"Second\""))
-            #expect(text.contains("\"Third\""))
-            #expect(text.contains("\"Fourth\""))
-        }
-
-        @Test("Custom maxEntries of 1 keeps only latest")
-        func maxOne() async {
-            let store = MicDiagnosticStore(maxEntries: 1)
-            await store.record(makeEntry(deviceName: "Old"))
-            await store.record(makeEntry(deviceName: "New"))
-
-            let count = await store.count
-            #expect(count == 1)
-
-            let text = await store.formattedDiagnostics()
-            #expect(!text.contains("\"Old\""))
-            #expect(text.contains("\"New\""))
-        }
-
-        @Test("At exactly maxEntries, no eviction yet")
-        func atCapacity() async {
-            let store = MicDiagnosticStore(maxEntries: 3)
-            await store.record(makeEntry(deviceName: "A"))
-            await store.record(makeEntry(deviceName: "B"))
-            await store.record(makeEntry(deviceName: "C"))
-
-            let count = await store.count
-            #expect(count == 3)
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("\"A\""))
-            #expect(text.contains("\"B\""))
-            #expect(text.contains("\"C\""))
-        }
-    }
-
-    // MARK: - Formatted output
-
-    @Suite("formattedDiagnostics")
-    struct FormattedDiagnosticsTests {
-
-        @Test("Empty store returns placeholder message")
-        func emptyMessage() async {
-            let store = MicDiagnosticStore()
-            let text = await store.formattedDiagnostics()
-            #expect(text == "No dictation sessions recorded yet.")
-        }
-
-        @Test("Header includes session count singular")
-        func headerSingular() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "Mic",
-                    proximity: "near_field",
-                    ambientRMS: 0.001,
-                    peakRMS: 0.05,
-                    gain: 1.0,
-                    threshold: 0.005,
-                    duration: 1.0,
-                    latency: 0.5,
-                    result: "ok"
-                ))
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("(1 session)"))
-        }
-
-        @Test("Header includes session count plural")
-        func headerPlural() async {
-            let store = MicDiagnosticStore()
-            for _ in 0..<3 {
-                await store.record(
-                    MicDiagnosticEntry(
-                        deviceName: "Mic",
-                        proximity: "near_field",
-                        ambientRMS: 0.001,
-                        peakRMS: 0.05,
-                        gain: 1.0,
-                        threshold: 0.005,
-                        duration: 1.0,
-                        latency: 0.5,
-                        result: "ok"
-                    ))
-            }
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("(3 sessions)"))
-        }
-
-        @Test("Header includes macOS version")
-        func includesMacOS() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "Mic",
-                    proximity: "near_field",
-                    ambientRMS: 0.001,
-                    peakRMS: 0.05,
-                    gain: 1.0,
-                    threshold: 0.005,
-                    duration: 1.0,
-                    latency: 0.5,
-                    result: "ok"
-                ))
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("macOS:"))
-        }
-
-        @Test("Header includes Mac model")
-        func includesMacModel() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "Mic",
-                    proximity: "near_field",
-                    ambientRMS: 0.001,
-                    peakRMS: 0.05,
-                    gain: 1.0,
-                    threshold: 0.005,
-                    duration: 1.0,
-                    latency: 0.5,
-                    result: "ok"
-                ))
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("Mac:"))
-        }
-
-        @Test("Session line includes all fields with correct formatting")
-        func sessionLineFormat() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "MacBook Pro Microphone",
-                    proximity: "far_field",
-                    ambientRMS: 0.000300,
-                    peakRMS: 0.045000,
-                    gain: 12.0,
-                    threshold: 0.001000,
-                    duration: 2.5,
-                    latency: 0.55,
-                    result: "ok"
-                ))
-
-            let text = await store.formattedDiagnostics()
-
-            #expect(text.contains("Session 1:"))
-            #expect(text.contains("device=\"MacBook Pro Microphone\""))
-            #expect(text.contains("proximity=far_field"))
-            #expect(text.contains("ambient=0.000300"))
-            #expect(text.contains("peak=0.045000"))
-            #expect(text.contains("gain=12.0x"))
-            #expect(text.contains("threshold=0.001000"))
-            #expect(text.contains("duration=2.50s"))
-            #expect(text.contains("latency=0.55s"))
-            #expect(text.contains("result=ok"))
-        }
-
-        @Test("Multiple sessions are numbered sequentially")
-        func sessionNumbering() async {
-            let store = MicDiagnosticStore()
-            for _ in 0..<3 {
-                await store.record(
-                    MicDiagnosticEntry(
-                        deviceName: "Mic",
-                        proximity: "near_field",
-                        ambientRMS: 0.001,
-                        peakRMS: 0.05,
-                        gain: 1.0,
-                        threshold: 0.005,
-                        duration: 1.0,
-                        latency: 0.5,
-                        result: "ok"
-                    ))
-            }
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("Session 1:"))
-            #expect(text.contains("Session 2:"))
-            #expect(text.contains("Session 3:"))
-        }
-
-        @Test("Silent result is formatted correctly")
-        func silentResult() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "AirPods",
-                    proximity: "near_field",
-                    ambientRMS: 0.000100,
-                    peakRMS: 0.000050,
-                    gain: 1.0,
-                    threshold: 0.005000,
-                    duration: 0,
-                    latency: 0,
-                    result: "silent"
-                ))
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("result=silent"))
-            #expect(text.contains("duration=0.00s"))
-            #expect(text.contains("latency=0.00s"))
-        }
-
-        @Test("Empty result is formatted correctly")
-        func emptyResult() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "Bose BT",
-                    proximity: "near_field",
-                    ambientRMS: 0.000200,
-                    peakRMS: 0.009000,
-                    gain: 1.0,
-                    threshold: 0.005000,
-                    duration: 1.8,
-                    latency: 0.92,
-                    result: "empty"
-                ))
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("result=empty"))
-        }
-
-        @Test("Blank line separates header from sessions")
-        func blankLineSeparator() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "Mic",
-                    proximity: "near_field",
-                    ambientRMS: 0.001,
-                    peakRMS: 0.05,
-                    gain: 1.0,
-                    threshold: 0.005,
-                    duration: 1.0,
-                    latency: 0.5,
-                    result: "ok"
-                ))
-
-            let text = await store.formattedDiagnostics()
-            let lines = text.components(separatedBy: "\n")
-
-            // Line 0: header, Line 1: FreeFlow version, Line 2: macOS, Line 3: Mac, Line 4: blank, Line 5: Session 1
-            #expect(lines.count >= 6)
-            #expect(lines[0].hasPrefix("FreeFlow Mic Diagnostics"))
-            #expect(lines[1].hasPrefix("FreeFlow:"))
-            #expect(lines[2].hasPrefix("macOS:"))
-            #expect(lines[3].hasPrefix("Mac:"))
-            #expect(lines[4] == "")
-            #expect(lines[5].hasPrefix("Session 1:"))
-        }
-
-        @Test("Near-field gain 1.0 is formatted as 1.0x")
-        func nearFieldGain() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "AirPods",
-                    proximity: "near_field",
-                    ambientRMS: 0.001,
-                    peakRMS: 0.05,
-                    gain: 1.0,
-                    threshold: 0.005,
-                    duration: 1.0,
-                    latency: 0.5,
-                    result: "ok"
-                ))
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("gain=1.0x"))
-        }
-
-        @Test("Far-field high gain is formatted correctly")
-        func farFieldHighGain() async {
-            let store = MicDiagnosticStore()
-            await store.record(
-                MicDiagnosticEntry(
-                    deviceName: "Blue Yeti",
-                    proximity: "far_field",
-                    ambientRMS: 0.000150,
-                    peakRMS: 0.032000,
-                    gain: 15.5,
-                    threshold: 0.001000,
-                    duration: 3.2,
-                    latency: 0.62,
-                    result: "ok"
-                ))
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("gain=15.5x"))
-        }
-    }
-
-    // MARK: - MicDiagnosticEntry
-
-    @Suite("MicDiagnosticEntry")
-    struct EntryTests {
-
-        @Test("Timestamp defaults to now")
-        func defaultTimestamp() {
-            let before = Date()
-            let entry = MicDiagnosticEntry(
-                deviceName: "Mic",
-                proximity: "near_field",
-                ambientRMS: 0.001,
-                peakRMS: 0.05,
-                gain: 1.0,
-                threshold: 0.005,
-                duration: 1.0,
-                latency: 0.5,
-                result: "ok"
-            )
-            let after = Date()
-            #expect(entry.timestamp >= before)
-            #expect(entry.timestamp <= after)
-        }
-
-        @Test("All fields are stored correctly")
-        func fieldsStored() {
-            let entry = MicDiagnosticEntry(
-                deviceName: "Test Device",
-                proximity: "far_field",
-                ambientRMS: 0.000300,
-                peakRMS: 0.045000,
-                gain: 12.0,
-                threshold: 0.001000,
-                duration: 2.5,
-                latency: 0.55,
-                result: "ok"
-            )
-            #expect(entry.deviceName == "Test Device")
-            #expect(entry.proximity == "far_field")
-            #expect(entry.ambientRMS == 0.000300)
-            #expect(entry.peakRMS == 0.045000)
-            #expect(entry.gain == 12.0)
-            #expect(entry.threshold == 0.001000)
-            #expect(entry.duration == 2.5)
-            #expect(entry.latency == 0.55)
-            #expect(entry.result == "ok")
-        }
-    }
-
-    // MARK: - Clear then format
-
-    @Test("Format after clear returns placeholder")
-    func formatAfterClear() async {
-        let store = MicDiagnosticStore()
-        await store.record(
-            MicDiagnosticEntry(
-                deviceName: "Mic",
-                proximity: "near_field",
-                ambientRMS: 0.001,
-                peakRMS: 0.05,
-                gain: 1.0,
-                threshold: 0.005,
-                duration: 1.0,
-                latency: 0.5,
-                result: "ok"
-            ))
-        await store.clear()
-        let text = await store.formattedDiagnostics()
-        #expect(text == "No dictation sessions recorded yet.")
-    }
-
-    // MARK: - Mixed device types
-
-    @Test("Mixed device types show correct per-session data")
-    func mixedDevices() async {
-        let store = MicDiagnosticStore()
-
-        await store.record(
-            MicDiagnosticEntry(
-                deviceName: "MacBook Pro Microphone",
-                proximity: "far_field",
-                ambientRMS: 0.000300,
-                peakRMS: 0.045000,
-                gain: 12.0,
-                threshold: 0.001000,
-                duration: 2.5,
-                latency: 0.55,
-                result: "ok"
-            ))
-
-        await store.record(
-            MicDiagnosticEntry(
-                deviceName: "AirPods",
-                proximity: "near_field",
-                ambientRMS: 0.000100,
-                peakRMS: 0.000050,
-                gain: 1.0,
-                threshold: 0.005000,
-                duration: 0,
-                latency: 0,
-                result: "silent"
-            ))
-
-        await store.record(
-            MicDiagnosticEntry(
-                deviceName: "Blue Yeti",
-                proximity: "far_field",
-                ambientRMS: 0.000150,
-                peakRMS: 0.032000,
-                gain: 15.5,
-                threshold: 0.001000,
-                duration: 3.2,
-                latency: 0.62,
-                result: "ok"
-            ))
-
-        let text = await store.formattedDiagnostics()
-
-        #expect(text.contains("(3 sessions)"))
-        #expect(text.contains("Session 1:"))
-        #expect(text.contains("Session 2:"))
-        #expect(text.contains("Session 3:"))
-        #expect(text.contains("device=\"MacBook Pro Microphone\""))
-        #expect(text.contains("device=\"AirPods\""))
-        #expect(text.contains("device=\"Blue Yeti\""))
-    }
-
-    // MARK: - Pipeline integration
-
-    @Suite("Pipeline integration")
-    struct PipelineIntegrationTests {
-
-        /// Build a pipeline wired to a MicDiagnosticStore so we can
-        /// verify entries are recorded for each dictation outcome.
-        private func makePipeline(
-            audioProvider: MockAudioProvider = MockAudioProvider(),
-            batchProvider: MockBatchProvider = MockBatchProvider(),
-            store: MicDiagnosticStore = MicDiagnosticStore()
-        ) -> (DictationPipeline, MockAudioProvider, MockBatchProvider, MicDiagnosticStore) {
-            let pipeline = DictationPipeline(
-                audioProvider: audioProvider,
-                contextProvider: MockAppContextProvider(),
-                backend: .cloud(
-                    realtime: MockStreamingProvider(),
-                    fallback: batchProvider),
-                textInjector: MockTextInjector(),
-                coordinator: RecordingCoordinator(),
-                micDiagnosticStore: store
-            )
-            return (pipeline, audioProvider, batchProvider, store)
-        }
-
-        private func activateAndWaitForCapture(
-            _ pipeline: DictationPipeline,
-            audioProvider: MockAudioProvider
-        ) async {
-            let previousReadyCount = audioProvider.captureReadyCount
-            guard await pipeline.activate() != nil else {
-                Issue.record("Pipeline activation was rejected")
-                return
-            }
-
-            for _ in 0..<10_000 {
-                if audioProvider.captureReadyCount > previousReadyCount {
-                    return
-                }
-                await Task.yield()
-            }
-            Issue.record("Audio capture did not become ready")
-        }
-
-        @Test("Successful dictation records an 'ok' entry")
-        func successRecordsOk() async {
-            let audio = MockAudioProvider()
-            audio.stubbedPeakRMS = 0.1
-            audio.stubbedAmbientRMS = 0.001
-            audio.stubbedMicProximity = .nearField
-
-            let dictation = MockBatchProvider(stubbedText: "Hello world")
-            let store = MicDiagnosticStore()
-            let (pipeline, _, _, _) = makePipeline(
-                audioProvider: audio,
-                batchProvider: dictation,
-                store: store
-            )
-
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-
-            let count = await store.count
-            #expect(count == 1)
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("result=ok"))
-            #expect(text.contains("proximity=near_field"))
-        }
-
-        @Test("Silent press records a 'silent' entry with zero duration")
-        func silentPressRecordsSilent() async {
-            let audio = MockAudioProvider()
-            // Peak below the early silence threshold (0.005 for near-field
-            // with ambient calibration, or 0.001 for far-field).
-            audio.stubbedPeakRMS = 0.0001
-            audio.stubbedAmbientRMS = 0.0001
-            audio.stubbedMicProximity = .farField
-
-            let store = MicDiagnosticStore()
-            let (pipeline, _, _, _) = makePipeline(
-                audioProvider: audio,
-                store: store
-            )
-
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-
-            let count = await store.count
-            #expect(count == 1)
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("result=silent"))
-        }
-
-        @Test("Empty dictation result records an 'empty' entry")
-        func emptyResultRecordsEmpty() async {
-            let audio = MockAudioProvider()
-            audio.stubbedPeakRMS = 0.1
-            audio.stubbedAmbientRMS = 0.001
-            audio.stubbedMicProximity = .nearField
-
-            // Server returns whitespace-only text.
-            let dictation = MockBatchProvider(stubbedText: "   ")
-            let store = MicDiagnosticStore()
-            let (pipeline, _, _, _) = makePipeline(
-                audioProvider: audio,
-                batchProvider: dictation,
-                store: store
-            )
-
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-
-            let count = await store.count
-            #expect(count == 1)
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("result=empty"))
-        }
-
-        @Test("Multiple dictations accumulate entries in order")
-        func multipleSessionsAccumulate() async {
-            let audio = MockAudioProvider()
-            audio.stubbedPeakRMS = 0.1
-            audio.stubbedAmbientRMS = 0.001
-            audio.stubbedMicProximity = .nearField
-
-            let dictation = MockBatchProvider(stubbedText: "First")
-            let store = MicDiagnosticStore()
-            let (pipeline, _, _, _) = makePipeline(
-                audioProvider: audio,
-                batchProvider: dictation,
-                store: store
-            )
-
-            // First dictation: success.
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-
-            // Second dictation: success with different text.
-            dictation.stubbedText = "Second"
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-
-            let count = await store.count
-            #expect(count == 2)
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("Session 1:"))
-            #expect(text.contains("Session 2:"))
-        }
-
-        @Test("Far-field mic records far_field proximity and gain")
-        func farFieldProximityAndGain() async {
-            let audio = MockAudioProvider()
-            audio.stubbedPeakRMS = 0.1
-            audio.stubbedAmbientRMS = 0.001
-            audio.stubbedMicProximity = .farField
-
-            let dictation = MockBatchProvider(stubbedText: "test")
-            let store = MicDiagnosticStore()
-            let (pipeline, _, _, _) = makePipeline(
-                audioProvider: audio,
-                batchProvider: dictation,
-                store: store
-            )
-
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-
-            let count = await store.count
-            #expect(count == 1)
-
-            let text = await store.formattedDiagnostics()
-            #expect(text.contains("proximity=far_field"))
-            // MockAudioProvider uses default gainFactor (1.0) from
-            // the protocol extension.
-            #expect(text.contains("gain=1.0x"))
-        }
-
-        @Test("Pipeline without store does not crash")
-        func noStoreSafe() async {
-            let audio = MockAudioProvider()
-            let pipeline = DictationPipeline(
-                audioProvider: audio,
-                contextProvider: MockAppContextProvider(),
-                backend: .cloud(
-                    realtime: MockStreamingProvider(),
-                    fallback: MockBatchProvider(stubbedText: "safe")),
-                textInjector: MockTextInjector(),
-                coordinator: RecordingCoordinator()
-            )
-
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            await pipeline.complete()
-            // No crash, no store — just verifying the nil path is safe.
-        }
+            result: result)
     }
 }

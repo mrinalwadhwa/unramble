@@ -5,8 +5,7 @@ import Testing
 
 // The on-device provider closes bounded pause/size units, polishes each, and
 // accumulates them internally. Nothing is injected mid-stream: the whole
-// polished transcript is returned once at finish, whether or not a preview
-// handler is set.
+// polished transcript is returned once at finish.
 @Suite("Local unit streaming")
 struct LocalUnitStreamingTests {
 
@@ -23,14 +22,15 @@ struct LocalUnitStreamingTests {
         LocalStreamingProvider(
             sttEngine: ScriptRecognizer(transcripts),
             polishChatClient: EchoPolishClient(),
+            cycleInterval: 100.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
                 hardPauseSilenceBytes: 200, maximumUnitBytes: 1_000_000),
             silenceThreshold: 0.01)
     }
 
-    @Test("finish returns the full transcript whether or not a preview handler is set")
-    func finishReturnsFullRegardlessOfHandler() async throws {
+    @Test("finish returns the full transcript across bounded units")
+    func finishReturnsFullTranscript() async throws {
         // Five 100-byte steps: speech, speech, silence, speech, speech.
         // The silence step closes the first unit; finish closes the second.
         let transcripts = [
@@ -40,16 +40,11 @@ struct LocalUnitStreamingTests {
         let audio = speech(100) + speech(100) + silence(100)
             + speech(100) + speech(100)
 
-        let withHandler = makeProvider(transcripts)
-        withHandler.setChunkHandler { _ in }
-        let a = try await withHandler.replay(audio: audio, stepBytes: 100)
+        let provider = makeProvider(transcripts)
+        let result = try await provider.replayForTesting(audio)
 
-        let without = makeProvider(transcripts)
-        let b = try await without.replay(audio: audio, stepBytes: 100)
-
-        #expect(a == b, "a preview handler must not change the returned text")
-        #expect(a.lowercased().contains("first part"))
-        #expect(a.lowercased().contains("second part"))
+        #expect(result.lowercased().contains("first part"))
+        #expect(result.lowercased().contains("second part"))
     }
 
     @Test("A hard pause resets recognition and preserves content across resets")
@@ -110,13 +105,14 @@ struct LocalUnitStreamingTests {
         #expect(result.lowercased().contains("charlie"))
     }
 
-    @Test("setSilenceThreshold makes low-energy audio count as a pause")
-    func silenceThresholdControlsPauseDetection() async throws {
+    @Test("Replay silence threshold controls low-energy pause detection")
+    func replaySilenceThresholdControlsPauseDetection() async throws {
         func make() -> (LocalStreamingProvider, MultiSessionRecognizer) {
             let recognizer = MultiSessionRecognizer(["unit one", "unit two"])
             let provider = LocalStreamingProvider(
                 sttEngine: recognizer,
                 polishChatClient: EchoPolishClient(),
+                cycleInterval: 640.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
                 unitPolicy: LocalUnitPolicy(
                     minimumSpeechBytes: 640, softPauseSilenceBytes: 640,
                     hardPauseSilenceBytes: 640, maximumUnitBytes: 1_000_000),
@@ -129,14 +125,15 @@ struct LocalUnitStreamingTests {
 
         // At the speech floor the low-energy tail is not silence: no pause.
         let (low, lowRec) = make()
-        _ = try await low.replay(audio: audio, stepBytes: 640)
+        _ = try await low.replayForTesting(
+            audio, silenceThreshold: 0.0005)
         #expect(lowRec.sessionCount == 1)
 
         // A higher threshold classifies the tail as a pause, which closes a
         // unit and resets recognition.
         let (high, highRec) = make()
-        high.setSilenceThreshold(0.02)
-        _ = try await high.replay(audio: audio, stepBytes: 640)
+        _ = try await high.replayForTesting(
+            audio, silenceThreshold: 0.02)
         #expect(highRec.sessionCount == 2)
     }
 
@@ -149,13 +146,14 @@ struct LocalUnitStreamingTests {
         let provider = LocalStreamingProvider(
             sttEngine: recognizer,
             polishChatClient: SentenceFinalizingClient(),
+            cycleInterval: 100.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
                 hardPauseSilenceBytes: 100_000, maximumUnitBytes: 1_000_000),
             silenceThreshold: 0.01)
         // Speech, a mid-sentence pause (closes unit 1), then the rest.
         let audio = speech(200) + silence(100) + speech(200)
-        let result = try await provider.replay(audio: audio, stepBytes: 100)
+        let result = try await provider.replayForTesting(audio)
 
         #expect(result.lowercased().contains("the plan is to ship on friday"))
         #expect(!result.contains(". To ship"),
@@ -172,6 +170,7 @@ struct LocalUnitStreamingTests {
         let provider = LocalStreamingProvider(
             sttEngine: recognizer,
             polishChatClient: SentenceFinalizingClient(),
+            cycleInterval: 100.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
                 hardPauseSilenceBytes: 100_000, maximumUnitBytes: 1_000_000),
@@ -179,7 +178,7 @@ struct LocalUnitStreamingTests {
         // The pause closes the unit; finish has no further audio and must
         // still commit the held sentence.
         let audio = speech(200) + silence(100)
-        let result = try await provider.replay(audio: audio, stepBytes: 100)
+        let result = try await provider.replayForTesting(audio)
 
         #expect(result.lowercased().contains("the plan is ready"))
     }
@@ -199,13 +198,14 @@ struct LocalUnitStreamingTests {
         let provider = LocalStreamingProvider(
             sttEngine: recognizer,
             polishChatClient: DropTrailingNewClient(),
+            cycleInterval: 100.0 / Double(LocalUnitPolicy.sourceBytesPerSecond),
             unitPolicy: LocalUnitPolicy(
                 minimumSpeechBytes: 100, softPauseSilenceBytes: 40,
                 hardPauseSilenceBytes: 100_000, maximumUnitBytes: 1_000_000),
             silenceThreshold: 0.01)
         // Speech, a pause right after "new" (closes unit 1), then the rest.
         let audio = speech(200) + silence(100) + speech(200)
-        let result = try await provider.replay(audio: audio, stepBytes: 100)
+        let result = try await provider.replayForTesting(audio)
 
         #expect(result.contains("\n"),
             "the break command produced no line break: \(result.debugDescription)")

@@ -107,7 +107,8 @@ struct NemotronBaseline {
             guard wav.count > 44 else { continue }
 
             let sttStart = CFAbsoluteTimeGetCurrent()
-            let stt = (try? await nemotron.transcribe(audio: wav)) ?? ""
+            let stt = (try? LocalRecognitionFixtureSupport.recognize(
+                wavData: wav, using: nemotron)) ?? ""
             let sttTime = CFAbsoluteTimeGetCurrent() - sttStart
 
             let polished: String

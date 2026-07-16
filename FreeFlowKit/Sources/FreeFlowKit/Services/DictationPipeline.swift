@@ -284,6 +284,17 @@ public actor DictationPipeline: PipelineProviding {
         case local
         case realtime
         case httpFallback = "http_fallback"
+
+        var diagnosticResult: MicDiagnosticResult {
+            switch self {
+            case .local:
+                return .successLocal
+            case .realtime:
+                return .successRealtime
+            case .httpFallback:
+                return .successHTTPFallback
+            }
+        }
     }
 
     private struct ResolvedDictation {
@@ -1347,7 +1358,6 @@ public actor DictationPipeline: PipelineProviding {
             // transcript from bounded units; cloud stays atomic because
             // arbitrary target applications cannot safely revise text after
             // injection. The pipeline injects each provider's result once.
-            streaming.setChunkHandler(nil)
 
             // Local pause detection uses the same ambient-adaptive threshold as
             // the silent-press gate, so real acoustic pauses close units rather
@@ -1402,7 +1412,6 @@ public actor DictationPipeline: PipelineProviding {
             }
 
             guard !Task.isCancelled, ownsSession(session.id) else {
-                streaming.setChunkHandler(nil)
                 await streaming.cancelStreaming(sessionID: session.id)
                 isStreamingSession = false
                 if captureStopOperation?.sessionID != session.id,
@@ -1422,7 +1431,6 @@ public actor DictationPipeline: PipelineProviding {
 
             guard streamingStarted else {
                 Log.debug("[Pipeline] Streaming setup timed out or failed, falling back to batch")
-                streaming.setChunkHandler(nil)
                 isStreamingSession = false
                 return
             }
@@ -1461,7 +1469,6 @@ public actor DictationPipeline: PipelineProviding {
 
         let forwardingOperation = audioForwardingOperation
         audioForwardingOperation = nil
-        streamingProvider.setChunkHandler(nil)
         if let forwardingOperation {
             await forwardingOperation.cancel {
                 await streamingProvider.cancelStreaming(sessionID: sessionID)
@@ -1691,15 +1698,14 @@ public actor DictationPipeline: PipelineProviding {
             if let store = micDiagnosticStore {
                 await store.record(
                     MicDiagnosticEntry(
-                        deviceName: earlyMetrics.deviceName,
-                        proximity: earlyMetrics.micProximity.rawValue,
+                        proximity: earlyMetrics.micProximity,
                         ambientRMS: earlyMetrics.ambientRMS,
                         peakRMS: earlyMetrics.peakRMS,
                         gain: earlyMetrics.gainFactor,
                         threshold: earlyThreshold,
                         duration: 0,
                         latency: 0,
-                        result: "silent"
+                        result: .silent
                     ))
             }
 
@@ -1867,12 +1873,6 @@ public actor DictationPipeline: PipelineProviding {
         audioForwardingOperation = nil
         isStreamingSession = false
 
-        // Clear the chunk handler before entering the pipeline task so
-        // late-arriving chunks cannot inject text during finishStreaming.
-        if useStreaming {
-            streamingProvider.setChunkHandler(nil)
-        }
-
         let (pipelineCompletion, pipelineCompletionContinuation) =
             AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let sessionContext = pendingContext.flatMap { pending in
@@ -1969,15 +1969,14 @@ public actor DictationPipeline: PipelineProviding {
                 if let store = micDiagnosticStore {
                     await store.record(
                         MicDiagnosticEntry(
-                            deviceName: postRecordMetrics.deviceName,
-                            proximity: postRecordMetrics.micProximity.rawValue,
+                            proximity: postRecordMetrics.micProximity,
                             ambientRMS: postRecordMetrics.ambientRMS,
                             peakRMS: postRecordMetrics.peakRMS,
                             gain: postRecordMetrics.gainFactor,
                             threshold: postRecordThreshold,
                             duration: audioBuffer.duration,
                             latency: 0,
-                            result: "silent"
+                            result: .silent
                         ))
                 }
                 if let forwardingOperation {
@@ -2121,7 +2120,7 @@ public actor DictationPipeline: PipelineProviding {
                 silenceThreshold: postRecordThreshold,
                 t0: t0, t1: t1, t4: t4,
                 completeEnteredAt: completeEnteredAt,
-                mode: resolvedDictation.source.rawValue)
+                source: resolvedDictation.source)
         }
 
         self.pipelineTask = task
@@ -2394,15 +2393,14 @@ public actor DictationPipeline: PipelineProviding {
 
         // Cancel the streaming session. Always attempt cancellation even
         // if complete() already cleared isStreamingSession — the pipeline
-        // task may still be inside finishStreaming(). cancelStreaming() is
+        // task may still be inside finishStreaming(). Cancellation is
         // a no-op when no session is active.
         isStreamingSession = false
         let streaming = backend.streamingProvider
-        streaming.setChunkHandler(nil)
         if let sessionID {
             await streaming.cancelStreaming(sessionID: sessionID)
         } else {
-            await streaming.cancelStreaming()
+            await streaming.cancelActiveStreaming()
         }
 
         if let runningForwardingOperation {
@@ -2438,7 +2436,7 @@ public actor DictationPipeline: PipelineProviding {
             if let sessionID {
                 await streaming.cancelStreaming(sessionID: sessionID)
             } else {
-                await streaming.cancelStreaming()
+                await streaming.cancelActiveStreaming()
             }
         }
         // Context reads are read-only and session-fenced. Joining a hung AX
@@ -2453,11 +2451,10 @@ public actor DictationPipeline: PipelineProviding {
         audioForwardingOperation = nil
         if let lateForwardingOperation {
             await lateForwardingOperation.cancel { [streaming] in
-                streaming.setChunkHandler(nil)
                 if let sessionID {
                     await streaming.cancelStreaming(sessionID: sessionID)
                 } else {
-                    await streaming.cancelStreaming()
+                    await streaming.cancelActiveStreaming()
                 }
             }
         }
@@ -2483,7 +2480,7 @@ public actor DictationPipeline: PipelineProviding {
             if let sessionID {
                 await streaming.cancelStreaming(sessionID: sessionID)
             } else {
-                await streaming.cancelStreaming()
+                await streaming.cancelActiveStreaming()
             }
             _ = await lateStreamingSetupOperation.task.result
         }
@@ -2765,10 +2762,8 @@ public actor DictationPipeline: PipelineProviding {
                 _ = await coordinator.failDictation(sessionID: sessionID)
                 return nil
             }
-            Log.debug("[Pipeline] local polished: \"\(result)\"")
-            saveSampleIfCollecting(
-                streaming: streaming, audio: audioBuffer.data,
-                polished: result)
+            Log.debug(
+                "[Pipeline] Local dictation resolved (\(result.utf8.count) bytes)")
             return result
         } catch {
             Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
@@ -2782,57 +2777,6 @@ public actor DictationPipeline: PipelineProviding {
             _ = await coordinator.failDictation(sessionID: sessionID)
             return nil
         }
-    }
-
-    /// Save audio + structured log when `/tmp/freeflow-collect` exists.
-    private func saveSampleIfCollecting(
-        streaming: StreamingDictationProviding,
-        audio: Data, polished: String
-    ) {
-        let flag = "/tmp/freeflow-collect"
-        guard FileManager.default.fileExists(atPath: flag) else { return }
-
-        let dir = "/tmp/freeflow-samples"
-        try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true)
-
-        // The returned text is already the full polished transcript; the
-        // local provider also exposes it as lastPolishedTranscript next to
-        // the raw STT for the collected sample.
-        let rawSTT: String
-        var polishedFull = polished
-        if let local = streaming as? LocalStreamingProvider {
-            rawSTT = local.lastRawTranscript
-            if !local.lastPolishedTranscript.isEmpty {
-                polishedFull = local.lastPolishedTranscript
-            }
-        } else {
-            rawSTT = ""
-        }
-
-        // Atomic counter via file count
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir)
-            .filter { $0.hasSuffix(".wav") }) ?? []
-        let n = files.count + 1
-        let tag = String(format: "%03d", n)
-
-        // Save WAV
-        let wav = WAVEncoder.encode(
-            pcmData: audio, sampleRate: 16000, channels: 1,
-            bitsPerSample: 16)
-        let wavPath = "\(dir)/sample-\(tag).wav"
-        try? wav.write(to: URL(fileURLWithPath: wavPath))
-
-        // Structured log line
-        let escaped = { (s: String) -> String in
-            s.replacingOccurrences(of: "\\", with: "\\\\")
-             .replacingOccurrences(of: "\"", with: "\\\"")
-             .replacingOccurrences(of: "\n", with: "\\n")
-        }
-        let json = "{\"n\":\(n)"
-            + ",\"stt\":\"\(escaped(rawSTT))\""
-            + ",\"polished\":\"\(escaped(polishedFull))\"}"
-        Log.debug("[SAMPLE] \(json)")
     }
 
     // MARK: - Cloud Dictation
@@ -2989,12 +2933,13 @@ public actor DictationPipeline: PipelineProviding {
         silenceThreshold: Float,
         t0: CFAbsoluteTime, t1: CFAbsoluteTime, t4: CFAbsoluteTime,
         completeEnteredAt: CFAbsoluteTime,
-        mode: String
+        source: DictationSource
     ) async {
         guard ownsSession(sessionID) else { return }
         let captureMetrics = audioProvider.metrics(
             owner: audioOwner(sessionID))
-        Log.debug("[Pipeline] dictation returned, injecting text: \"\(text)\"")
+        Log.debug(
+            "[Pipeline] Dictation resolved (\(text.utf8.count) bytes), injecting")
 
         let finalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !finalText.isEmpty else {
@@ -3002,15 +2947,14 @@ public actor DictationPipeline: PipelineProviding {
             if let store = micDiagnosticStore, let captureMetrics {
                 await store.record(
                     MicDiagnosticEntry(
-                        deviceName: captureMetrics.deviceName,
-                        proximity: captureMetrics.micProximity.rawValue,
+                        proximity: captureMetrics.micProximity,
                         ambientRMS: captureMetrics.ambientRMS,
                         peakRMS: captureMetrics.peakRMS,
                         gain: captureMetrics.gainFactor,
                         threshold: silenceThreshold,
                         duration: audioBuffer.duration,
                         latency: CFAbsoluteTimeGetCurrent() - t0,
-                        result: "empty"
+                        result: .empty
                     ))
             }
             await resetOwnedSession(sessionID)
@@ -3061,21 +3005,20 @@ public actor DictationPipeline: PipelineProviding {
                 + " total=\(fmt(t5 - t0))"
                 + " e2e=\(fmt(t5 - completeEnteredAt))"
                 + " audio=\(audioKB)KB/\(fmt(audioBuffer.duration))"
-                + " mode=\(mode)"
+                + " mode=\(source.rawValue)"
         )
 
         if let store = micDiagnosticStore, let captureMetrics {
             await store.record(
                 MicDiagnosticEntry(
-                    deviceName: captureMetrics.deviceName,
-                    proximity: captureMetrics.micProximity.rawValue,
+                    proximity: captureMetrics.micProximity,
                     ambientRMS: captureMetrics.ambientRMS,
                     peakRMS: captureMetrics.peakRMS,
                     gain: captureMetrics.gainFactor,
                     threshold: silenceThreshold,
                     duration: audioBuffer.duration,
                     latency: t5 - t0,
-                    result: "ok_\(mode)"
+                    result: source.diagnosticResult
                 ))
         }
 
@@ -3128,15 +3071,14 @@ public actor DictationPipeline: PipelineProviding {
                 {
                     await store.record(
                         MicDiagnosticEntry(
-                            deviceName: captureMetrics.deviceName,
-                            proximity: captureMetrics.micProximity.rawValue,
+                            proximity: captureMetrics.micProximity,
                             ambientRMS: captureMetrics.ambientRMS,
                             peakRMS: captureMetrics.peakRMS,
                             gain: captureMetrics.gainFactor,
                             threshold: silenceThreshold,
                             duration: audioBuffer.duration,
                             latency: CFAbsoluteTimeGetCurrent() - diagnosticStartedAt,
-                            result: "empty"
+                            result: .empty
                         ))
                 }
                 retainRecovery(
@@ -3361,7 +3303,6 @@ public actor DictationPipeline: PipelineProviding {
             throw DictationError.emptyAudio
         }
 
-        streaming.setChunkHandler(nil)
 
         do {
             try Task.checkCancellation()

@@ -10,8 +10,7 @@ import Foundation
 /// final unit and returns the whole polished transcript for one injection.
 ///
 /// A pause bounds each unit so the polish model sees short input and stays
-/// faithful. A chunk handler, if set, mirrors each closed unit for a preview
-/// but never changes what `finishStreaming` returns.
+/// faithful.
 public final class LocalStreamingProvider: LocalAudioReplayProviding,
     @unchecked Sendable
 {
@@ -31,23 +30,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
     private let lock = NSLock()
     private var accumulatedAudio = Data()
     private var currentContext: AppContext = .empty
-
-    private var rawTranscript = ""
-
-    /// Raw STT transcript from the last `finishStreaming()` call.
-    public var lastRawTranscript: String {
-        lock.withLock { rawTranscript }
-    }
-
-    private var polishedTranscript = ""
-
-    /// Full polished transcript (committed chunks plus final tail) from
-    /// the last `finishStreaming()` call. Useful for diagnostics and
-    /// sample collection even when `finishStreaming` returns only the
-    /// tail because chunks were injected live.
-    public var lastPolishedTranscript: String {
-        lock.withLock { polishedTranscript }
-    }
 
     /// Audio byte offset where the current, not-yet-closed unit began.
     private var unitStartByte = 0
@@ -75,19 +57,13 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
     /// Identifies the current recognition session across async cycle work.
     private var sessionGeneration: UInt64 = 0
     private var activeSessionID: DictationSessionID?
-    private var compatibilitySessionID: DictationSessionID?
-    private var compatibilityStartingSessionID: DictationSessionID?
 
     /// Bytes of accumulated audio already fed to the streaming session.
     private var fedBytes = 0
 
     /// Accumulated polished text for all committed sentences. Used as
-    /// preceding context for later chunks and as the full result when no
-    /// chunk handler is set.
+    /// preceding context for later chunks and as part of the full result.
     private var committedPolished = ""
-
-    /// Receives each committed chunk's polished text for live injection.
-    private var chunkHandler: (@Sendable (String) async -> Void)?
 
     private struct Finalization {
         let id: UUID
@@ -143,53 +119,11 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
 
     // MARK: - StreamingDictationProviding
 
-    public func setChunkHandler(
-        _ handler: (@Sendable (String) async -> Void)?
-    ) {
-        lock.withLock { chunkHandler = handler }
-    }
-
     /// Set the energy threshold below which a 20 ms window counts as silence
     /// when detecting the pauses that close units. The pipeline supplies its
     /// ambient-adaptive value per dictation; the default is the speech floor.
     public func setSilenceThreshold(_ threshold: Float) {
         lock.withLock { silenceThreshold = threshold }
-    }
-
-    public func startStreaming(
-        context: AppContext, language: String?, micProximity: MicProximity
-    ) async throws {
-        let sessionID = DictationSessionID()
-        let reserved = lock.withLock {
-            guard compatibilitySessionID == nil,
-                compatibilityStartingSessionID == nil
-            else { return false }
-            compatibilityStartingSessionID = sessionID
-            return true
-        }
-        guard reserved else { throw CancellationError() }
-        do {
-            try await startStreaming(
-                sessionID: sessionID,
-                context: context,
-                language: language,
-                micProximity: micProximity)
-            lock.withLock {
-                if activeSessionID == sessionID {
-                    compatibilitySessionID = sessionID
-                }
-                if compatibilityStartingSessionID == sessionID {
-                    compatibilityStartingSessionID = nil
-                }
-            }
-        } catch {
-            lock.withLock {
-                if compatibilityStartingSessionID == sessionID {
-                    compatibilityStartingSessionID = nil
-                }
-            }
-            throw error
-        }
     }
 
     public func startStreaming(
@@ -224,13 +158,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         }
     }
 
-    public func sendAudio(_ pcmData: Data) async throws {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            throw CancellationError()
-        }
-        try await sendAudio(pcmData, sessionID: sessionID)
-    }
-
     public func sendAudio(
         _ pcmData: Data,
         sessionID: DictationSessionID
@@ -247,13 +174,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         guard accepted else { throw CancellationError() }
     }
 
-    public func finishStreaming() async throws -> String {
-        guard let sessionID = lock.withLock({ compatibilitySessionID }) else {
-            return ""
-        }
-        return try await finishStreaming(sessionID: sessionID)
-    }
-
     public func finishStreaming(
         sessionID: DictationSessionID
     ) async throws -> String {
@@ -262,11 +182,8 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             sessionID: sessionID)
     }
 
-    public func cancelStreaming() async {
-        guard let sessionID = lock.withLock({
-            activeSessionID ?? compatibilitySessionID
-                ?? compatibilityStartingSessionID
-        }) else { return }
+    public func cancelActiveStreaming() async {
+        guard let sessionID = lock.withLock({ activeSessionID }) else { return }
         await cancelStreaming(sessionID: sessionID)
     }
 
@@ -283,7 +200,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             sessionGeneration &+= 1
             finishing = true
             cancelling = true
-            chunkHandler = nil
             return (
                 sessionGeneration, setupOperation, backgroundTask,
                 finalization)
@@ -301,17 +217,8 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         }
         lock.withLock {
             guard sessionGeneration == state.generation else { return }
-            accumulatedAudio = Data()
-            committedPolished = ""
-            committedTranscript = ""
-            carry = ""
-            unitStartByte = 0
-            trailingSilenceBytes = 0
-            rawTranscript = ""
-            polishedTranscript = ""
+            clearSessionContentLocked()
             recognitionSession = nil
-            recognitionError = nil
-            fedBytes = 0
             if setupOperation?.id == state.setup?.id {
                 setupOperation = nil
             }
@@ -322,12 +229,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             finishing = false
             cancelling = false
             activeSessionID = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
-            if compatibilityStartingSessionID == sessionID {
-                compatibilityStartingSessionID = nil
-            }
         }
     }
 
@@ -371,22 +272,13 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
                     // cancellation cannot claim this generation between the
                     // final stale check and model-session allocation.
                     let newSession = try sttEngine.makeRecognitionSession()
-                    accumulatedAudio = Data()
+                    clearSessionContentLocked()
                     currentContext = context
                     if let silenceThreshold {
                         self.silenceThreshold = silenceThreshold
                     }
-                    committedPolished = ""
-                    committedTranscript = ""
-                    carry = ""
-                    unitStartByte = 0
-                    trailingSilenceBytes = 0
-                    rawTranscript = ""
-                    polishedTranscript = ""
                     finishing = false
                     recognitionSession = newSession
-                    recognitionError = nil
-                    fedBytes = 0
                     setupOperation = nil
                     return true
                 }
@@ -459,10 +351,16 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
                 if finalization?.id == operation.id { finalization = nil }
             }
         }
-        let result = try await withTaskCancellationHandler {
-            try await operation.task.value
-        } onCancel: {
-            operation.task.cancel()
+        let result: String
+        do {
+            result = try await withTaskCancellationHandler {
+                try await operation.task.value
+            } onCancel: {
+                operation.task.cancel()
+            }
+        } catch {
+            await cancelStreaming(sessionID: sessionID)
+            throw error
         }
         let cleaned = lock.withLock { () -> Bool in
             guard activeSessionID == sessionID,
@@ -470,15 +368,10 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
                 !cancelling,
                 finalization?.id == operation.id
             else { return false }
+            clearSessionContentLocked()
             activeSessionID = nil
             recognitionSession = nil
             backgroundTask = nil
-            if compatibilitySessionID == sessionID {
-                compatibilitySessionID = nil
-            }
-            if compatibilityStartingSessionID == sessionID {
-                compatibilityStartingSessionID = nil
-            }
             finishing = false
             return true
         }
@@ -516,15 +409,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
 
         guard !snapshot.audio.isEmpty else {
             Log.debug("[LocalStreaming] No audio accumulated")
-            let published = lock.withLock {
-                guard sessionGeneration == generation, !Task.isCancelled else {
-                    return false
-                }
-                polishedTranscript = Self.joinPolished(
-                    snapshot.committed, snapshot.carry)
-                return true
-            }
-            guard published else { throw CancellationError() }
             return Self.joinPolished(snapshot.committed, snapshot.carry)
         }
 
@@ -567,17 +451,7 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
 
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            let published = lock.withLock {
-                guard sessionGeneration == generation, !Task.isCancelled else {
-                    return false
-                }
-                rawTranscript = ""
-                polishedTranscript = Self.joinPolished(
-                    snapshot.committed, snapshot.carry)
-                accumulatedAudio = Data()
-                return true
-            }
-            guard published else { throw CancellationError() }
+            try requireCurrentSession(generation)
             return Self.joinPolished(snapshot.committed, snapshot.carry)
         }
 
@@ -618,20 +492,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         let full = Self.capitalizePronounI(
             Self.joinPolished(snapshot.committed, finalPolished))
 
-        let published = lock.withLock {
-            guard sessionGeneration == generation, !Task.isCancelled else {
-                return false
-            }
-            committedPolished = full
-            committedTranscript = trimmed
-            carry = ""
-            rawTranscript = trimmed
-            polishedTranscript = full
-            accumulatedAudio = Data()
-            return true
-        }
-        guard published else { throw CancellationError() }
-
         Log.debug("[LocalStreaming] Finish (stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
         return full
@@ -651,30 +511,6 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             if recognitionError == nil { recognitionError = error }
             return true
         }
-    }
-
-    // MARK: - Captured Audio Replay
-
-    /// Drive the real unit + polish pipeline deterministically, without the
-    /// wall-clock background timer, to reproduce offline exactly what a live
-    /// dictation produces. Feed `audio` in `stepBytes` increments, running one
-    /// cycle per step (each cycle feeds the new audio, closes a unit when the
-    /// policy fires, polishes it, and appends it internally), then finish and
-    /// return the whole polished transcript.
-    ///
-    /// `stepBytes` mimics how much audio arrives per cycle in production
-    /// (default 96 000 = ~3 s at 16 kHz mono 16-bit, matching the 3 s
-    /// cycle interval). Tests can override it to exercise exact boundaries.
-    func replay(
-        audio: Data, stepBytes: Int = 96_000, context: AppContext = .empty
-    ) async throws -> String {
-        let sessionID = DictationSessionID()
-        return try await replayCapturedAudio(
-            audio,
-            sessionID: sessionID,
-            context: context,
-            stepBytes: stepBytes,
-            silenceThreshold: nil)
     }
 
     /// Replay a retained production capture through the same cycle and unit
@@ -767,6 +603,20 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
 
             try? await Task.sleep(nanoseconds: UInt64(cycleInterval * 1_000_000_000))
         }
+    }
+
+    /// Clear all user content owned by a terminal session. Call with `lock`
+    /// held; session ownership and task handles are cleared by the caller.
+    private func clearSessionContentLocked() {
+        accumulatedAudio = Data()
+        currentContext = .empty
+        committedPolished = ""
+        committedTranscript = ""
+        carry = ""
+        unitStartByte = 0
+        trailingSilenceBytes = 0
+        recognitionError = nil
+        fedBytes = 0
     }
 
     private func runOneCycle(generation: UInt64) async {
@@ -898,11 +748,11 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             boundary == .hardPause
             ? try? sttEngine.makeRecognitionSession() : nil
 
-        let publication = lock.withLock {
-            () -> (Bool, (@Sendable (String) async -> Void)?) in
+        let published = lock.withLock {
+            () -> Bool in
             guard sessionGeneration == generation, !finishing,
                 recognitionError == nil
-            else { return (false, nil) }
+            else { return false }
             if !commit.isEmpty {
                 committedPolished = Self.joinPolished(committedPolished, commit)
             }
@@ -926,16 +776,11 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
                 unitStartByte = fedBytes
             }
             trailingSilenceBytes = 0
-            return (true, chunkHandler)
+            return true
         }
-        guard publication.0 else { return }
+        guard published else { return }
 
         Log.debug("[LocalStreaming] Closed unit (\(unitText.count) chars, reset=\(boundary == .hardPause), stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
-
-        // A preview handler may mirror the unit; it does not gate the return.
-        if let handler = publication.1 {
-            await handler(polished)
-        }
     }
 
     // MARK: - Joining

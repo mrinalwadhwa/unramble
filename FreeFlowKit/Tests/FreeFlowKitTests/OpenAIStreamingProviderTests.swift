@@ -273,13 +273,30 @@ struct OpenAIRealtimeSessionSummaryTests {
         #expect(line.contains("polish=skip"))
     }
 
-    @Test("error field escapes embedded quotes")
-    func errorField() {
+    @Test("summary emits only a closed failure category")
+    func failureField() {
         var t = makeTiming()
         t.endedAt = Date(timeIntervalSince1970: 1000.5)
-        t.error = "connection \"lost\" mid-session"
+        t.failure = .network
         let line = OpenAIStreamingProvider.formatSessionSummary(t)
-        #expect(line.contains("error=\"connection 'lost' mid-session\""))
+        #expect(line.contains("failure=network"))
+        #expect(!line.contains("error="))
+    }
+
+    @Test("arbitrary error descriptions map to closed failure categories")
+    func failureClassification() {
+        let secret = "dictated-secret-\(UUID().uuidString)"
+
+        #expect(
+            OpenAIStreamingProvider.failureKind(
+                for: DictationError.networkError(secret)) == .network)
+        #expect(
+            OpenAIStreamingProvider.failureKind(
+                for: DictationError.requestFailed(
+                    statusCode: 500, message: secret)) == .request)
+        #expect(
+            OpenAIStreamingProvider.failureKind(for: CancellationError())
+                == .cancelled)
     }
 }
 
@@ -1775,16 +1792,17 @@ struct OpenAIRealtimeLiveTests {
             return
         }
         let provider = OpenAIStreamingProvider(apiKey: apiKey)
+        let sessionID = DictationSessionID()
         try await provider.startStreaming(
+            sessionID: sessionID,
             context: AppContext.empty,
             language: "en",
             micProximity: .nearField)
         // Feed half a second of silent audio.
         let pcm = silentPCM(seconds: 0.5)
-        try await provider.sendAudio(pcm)
+        try await provider.sendAudio(pcm, sessionID: sessionID)
         // finishStreaming commits and returns the transcript (likely empty).
-        _ = try await provider.finishStreaming()
-        await provider.cancelStreaming()
+        _ = try await provider.finishStreaming(sessionID: sessionID)
     }
 
     @Test("live: tone signal returns a response")
@@ -1794,14 +1812,15 @@ struct OpenAIRealtimeLiveTests {
             return
         }
         let provider = OpenAIStreamingProvider(apiKey: apiKey)
+        let sessionID = DictationSessionID()
         try await provider.startStreaming(
+            sessionID: sessionID,
             context: AppContext.empty,
             language: "en",
             micProximity: .farField)
         let pcm = toneWAV(seconds: 1.0)
-        try await provider.sendAudio(pcm)
-        _ = try await provider.finishStreaming()
-        await provider.cancelStreaming()
+        try await provider.sendAudio(pcm, sessionID: sessionID)
+        _ = try await provider.finishStreaming(sessionID: sessionID)
     }
 }
 
@@ -1810,12 +1829,12 @@ struct OpenAIRealtimeLiveTests {
 @Suite("OpenAIStreamingProvider – concurrent cancel safety")
 struct ConcurrentCancelSafetyTests {
 
-    @Test("concurrent cancelStreaming calls do not crash")
+    @Test("concurrent active-session cancellation calls do not crash")
     func concurrentCancel() async {
         let provider = OpenAIStreamingProvider(apiKey: "sk-test")
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<10 {
-                group.addTask { await provider.cancelStreaming() }
+                group.addTask { await provider.cancelActiveStreaming() }
             }
         }
         // If we get here without crashing, the lock discipline is correct.
