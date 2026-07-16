@@ -694,8 +694,17 @@ public enum PolishPipeline {
             of: " {2,}", with: " ", options: .regularExpression)
 
         if !casual {
+            // Capitalize the first letter after a sentence terminator, as the
+            // input preprocessing does: the model often leaves a sentence it
+            // split (or one that starts at a unit seam) lowercase.
+            result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
             // Capitalize first letter after paragraph/line breaks.
             result = capitalizeAfterPattern(result, pattern: "(\\n)(\\w)")
+            // Capitalize the standalone pronoun "i" ("i think" -> "I think",
+            // "i'll" -> "I'll"), which the model sometimes leaves lowercase.
+            result = result.replacingOccurrences(
+                of: "(?<![A-Za-z])i(?![A-Za-z])", with: "I",
+                options: .regularExpression)
         }
 
         return result
@@ -1452,8 +1461,21 @@ public enum PolishPipeline {
             // model uppercased it back. Restore only if same first word.
             let inWord = preprocessed.prefix(while: { $0.isLetter })
             let outWord = text.prefix(while: { $0.isLetter })
-            if inWord.lowercased() == outWord.lowercased() {
+            // Never lowercase the pronoun "I", even mid-sentence.
+            if inWord.lowercased() == outWord.lowercased(),
+                outWord.lowercased() != "i" {
                 return outFirst.lowercased() + text.dropFirst()
+            }
+        }
+
+        if !noPreceding && inFirst.isUppercase && outFirst.isLowercase {
+            // Preprocessing capitalized the first word (preceding ended at a
+            // sentence boundary — e.g. this unit starts a new sentence across a
+            // seam), but the model lowercased it. Restore only if same first word.
+            let inWord = preprocessed.prefix(while: { $0.isLetter })
+            let outWord = text.prefix(while: { $0.isLetter })
+            if inWord.lowercased() == outWord.lowercased() {
+                return outFirst.uppercased() + text.dropFirst()
             }
         }
 
