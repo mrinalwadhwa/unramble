@@ -890,6 +890,14 @@ public enum PolishPipeline {
             // names that should always be capitalized the same way. This
             // is additive only — never removes or transforms content.
             result = capitalizeKnownTerms(result)
+
+            // Capitalize the first letter after a sentence terminator or a
+            // line break. The model frequently lowercases its output and
+            // leaves a sentence it kept mid-string (or one that begins at a
+            // unit seam) uncapitalized. The input preprocessing already does
+            // this, so mirror it on the output.
+            result = capitalizeAfterPattern(result, pattern: "([.!?]\\s+)(\\w)")
+            result = capitalizeAfterPattern(result, pattern: "(\\n)(\\w)")
         }
 
         return result

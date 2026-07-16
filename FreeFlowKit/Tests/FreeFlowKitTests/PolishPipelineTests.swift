@@ -796,6 +796,42 @@ struct NormalizeFormattingTests {
         #expect(PolishPipeline.normalizeFormatting(
             "Usage is at 85%.") == "Usage is at 85%.")
     }
+
+    @Test("capitalize sentence start after period")
+    func capitalizeSentenceStart() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "on the product side. onboarding is live.")
+            == "on the product side. Onboarding is live.")
+    }
+
+    @Test("capitalize sentence start after question mark")
+    func capitalizeSentenceStartQuestion() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "are we clear? on timelines we are behind.")
+            == "are we clear? On timelines we are behind.")
+    }
+
+    @Test("capitalize sentence start after line break")
+    func capitalizeSentenceStartLineBreak() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "first line.\nsecond line.")
+            == "first line.\nSecond line.")
+    }
+
+    @Test("decimal not treated as sentence boundary")
+    func decimalNotSentenceBoundary() {
+        // The period in "2.5" has no following whitespace, so the next word
+        // must not be capitalized.
+        #expect(PolishPipeline.normalizeFormatting(
+            "we shipped 2.5 million requests")
+            == "we shipped 2.5 million requests")
+    }
+
+    @Test("already-capitalized sentence start unchanged")
+    func capitalizedSentenceStartUnchanged() {
+        let input = "The migration is done. Everything is stable."
+        #expect(PolishPipeline.normalizeFormatting(input) == input)
+    }
 }
 
 // MARK: - buildUserPrompt
