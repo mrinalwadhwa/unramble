@@ -692,6 +692,10 @@
                 margin-bottom: 1.5rem;
             }
 
+            .mic-level-container.is-unavailable .mic-level-bar {
+                opacity: 0.45;
+            }
+
             .mic-level-label {
                 display: flex;
                 align-items: center;
@@ -1034,7 +1038,7 @@
             <section class="step-section step-hidden" data-step="microphone">
                 <div class="step-icon step-icon-warm"><img data-symbol="mic.circle" /></div>
                 <h1>Microphone access</h1>
-                <p>FreeFlow needs microphone access to listen when you dictate.</p>
+                <p>FreeFlow keeps your microphone ready while it is running so dictation includes speech from the moment you press the shortcut. macOS will show its microphone indicator.</p>
 
                 <div id="microphone-status" class="permission-status"></div>
 
@@ -1060,12 +1064,12 @@
                     <select id="mic-select"></select>
                 </div>
 
-                <div class="mic-level-container">
+                <div id="mic-level-container" class="mic-level-container is-unavailable">
                     <div class="mic-level-label">
                         <span class="mic-icon">&#127908;</span>
                         <span>Speak to test your microphone</span>
                     </div>
-                    <div class="mic-level-bar">
+                    <div id="mic-level-bar" class="mic-level-bar" aria-disabled="true">
                         <div id="mic-level-fill" class="mic-level-fill"></div>
                     </div>
                 </div>
@@ -1251,6 +1255,7 @@
                     accessibility: "unknown",
                     microphone: "unknown",
                 };
+                var micPreviewAvailable = false;
 
                 // ----------------------------------------------------------------
                 // Initialization
@@ -1274,6 +1279,7 @@
                     bridge.on("permissionStatus", handlePermissionStatus);
                     bridge.on("microphoneList", handleMicrophoneList);
                     bridge.on("microphoneSelected", handleMicrophoneSelected);
+                    bridge.on("micPreviewAvailability", handleMicPreviewAvailability);
                     bridge.on("audioLevel", handleAudioLevel);
                     bridge.on("dictationResult", handleDictationResult);
 
@@ -1334,7 +1340,7 @@
                     // Stop mic preview when leaving microphone-select step.
                     if (prevIndex >= 0 && steps[prevIndex] === "microphone-select") {
                         bridge.send("stopMicPreview");
-                        resetMicLevel();
+                        setMicPreviewAvailable(false);
                     }
 
                     var delay = prevIndex >= 0 ? 200 : 0;
@@ -1396,6 +1402,7 @@
                             break;
 
                         case "microphone-select":
+                            setMicPreviewAvailable(false);
                             bridge.send("listMicrophones");
                             bridge.send("startMicPreview");
                             break;
@@ -1717,6 +1724,10 @@
                 }
 
                 function handleAudioLevel(data) {
+                    if (!micPreviewAvailable) {
+                        resetMicLevel();
+                        return;
+                    }
                     var level = (data && data.level) || 0;
                     var fill = document.getElementById("mic-level-fill");
                     if (!fill) return;
@@ -1739,11 +1750,29 @@
                     }
                 }
 
+                function handleMicPreviewAvailability(data) {
+                    setMicPreviewAvailable(!!(data && data.available));
+                }
+
+                function setMicPreviewAvailable(available) {
+                    micPreviewAvailable = available;
+                    var container = document.getElementById("mic-level-container");
+                    var bar = document.getElementById("mic-level-bar");
+                    if (container) {
+                        container.classList.toggle("is-unavailable", !available);
+                    }
+                    if (bar) {
+                        bar.setAttribute("aria-disabled", available ? "false" : "true");
+                    }
+                    if (!available) resetMicLevel();
+                }
+
                 function onMicSelectChange() {
                     var select = document.getElementById("mic-select");
                     if (!select) return;
                     var id = parseInt(select.value, 10);
                     if (!isNaN(id)) {
+                        setMicPreviewAvailable(false);
                         bridge.send("selectMicrophone", { id: id });
                     }
                 }

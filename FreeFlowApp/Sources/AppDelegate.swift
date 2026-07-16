@@ -11,8 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let coordinator = RecordingCoordinator()
     private let permissionProvider = MicrophonePermissionProvider()
     private let hotkeyProvider = CGEventTapHotkeyProvider()
+    private let modeHotkeyProvider = CGEventTapHotkeyProvider()
     private var hotkeyPipelineDriver: HotkeyPipelineDriver?
     private var hotkeyPipelineIdentity: ObjectIdentifier?
+    private var dictationHotkeyPublicationRequested = false
+    private var hotkeyReRegistrationGeneration: UInt = 0
+    private var hotkeyReRegistrationTask: Task<Void, Never>?
+    private var registeredModeHotkeyBinding: ShortcutBinding?
     private let transcriptBuffer = TranscriptBuffer()
     private let textInjector = SerializedTextInjector(base: AppTextInjector())
     private let audioDeviceProvider = CoreAudioDeviceProvider()
@@ -23,6 +28,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localModelPreloadTask: Task<Void, Never>?
     private let pipelineRebuildQueue = AsyncLatestOperationQueue()
     private var pipelineRebuildTask: Task<Void, Never>?
+    private var modeTransition = DictationModeTransition(
+        effectiveMode: Settings.shared.dictationMode)
+    private var modeSwitchTask: Task<Void, Never>?
+    private var modeSwitchRequest: DictationModeTransition.Request?
+    private var alwaysReadyPreviewLease: MicrophoneCaptureLease?
+    private var alwaysReadyPreviewTask: Task<Void, Never>?
+    private var isAlwaysReadyPreviewAvailable = false
+    private var dictationHotkeyMaintenanceIDs: Set<UUID> = []
+    private var terminationCaptureDrainTask: Task<Void, Never>?
+    private var didFenceApplicationTermination = false
+    private var didDrainCaptureForTermination = false
 
     private struct DetachedPipelineGeneration: Sendable {
         let pipeline: DictationPipeline?
@@ -52,20 +68,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionController: PermissionController?
     private var onboardingController: OnboardingController?
     private var settingsController: SettingsController?
-    private var privateModeMonitor: Any?
-    private var privateModeLocalMonitor: Any?
 
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         purgeLegacyV01State()
+        if modeTransition.effectiveMode == .local,
+            !DictationMode.isLocalAvailable
+        {
+            modeTransition = DictationModeTransition(effectiveMode: .cloud)
+            Settings.shared.dictationMode = .cloud
+        }
         setupMenuBar()
-        setupPipeline()
+        setupPipeline(mode: modeTransition.effectiveMode)
         setupUpdater()
         setupInAppMessages()
         setupSettings()
         setupMenuBarState()
-        setupPrivateModeShortcut()
         determineLaunchFlow()
     }
 
@@ -106,16 +125,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        if didDrainCaptureForTermination {
+            return .terminateNow
+        }
+
+        fenceApplicationForTermination()
+        guard terminationCaptureDrainTask == nil else {
+            return .terminateLater
+        }
+
+        let captureCoordinator = microphoneCaptureCoordinator
+        let captureProvider = audioProvider
+        terminationCaptureDrainTask = Task { @MainActor [weak self] in
+            await captureCoordinator.shutdown()
+            captureProvider.shutdown()
+
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            self.didDrainCaptureForTermination = true
+            self.terminationCaptureDrainTask = nil
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        fenceApplicationForTermination()
+        if !didDrainCaptureForTermination {
+            // Fallback for termination paths that bypass the deferred reply.
+            audioProvider.shutdown()
+        }
+        soundFeedbackProvider.shutdown()
+        onboardingController?.dismissWindow()
+        settingsController?.closeWindow()
+    }
+
+    private func fenceApplicationForTermination() {
+        guard !didFenceApplicationTermination else { return }
+        didFenceApplicationTermination = true
         pipelineRebuildQueue.invalidate()
         pipelineRebuildTask?.cancel()
+        modeSwitchTask?.cancel()
+        hotkeyReRegistrationGeneration &+= 1
+        hotkeyReRegistrationTask?.cancel()
+        alwaysReadyPreviewTask?.cancel()
         localModelPreloadTask?.cancel()
         unregisterHotkey()
+        unregisterModeHotkey()
         hudController?.stop()
         menuBarController?.stop()
         permissionController?.stop()
-        audioProvider.shutdown()
-        soundFeedbackProvider.shutdown()
         onboardingController?.dismissWindow()
         settingsController?.closeWindow()
     }
@@ -128,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// permissions. Cloud mode requires a key — if one is stored, proceed;
     /// otherwise show onboarding.
     private func determineLaunchFlow() {
-        if Settings.shared.dictationMode == .local && DictationMode.isLocalAvailable {
+        if modeTransition.effectiveMode == .local && DictationMode.isLocalAvailable {
             Log.debug("[AppDelegate] Local mode, checking permissions")
             checkPermissions()
         } else if ServiceConfig.shared.isConfigured {
@@ -143,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Onboarding
 
     private func showOnboarding() {
+        guard !didFenceApplicationTermination else { return }
         menuBarController?.onReopenOnboarding = { [weak self] in
             self?.onboardingController?.showWindow()
         }
@@ -160,19 +225,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         controller.permissionProvider = permissionProvider
         controller.audioDeviceProvider = audioDeviceProvider
-        controller.audioPreviewProvider = audioProvider
-        controller.soundFeedbackProvider = soundFeedbackProvider
+        controller.microphoneCaptureCoordinator = microphoneCaptureCoordinator
 
         controller.onRegisterHotkey = { [weak self] in
-            // Rebuild the pipeline so it picks up the API key or
-            // dictation mode the user just configured in onboarding.
-            self?.rebuildPipeline { [weak self] in
+            guard let self, !self.didFenceApplicationTermination else {
+                return
+            }
+            let requestedMode = Settings.shared.dictationMode
+            let afterPublication: @MainActor @Sendable () -> Void = {
+                [weak self] in
                 self?.startOnboardingDictationObserver()
+            }
+            if requestedMode != self.modeTransition.effectiveMode {
+                _ = self.requestDictationMode(
+                    requestedMode, afterPublication: afterPublication)
+            } else if requestedMode == .cloud {
+                // The launch-time cloud client may predate key entry.
+                self.rebuildPipeline(afterReplacement: afterPublication)
+            } else {
+                self.registerHotkey()
+                afterPublication()
             }
         }
 
-        controller.onComplete = { [weak self] in
-            guard let self else { return }
+        controller.onComplete = { [weak self] credentialedMode in
+            guard let self, !self.didFenceApplicationTermination else {
+                return
+            }
             Log.debug("[AppDelegate] Onboarding complete")
             self.stopOnboardingDictationObserver()
             self.onboardingController = nil
@@ -180,22 +259,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.menuBarController?.onReopenOnboarding = nil
 
             if let recoveryPipeline = self.pendingSessionRecoveryPipeline {
-                self.pendingSessionRecoveryPipeline = nil
                 Task { [weak self, recoveryPipeline] in
                     await recoveryPipeline.presentRecoveryAfterAuthentication()
                     await MainActor.run {
                         guard let self,
                             self.pipeline === recoveryPipeline,
-                            self.pendingSessionRecoveryPipeline == nil
+                            self.pendingSessionRecoveryPipeline === recoveryPipeline
                         else { return }
+                        self.pendingSessionRecoveryPipeline = nil
                         self.registerHotkey()
                     }
                 }
                 return
             }
 
-            self.rebuildPipeline()
-            self.checkPermissions()
+            if let credentialedMode {
+                _ = self.requestDictationMode(
+                    credentialedMode,
+                    afterPublication: { [weak self] in
+                        self?.checkPermissions()
+                    })
+                return
+            }
+
+            let requestedMode = Settings.shared.dictationMode
+            if requestedMode != self.modeTransition.effectiveMode {
+                _ = self.requestDictationMode(
+                    requestedMode,
+                    afterPublication: { [weak self] in
+                        self?.checkPermissions()
+                    })
+            } else {
+                self.checkPermissions()
+            }
         }
 
         onboardingController = controller
@@ -296,6 +392,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Pipeline
 
     private let audioProvider = AudioCaptureProvider()
+    private lazy var microphoneCaptureCoordinator =
+        MicrophoneCaptureCoordinator(
+            audioProvider: audioProvider,
+            audioDeviceProvider: audioDeviceProvider,
+            withDeviceSelectionTransaction: { [weak self] operation in
+                let maintenanceID = UUID()
+                guard let pipeline = await MainActor.run(body: {
+                    [weak self] () -> DictationPipeline? in
+                    guard let self, let pipeline = self.pipeline else {
+                        return nil
+                    }
+                    self.beginDictationHotkeyMaintenance(id: maintenanceID)
+                    return pipeline
+                }) else {
+                    throw MicrophoneCaptureCoordinatorError
+                        .deviceSelectionUnavailable
+                }
+                do {
+                    try await pipeline.withQuiescentCaptureMaintenance(operation)
+                    await MainActor.run { [weak self] in
+                        self?.finishDictationHotkeyMaintenance(id: maintenanceID)
+                    }
+                } catch {
+                    await MainActor.run { [weak self] in
+                        self?.finishDictationHotkeyMaintenance(id: maintenanceID)
+                    }
+                    throw error
+                }
+            })
 
     /// Resolve a model directory path, checking the app bundle first,
     /// then Application Support. Returns the directory path as a String,
@@ -321,7 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    private func setupPipeline() {
+    private func setupPipeline(mode: DictationMode) {
         audioProvider.setAudioDeviceProvider(audioDeviceProvider)
         audioProvider.setSoundFeedbackProvider(soundFeedbackProvider)
         audioDeviceProvider.setAudioCaptureProvider(audioProvider)
@@ -330,7 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let backend: DictationBackend
         let onSessionExpired: (@Sendable () -> Void)?
 
-        if Settings.shared.dictationMode == .local {
+        if mode == .local {
             // Local mode: on-device STT + fine-tuned MLX LLM polish.
             #if arch(arm64)
             Log.debug("[AppDelegate] Using local models (STT + MLX)")
@@ -405,8 +530,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        let isLocal = Settings.shared.dictationMode == .local
-        Log.debug("[AppDelegate] setupPipeline: isLocal=\(isLocal), mode=\(Settings.shared.dictationMode.rawValue)")
+        let isLocal = mode == .local
+        Log.debug(
+            "[AppDelegate] setupPipeline: isLocal=\(isLocal), mode=\(mode.rawValue)")
         let newPipeline = DictationPipeline(
             audioProvider: audioProvider,
             contextProvider: AXAppContextProvider(),
@@ -463,7 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return driver.transferHeldSession(completion)
         }
-        controller.viewModel.isPrivateMode = Settings.shared.dictationMode == .local
+        controller.viewModel.isPrivateMode = modeTransition.effectiveMode == .local
         hudController = controller
     }
 
@@ -478,6 +604,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pipeline: pipeline,
             transcriptBuffer: transcriptBuffer,
             audioDeviceProvider: audioDeviceProvider,
+            microphoneCaptureCoordinator: microphoneCaptureCoordinator,
             updaterService: updaterService,
             micDiagnosticStore: micDiagnosticStore,
             shortcuts: .default
@@ -495,72 +622,158 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onTogglePrivateMode = { [weak self] in
             self?.togglePrivateMode()
         }
-    }
 
-    /// Register a global keyboard shortcut to toggle private mode.
-    /// Works from any app since it uses NSEvent global monitoring.
-    /// Reads the binding from Settings so it respects user customization.
-    private func setupPrivateModeShortcut() {
-        guard DictationMode.isLocalAvailable else { return }
-
-        // Remove any existing monitors to avoid duplicates.
-        if let monitor = privateModeMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        if let monitor = privateModeLocalMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-
-        privateModeMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: .keyDown
-        ) { [weak self] event in
-            let binding = Settings.shared.privateModeShortcutBinding
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if binding.matches(keyCode: event.keyCode, modifierFlags: flags.rawValue) {
-                Task { @MainActor in
-                    self?.togglePrivateMode()
-                }
-            }
-        }
-
-        privateModeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
-            [weak self] event in
-            let binding = Settings.shared.privateModeShortcutBinding
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if binding.matches(keyCode: event.keyCode, modifierFlags: flags.rawValue) {
-                Task { @MainActor in
-                    self?.togglePrivateMode()
-                }
-                return nil
-            }
-            return event
-        }
+        updateModePresentation()
     }
 
     /// Toggle between cloud and private (local) dictation mode.
-    ///
-    /// Switching to cloud requires an API key. If none is stored,
-    /// show the onboarding flow so the user can enter one.
     private func togglePrivateMode() {
-        let isCurrentlyLocal = Settings.shared.dictationMode == .local
+        let newMode: DictationMode = modeTransition.effectiveMode == .local
+            ? .cloud : .local
+        requestDictationMode(newMode)
+    }
 
-        if isCurrentlyLocal && !ServiceConfig.shared.isConfigured {
-            // No API key — show just the API key entry screen.
-            Log.debug("[AppDelegate] Private mode toggle: no API key, prompting")
-            let controller = ensureOnboardingController()
-            controller.showAPIKeyEntry()
-            return
+    /// Admit one mode request, then preserve every operation already owned by
+    /// the old generation before replacing it. Persisted/UI mode remains tied
+    /// to the installed backend until the new pipeline is synchronously
+    /// published on the main actor.
+    @discardableResult
+    private func requestDictationMode(
+        _ newMode: DictationMode,
+        afterPublication: (@MainActor @Sendable () -> Void)? = nil
+    ) -> Bool {
+        guard !didFenceApplicationTermination else { return false }
+        guard pendingSessionRecoveryPipeline == nil else {
+            Log.debug(
+                "[AppDelegate] Mode request ignored during session recovery")
+            return false
+        }
+        guard let currentPipeline = pipeline else {
+            Log.debug("[AppDelegate] Mode request ignored without a pipeline")
+            return false
         }
 
-        let newMode: DictationMode = isCurrentlyLocal ? .cloud : .local
-        Settings.shared.dictationMode = newMode
-        Log.debug("[AppDelegate] Private mode toggled: \(newMode.rawValue)")
+        let isAvailable = newMode == .local
+            ? DictationMode.isLocalAvailable
+            : ServiceConfig.shared.isConfigured
+        switch modeTransition.request(newMode, isAvailable: isAvailable) {
+        case .unchanged:
+            afterPublication?()
+            return true
+        case .busy:
+            Log.debug("[AppDelegate] Mode request ignored while replacement is pending")
+            return false
+        case .unavailable:
+            if newMode == .cloud {
+                Log.debug("[AppDelegate] Cloud mode requires an API key")
+                showCloudCredentialEntry()
+            }
+            return false
+        case .accepted(let request):
+            modeSwitchRequest = request
+            updateModePresentation()
 
-        rebuildPipeline()
+            let switchTask = Task { @MainActor [weak self, currentPipeline] in
+                await currentPipeline.sealForReplacement()
+                guard let self else { return }
+                guard !Task.isCancelled,
+                    self.pipeline === currentPipeline,
+                    self.modeSwitchRequest == request,
+                    self.modeTransition.requestedRequest == request
+                else {
+                    if self.pipeline === currentPipeline {
+                        _ = await currentPipeline.reopenAfterFailedReplacement()
+                    }
+                    return
+                }
 
-        let isPrivate = newMode == .local
-        menuBarController?.setPrivateMode(isPrivate)
-        hudController?.viewModel.isPrivateMode = isPrivate
+                // The credential may have been removed while a live dictation
+                // was draining. Reopen this exact quiescent generation instead
+                // of leaving working local dictation permanently sealed.
+                if request.mode == .cloud,
+                    !ServiceConfig.shared.isConfigured
+                {
+                    let reopened = await currentPipeline
+                        .reopenAfterFailedReplacement()
+                    guard self.pipeline === currentPipeline,
+                        self.modeSwitchRequest == request,
+                        self.modeTransition.requestedRequest == request
+                    else { return }
+                    _ = self.modeTransition.fail(request)
+                    self.clearModeSwitchTracking(request)
+                    self.updateModePresentation()
+                    if reopened {
+                        self.showCloudCredentialEntry()
+                    }
+                    return
+                }
+
+                guard
+                    let oldGeneration = self.detachPipelineGeneration(
+                        ifCurrent: currentPipeline)
+                else {
+                    _ = self.modeTransition.fail(request)
+                    self.clearModeSwitchTracking(request)
+                    self.updateModePresentation()
+                    return
+                }
+
+                let rebuildTask = self.pipelineRebuildQueue.submit(
+                    cleanup: { await oldGeneration.drain() },
+                    replacement: { [weak self] in
+                        guard let self,
+                            !self.didFenceApplicationTermination,
+                            self.modeSwitchRequest == request,
+                            self.modeTransition.requestedRequest == request
+                        else { return }
+
+                        self.setupPipeline(mode: request.mode)
+                        guard self.modeTransition.publish(request) else {
+                            return
+                        }
+                        Settings.shared.dictationMode = request.mode
+                        self.finishPipelinePublication()
+                        self.clearModeSwitchTracking(request)
+                        self.updateModePresentation()
+                        afterPublication?()
+                    })
+                self.pipelineRebuildTask = rebuildTask
+                await rebuildTask.value
+            }
+            modeSwitchTask = switchTask
+            Log.debug("[AppDelegate] Mode replacement requested: \(newMode.rawValue)")
+            return true
+        }
+    }
+
+    private func showCloudCredentialEntry() {
+        guard !didFenceApplicationTermination else { return }
+        let controller = ensureOnboardingController()
+        controller.showAPIKeyEntry()
+    }
+
+    private func clearModeSwitchTracking(
+        _ request: DictationModeTransition.Request
+    ) {
+        guard modeSwitchRequest == request else { return }
+        modeSwitchTask = nil
+        modeSwitchRequest = nil
+    }
+
+    private func cancelPendingModeSwitch() {
+        modeSwitchTask?.cancel()
+        modeSwitchTask = nil
+        modeSwitchRequest = nil
+        modeTransition.cancelPendingRequest()
+        updateModePresentation()
+    }
+
+    private func updateModePresentation() {
+        menuBarController?.setDictationMode(
+            effective: modeTransition.effectiveMode,
+            requested: modeTransition.requestedMode)
+        hudController?.viewModel.isPrivateMode =
+            modeTransition.effectiveMode == .local
     }
 
     /// Clear the stored API key and return to onboarding.
@@ -570,6 +783,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///   skip the reset if onboarding is already showing (prevents 401
     ///   errors from reloading the page during the try-it step).
     private func resetAPIKey(force: Bool = false) {
+        guard !didFenceApplicationTermination else { return }
         if !force && onboardingController != nil {
             Log.debug("[AppDelegate] Reset API key requested (ignored — onboarding active)")
             return
@@ -577,6 +791,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Log.debug("[AppDelegate] Reset API key requested (force=\(force))")
         pendingSessionRecoveryPipeline = nil
+        cancelPendingModeSwitch()
 
         // Dismiss any existing onboarding window.
         onboardingController?.dismissWindow()
@@ -603,6 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Replace an expired cloud credential without retiring the pipeline that
     /// owns the complete recovery WAV. API clients read the new key lazily.
     private func beginSessionRecovery() {
+        guard !didFenceApplicationTermination else { return }
         guard pendingSessionRecoveryPipeline == nil else { return }
         guard let pipeline else {
             resetAPIKey()
@@ -612,6 +828,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.debug("[AppDelegate] Beginning API key recovery")
         pendingSessionRecoveryPipeline = pipeline
         unregisterHotkey()
+        unregisterModeHotkey()
         menuBarController?.setHotkeyRegistered(false)
         keychain.deleteOpenAIAPIKey()
 
@@ -629,14 +846,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupSettings() {
         let controller = SettingsController()
         controller.audioDeviceProvider = audioDeviceProvider
-        controller.audioPreviewProvider = audioProvider
-        controller.soundFeedbackProvider = soundFeedbackProvider
+        controller.microphoneCaptureCoordinator = microphoneCaptureCoordinator
         controller.pipeline = pipeline
         controller.onHotkeyChanged = { [weak self] in
             self?.reRegisterHotkey()
         }
-        controller.onDictationModeChanged = { [weak self] in
-            self?.rebuildPipeline()
+        controller.onModeShortcutChanged = { [weak self] in
+            self?.reRegisterModeHotkey()
+        }
+        controller.onDictationModeChanged = { [weak self] mode in
+            self?.requestDictationMode(mode)
         }
         controller.onResetApp = { [weak self] in
             self?.resetAPIKey(force: true)
@@ -646,30 +865,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Show the settings window.
     private func showSettings() {
+        guard !didFenceApplicationTermination else { return }
         settingsController?.showWindow()
     }
 
     /// Re-register the hotkey after settings change.
     private func reRegisterHotkey() {
-        unregisterHotkey()
-        registerHotkey()
+        guard !didFenceApplicationTermination else { return }
+        hotkeyReRegistrationTask?.cancel()
+        hotkeyReRegistrationGeneration &+= 1
+        let generation = hotkeyReRegistrationGeneration
+        let maintenanceID = UUID()
+        beginDictationHotkeyMaintenance(id: maintenanceID)
+
+        guard let currentPipeline = pipeline else {
+            finishDictationHotkeyMaintenance(id: maintenanceID)
+            return
+        }
+
+        hotkeyReRegistrationTask = Task { @MainActor [weak self] in
+            do {
+                try await currentPipeline.withQuiescentCaptureMaintenance {}
+            } catch {
+                guard let self else { return }
+                self.finishDictationHotkeyMaintenance(id: maintenanceID)
+                if self.hotkeyReRegistrationGeneration == generation {
+                    self.hotkeyReRegistrationTask = nil
+                }
+                Log.debug(
+                    "[AppDelegate] Dictation hotkey re-registration skipped: \(error)")
+                return
+            }
+
+            guard let self else { return }
+            guard self.hotkeyReRegistrationGeneration == generation,
+                self.pipeline === currentPipeline
+            else {
+                self.finishDictationHotkeyMaintenance(id: maintenanceID)
+                return
+            }
+
+            // The old driver is now quiescent. Replace its physical event tap
+            // while the AppDelegate fence still blocks publication.
+            self.unpublishDictationHotkey()
+            self.finishDictationHotkeyMaintenance(id: maintenanceID)
+            self.hotkeyReRegistrationTask = nil
+        }
+    }
+
+    private func reRegisterModeHotkey() {
+        guard !didFenceApplicationTermination else { return }
+        unregisterModeHotkey()
+        registerModeHotkey()
     }
 
     /// Rebuild the pipeline after dictation mode changes.
     private func rebuildPipeline(
         afterReplacement: (@MainActor @Sendable () -> Void)? = nil
     ) {
-        Log.debug("[AppDelegate] Rebuilding pipeline for mode: \(Settings.shared.dictationMode.rawValue)")
+        guard !didFenceApplicationTermination else { return }
+        let effectiveMode = modeTransition.effectiveMode
+        Log.debug(
+            "[AppDelegate] Rebuilding effective pipeline: \(effectiveMode.rawValue)")
         pendingSessionRecoveryPipeline = nil
+        cancelPendingModeSwitch()
 
         let oldGeneration = detachPipelineGeneration()
         pipelineRebuildTask = pipelineRebuildQueue.submit(
             cleanup: { await oldGeneration.drain() },
             replacement: { [weak self] in
-                self?.finishPipelineRebuild()
+                self?.finishPipelineRebuild(mode: effectiveMode)
                 afterReplacement?()
             }
         )
+    }
+
+    private func detachPipelineGeneration(
+        ifCurrent expectedPipeline: DictationPipeline
+    ) -> DetachedPipelineGeneration? {
+        guard pipeline === expectedPipeline else { return nil }
+        return detachPipelineGeneration()
     }
 
     private func detachPipelineGeneration() -> DetachedPipelineGeneration {
@@ -698,13 +973,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func finishPipelineRebuild() {
-        setupPipeline()
+    private func finishPipelineRebuild(mode: DictationMode) {
+        setupPipeline(mode: mode)
+        finishPipelinePublication()
+    }
+
+    private func finishPipelinePublication() {
+        guard !didFenceApplicationTermination else { return }
         setupHUD()
         settingsController?.pipeline = pipeline
         menuBarController?.setPipeline(pipeline)
-        menuBarController?.setPrivateMode(
-            Settings.shared.dictationMode == .local)
+        updateModePresentation()
 
         // Register only after the latest replacement has been published.
         registerHotkey()
@@ -713,6 +992,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Permissions
 
     private func checkPermissions() {
+        guard !didFenceApplicationTermination else { return }
         let controller = PermissionController(permissionProvider: permissionProvider)
         controller.onPermissionsGranted = { [weak self] in
             self?.registerHotkey()
@@ -724,25 +1004,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Hotkey
 
     private func unregisterHotkey() {
+        dictationHotkeyPublicationRequested = false
+        unpublishDictationHotkey()
+    }
+
+    private func unpublishDictationHotkey() {
         hotkeyPipelineDriver?.invalidate()
         hotkeyPipelineDriver = nil
         hotkeyPipelineIdentity = nil
         hotkeyProvider.unregister()
+        menuBarController?.setHotkeyRegistered(false)
+    }
+
+    /// Availability and device maintenance fence only new presses. Keeping the
+    /// event tap and driver alive preserves release delivery for a press that
+    /// crossed the admission boundary before the fence.
+    private func suspendDictationHotkeyAdmission() {
+        hotkeyPipelineDriver?.suspendNewPresses()
+        menuBarController?.setHotkeyRegistered(false)
+    }
+
+    private func beginDictationHotkeyMaintenance(id: UUID) {
+        dictationHotkeyMaintenanceIDs.insert(id)
+        suspendDictationHotkeyAdmission()
+    }
+
+    private func finishDictationHotkeyMaintenance(id: UUID) {
+        guard dictationHotkeyMaintenanceIDs.remove(id) != nil else { return }
+        guard dictationHotkeyMaintenanceIDs.isEmpty else { return }
+        publishDictationHotkeyIfReady()
+    }
+
+    private func unregisterModeHotkey() {
+        registeredModeHotkeyBinding = nil
+        modeHotkeyProvider.unregister()
+    }
+
+    private func registerModeHotkey() {
+        guard !didFenceApplicationTermination else { return }
+        guard DictationMode.isLocalAvailable else { return }
+        guard pendingSessionRecoveryPipeline == nil else { return }
+        let binding = Settings.shared.privateModeShortcutBinding
+        guard registeredModeHotkeyBinding != binding else { return }
+
+        unregisterModeHotkey()
+        let setting = HotkeySetting.modifierPlusKey(
+            modifierFlags: binding.standardModifierFlags,
+            keyCode: binding.keyCode,
+            keyName: binding.label)
+        do {
+            try modeHotkeyProvider.register(with: setting) {
+                [weak self] event in
+                guard event == .pressed else { return }
+                Task { @MainActor [weak self] in
+                    self?.togglePrivateMode()
+                }
+            }
+            registeredModeHotkeyBinding = binding
+            Log.debug(
+                "[AppDelegate] Mode shortcut registered (\(binding.label))")
+        } catch {
+            modeHotkeyProvider.unregister()
+            Log.debug(
+                "[AppDelegate] Failed to register mode shortcut: \(error)")
+        }
     }
 
     private func registerHotkey() {
+        guard !didFenceApplicationTermination else { return }
+        dictationHotkeyPublicationRequested = true
+        registerModeHotkey()
+        ensureAlwaysReadyMicrophoneCapture()
+        publishDictationHotkeyIfReady()
+    }
+
+    private func publishDictationHotkeyIfReady() {
+        guard !didFenceApplicationTermination else { return }
+        guard dictationHotkeyPublicationRequested else { return }
+        guard dictationHotkeyMaintenanceIDs.isEmpty else {
+            suspendDictationHotkeyAdmission()
+            Log.debug(
+                "[AppDelegate] Dictation hotkey waiting for microphone maintenance")
+            return
+        }
+        guard isAlwaysReadyPreviewAvailable else {
+            suspendDictationHotkeyAdmission()
+            Log.debug(
+                "[AppDelegate] Dictation hotkey waiting for continuous microphone capture")
+            return
+        }
         guard let pipeline else {
             Log.debug("[AppDelegate] Pipeline not initialized, cannot register hotkey")
             return
         }
         let pipelineIdentity = ObjectIdentifier(pipeline)
-        if hotkeyPipelineDriver != nil {
-            guard hotkeyPipelineIdentity != pipelineIdentity else {
+        if let existingDriver = hotkeyPipelineDriver {
+            if hotkeyPipelineIdentity == pipelineIdentity,
+                existingDriver.resumeNewPresses()
+            {
+                menuBarController?.setHotkeyRegistered(true)
                 Log.debug(
-                    "[AppDelegate] Hotkey already registered for current pipeline")
+                    "[AppDelegate] Dictation hotkey admission available")
                 return
             }
-            unregisterHotkey()
+            unpublishDictationHotkey()
         }
 
         // Create the HUD on first hotkey registration.
@@ -755,6 +1120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menuRef = menuBarController
         let driver = HotkeyPipelineDriver(
             pipeline: pipelineRef,
+            canAdmitPress: { [audioProvider] pressHostTime in
+                audioProvider.canAdmitDictationPress(at: pressHostTime)
+            },
             heldSessionAccepted: { [weak hudRef] heldSession in
                 await MainActor.run {
                     hudRef?.hotkeySessionAccepted(heldSession)
@@ -784,6 +1152,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 self.showHotkeyRegistrationFailedAlert(error: error)
             }
+        }
+    }
+
+    /// Keep one quiet preview demand alive after microphone authorization. Its
+    /// availability stream withdraws the dictation hotkey while the exact tap
+    /// is rotating, then republishes it only after replacement capture exists.
+    private func ensureAlwaysReadyMicrophoneCapture() {
+        guard permissionProvider.checkMicrophone() == .granted else {
+            Log.debug(
+                "[AppDelegate] Continuous microphone capture awaits permission")
+            return
+        }
+        guard alwaysReadyPreviewLease == nil,
+            alwaysReadyPreviewTask == nil
+        else { return }
+
+        let captureCoordinator = microphoneCaptureCoordinator
+        alwaysReadyPreviewTask = Task { @MainActor [weak self] in
+            var retryDelayNanoseconds: UInt64 = 100_000_000
+
+            while !Task.isCancelled {
+                do {
+                    let lease = try await captureCoordinator.acquirePreview()
+                    try Task.checkCancellation()
+                    guard let self else {
+                        _ = try? await lease.release()
+                        return
+                    }
+
+                    self.alwaysReadyPreviewLease = lease
+                    retryDelayNanoseconds = 100_000_000
+                    for await isAvailable in lease.captureAvailability {
+                        guard !Task.isCancelled else { break }
+                        self.isAlwaysReadyPreviewAvailable = isAvailable
+                        if isAvailable {
+                            self.publishDictationHotkeyIfReady()
+                        } else {
+                            self.suspendDictationHotkeyAdmission()
+                        }
+                    }
+
+                    self.isAlwaysReadyPreviewAvailable = false
+                    self.suspendDictationHotkeyAdmission()
+                    self.alwaysReadyPreviewLease = nil
+                    _ = try? await lease.release()
+                } catch is CancellationError {
+                    break
+                } catch {
+                    Log.debug(
+                        "[AppDelegate] Continuous microphone capture failed: \(error)")
+                }
+
+                guard !Task.isCancelled else { break }
+                do {
+                    try await Task.sleep(nanoseconds: retryDelayNanoseconds)
+                } catch {
+                    break
+                }
+                retryDelayNanoseconds = min(
+                    retryDelayNanoseconds * 2,
+                    5_000_000_000)
+            }
+
+            if let self, let lease = self.alwaysReadyPreviewLease {
+                self.alwaysReadyPreviewLease = nil
+                self.isAlwaysReadyPreviewAvailable = false
+                _ = try? await lease.release()
+                self.suspendDictationHotkeyAdmission()
+            }
+            self?.alwaysReadyPreviewTask = nil
         }
     }
 

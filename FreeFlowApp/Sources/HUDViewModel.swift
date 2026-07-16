@@ -425,23 +425,25 @@ final class HUDViewModel: ObservableObject {
         audioLevelTask?.cancel()
         audioLevel = 0
         let provider = audioProvider
+        guard let sessionID = pipelineSessionID else { return }
+        let owner = AudioCaptureOwner.dictation(sessionID)
         audioLevelTask = Task { [weak self] in
             // The audio level stream is created inside
             // audioProvider.startRecording(), which runs in a detached
-            // task after the coordinator emits .recording. Poll briefly
-            // so we pick it up once it exists.
+            // task after the coordinator emits .recording. Wait for this
+            // exact session's stream; a preview stream must never drive HUD.
             var stream: AsyncStream<Float>?
-            for _ in 0..<20 {  // up to ~200ms
-                stream = provider?.audioLevelStream
+            while !Task.isCancelled {
+                stream = provider?.audioLevelStream(owner: owner)
                 if stream != nil { break }
-                try? await Task.sleep(nanoseconds: 10_000_000)  // 10ms
-                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: .milliseconds(10))
             }
-            guard let stream else { return }
+            guard !Task.isCancelled, let stream else { return }
 
             for await level in stream {
                 guard !Task.isCancelled else { break }
                 guard let self else { break }
+                guard self.pipelineSessionID == sessionID else { break }
                 // Exponential smoothing to avoid jitter.
                 let smoothed =
                     audioLevelSmoothing * level

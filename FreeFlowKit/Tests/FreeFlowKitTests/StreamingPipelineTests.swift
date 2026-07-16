@@ -354,6 +354,7 @@ private final class GatedStartAudioProvider: AudioProviding, @unchecked Sendable
     private let startGate: SuspensionGate
     private let resetLock = NSLock()
     private var resetGeneration: UInt64 = 0
+    private var currentOwner: AudioCaptureOwner?
 
     init(startGate: SuspensionGate, enablePCMStream: Bool = false) {
         self.startGate = startGate
@@ -368,6 +369,18 @@ private final class GatedStartAudioProvider: AudioProviding, @unchecked Sendable
     var micProximity: MicProximity { base.micProximity }
     var gainFactor: Float { base.gainFactor }
     var deviceName: String { base.deviceName }
+    func isRecording(owner: AudioCaptureOwner) -> Bool {
+        base.isRecording(owner: owner)
+    }
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>? {
+        base.pcmAudioStream(owner: owner)
+    }
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>? {
+        base.audioLevelStream(owner: owner)
+    }
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics? {
+        base.metrics(owner: owner)
+    }
     func startRecording() async throws {
         try await startRecording(onCaptureReady: {})
     }
@@ -389,6 +402,47 @@ private final class GatedStartAudioProvider: AudioProviding, @unchecked Sendable
         }
     }
 
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        let generation: UInt64 = try resetLock.withLock {
+            guard currentOwner == nil else {
+                throw AudioCaptureError.alreadyRecording
+            }
+            currentOwner = owner
+            return resetGeneration
+        }
+        await startGate.waitForRelease()
+        do {
+            try await base.startRecording(
+                owner: owner,
+                configuration: configuration,
+                releaseBoundary: releaseBoundary,
+                onCaptureReady: {
+                    self.resetLock.withLock {
+                        guard self.currentOwner == owner,
+                            self.resetGeneration == generation
+                        else { return }
+                        onCaptureReady()
+                    }
+                })
+        } catch {
+            resetLock.withLock {
+                if currentOwner == owner { currentOwner = nil }
+            }
+            throw error
+        }
+        guard resetLock.withLock({
+            currentOwner == owner && resetGeneration == generation
+        }) else {
+            base.forceReset(owner: owner)
+            throw CancellationError()
+        }
+    }
+
     func stopRecording() async throws -> AudioBuffer {
         try await base.stopRecording()
     }
@@ -401,6 +455,41 @@ private final class GatedStartAudioProvider: AudioProviding, @unchecked Sendable
         resetLock.withLock { resetGeneration &+= 1 }
         base.forceReset()
         Task { await startGate.release() }
+    }
+
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer {
+        let buffer = try await base.stopRecording(owner: owner)
+        resetLock.withLock {
+            if currentOwner == owner { currentOwner = nil }
+        }
+        return buffer
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool {
+        base.closeRecordingBoundary(owner: owner)
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool {
+        base.closeRecordingBoundary(owner: owner, atHostTime: releaseHostTime)
+    }
+
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool {
+        let ownsStart = resetLock.withLock { () -> Bool in
+            guard currentOwner == owner else { return false }
+            resetGeneration &+= 1
+            currentOwner = nil
+            return true
+        }
+        guard ownsStart else { return false }
+        _ = base.forceReset(owner: owner)
+        Task { await startGate.release() }
+        return true
     }
 }
 
@@ -420,6 +509,18 @@ private final class StartReturnGatedAudioProvider: AudioProviding, @unchecked Se
     var peakRMS: Float { base.peakRMS }
     var ambientRMS: Float { base.ambientRMS }
     var micProximity: MicProximity { base.micProximity }
+    func isRecording(owner: AudioCaptureOwner) -> Bool {
+        base.isRecording(owner: owner)
+    }
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>? {
+        base.pcmAudioStream(owner: owner)
+    }
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>? {
+        base.audioLevelStream(owner: owner)
+    }
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics? {
+        base.metrics(owner: owner)
+    }
 
     func startRecording() async throws {
         try await startRecording(onCaptureReady: {})
@@ -429,6 +530,21 @@ private final class StartReturnGatedAudioProvider: AudioProviding, @unchecked Se
         onCaptureReady: @escaping @Sendable () -> Void
     ) async throws {
         try await base.startRecording(onCaptureReady: onCaptureReady)
+        base.emitPCMChunk(initialPCMChunk)
+        await startGate.waitForRelease()
+    }
+
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await base.startRecording(
+            owner: owner,
+            configuration: configuration,
+            releaseBoundary: releaseBoundary,
+            onCaptureReady: onCaptureReady)
         base.emitPCMChunk(initialPCMChunk)
         await startGate.waitForRelease()
     }
@@ -447,6 +563,32 @@ private final class StartReturnGatedAudioProvider: AudioProviding, @unchecked Se
         base.forceReset()
         Task { await startGate.release() }
     }
+
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer {
+        let buffer = try await base.stopRecording(owner: owner)
+        await startGate.release()
+        return buffer
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool {
+        base.closeRecordingBoundary(owner: owner)
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool {
+        base.closeRecordingBoundary(owner: owner, atHostTime: releaseHostTime)
+    }
+
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool {
+        let reset = base.forceReset(owner: owner)
+        if reset { Task { await startGate.release() } }
+        return reset
+    }
 }
 
 private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable {
@@ -462,6 +604,8 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
     private var _forceResetCount = 0
     private var _startCancellationCount = 0
     private var _captureReadyCount = 0
+    private var activeOwner: AudioCaptureOwner?
+    private var metricsOwner: AudioCaptureOwner?
     private var chunks: [Data] = []
     private var stream: AsyncStream<Data>?
     private var continuation: AsyncStream<Data>.Continuation?
@@ -488,6 +632,24 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
     var forceResetCount: Int { lock.withLock { _forceResetCount } }
     var startCancellationCount: Int { lock.withLock { _startCancellationCount } }
     var captureReadyCount: Int { lock.withLock { _captureReadyCount } }
+    func isRecording(owner: AudioCaptureOwner) -> Bool {
+        lock.withLock { activeOwner == owner && _isRecording }
+    }
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>? {
+        lock.withLock { activeOwner == owner ? stream : nil }
+    }
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>? { nil }
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics? {
+        lock.withLock {
+            guard metricsOwner == owner else { return nil }
+            return AudioCaptureMetrics(
+                peakRMS: 0.1,
+                ambientRMS: 0,
+                micProximity: .nearField,
+                gainFactor: 1,
+                deviceName: "Controlled capture")
+        }
+    }
 
     func startRecording() async throws {
         try await startRecording(onCaptureReady: {})
@@ -496,8 +658,29 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
     func startRecording(
         onCaptureReady: @escaping @Sendable () -> Void
     ) async throws {
+        try await startRecordingOwned(owner: nil, onCaptureReady: onCaptureReady)
+    }
+
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await startRecordingOwned(owner: owner, onCaptureReady: onCaptureReady)
+    }
+
+    private func startRecordingOwned(
+        owner: AudioCaptureOwner?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
         let (newStream, newContinuation) = AsyncStream<Data>.makeStream()
-        lock.withLock {
+        try lock.withLock {
+            guard !_isRecording, activeOwner == nil else {
+                throw AudioCaptureError.alreadyRecording
+            }
+            activeOwner = owner
+            metricsOwner = owner
             _isRecording = true
             _isHardwareRunning = true
             _captureBoundaryOpen = true
@@ -535,6 +718,21 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
     }
 
     func stopRecording() async throws -> AudioBuffer {
+        try await stopRecordingOwned(owner: nil)
+    }
+
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer {
+        try await stopRecordingOwned(owner: owner)
+    }
+
+    private func stopRecordingOwned(
+        owner: AudioCaptureOwner?
+    ) async throws -> AudioBuffer {
+        try lock.withLock {
+            if let owner, activeOwner != owner {
+                throw AudioCaptureError.ownerMismatch
+            }
+        }
         lock.withLock { _stopAttemptCount += 1 }
         await stopGate.waitForRelease()
         if stopFails {
@@ -544,6 +742,7 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
             _isRecording = false
             _isHardwareRunning = false
             _captureBoundaryOpen = false
+            activeOwner = nil
             _completedStopCount += 1
             continuation?.finish()
             continuation = nil
@@ -568,7 +767,18 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
     }
 
     func forceReset() {
+        forceResetOwned(owner: nil)
+    }
+
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool {
+        forceResetOwned(owner: owner)
+    }
+
+    @discardableResult
+    private func forceResetOwned(owner: AudioCaptureOwner?) -> Bool {
         lock.withLock {
+            if let owner, activeOwner != owner { return false }
             _forceResetCount += 1
             _isRecording = false
             _isHardwareRunning = false
@@ -577,7 +787,28 @@ private final class StopGatedAudioProvider: AudioProviding, @unchecked Sendable 
             continuation = nil
             stream = nil
             chunks = []
+            activeOwner = nil
+            if metricsOwner == owner || owner == nil { metricsOwner = nil }
+            return true
         }
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool {
+        lock.withLock {
+            guard activeOwner == owner else { return false }
+            _captureBoundaryOpen = false
+            _isRecording = false
+            return true
+        }
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool {
+        closeRecordingBoundary(owner: owner)
     }
 
     func waitUntilStopStarts() async {
@@ -615,13 +846,27 @@ private final class PostReleaseStartAudioProvider: AudioProviding, @unchecked Se
     private let base = MockAudioProvider()
     private let startGate: SuspensionGate
     private let postReleasePCM: Data
+    private let retainsPreviewPreRoll: Bool
+    private let stopFails: Bool
     private let resetLock = NSLock()
     private var resetGeneration: UInt64 = 0
+    private var currentOwner: AudioCaptureOwner?
+    private var _stopAttemptCount = 0
 
-    init(startGate: SuspensionGate, postReleasePCM: Data) {
+    init(
+        startGate: SuspensionGate,
+        postReleasePCM: Data,
+        retainsPreviewPreRoll: Bool = false,
+        stopFails: Bool = false
+    ) {
         self.startGate = startGate
         self.postReleasePCM = postReleasePCM
+        self.retainsPreviewPreRoll = retainsPreviewPreRoll
+        self.stopFails = stopFails
         base.enablePCMStream = true
+        if !retainsPreviewPreRoll {
+            base.stubbedBuffer = .empty
+        }
     }
 
     var isRecording: Bool { base.isRecording }
@@ -631,6 +876,26 @@ private final class PostReleaseStartAudioProvider: AudioProviding, @unchecked Se
     var micProximity: MicProximity { base.micProximity }
     var startCallCount: Int { base.startCallCount }
     var stopCallCount: Int { base.stopCallCount }
+    var stopAttemptCount: Int { resetLock.withLock { _stopAttemptCount } }
+    var releaseHostTimes: [UInt64] { base.releaseHostTimes }
+    func isRecording(owner: AudioCaptureOwner) -> Bool {
+        base.isRecording(owner: owner)
+    }
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>? {
+        base.pcmAudioStream(owner: owner)
+    }
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>? {
+        base.audioLevelStream(owner: owner)
+    }
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics? {
+        base.metrics(owner: owner)
+    }
+    func canRecoverCaptureReleasedBeforeReadiness(
+        owner: AudioCaptureOwner,
+        pressHostTime: UInt64
+    ) -> Bool {
+        retainsPreviewPreRoll
+    }
 
     func startRecording() async throws {
         try await startRecording(onCaptureReady: {})
@@ -651,7 +916,53 @@ private final class PostReleaseStartAudioProvider: AudioProviding, @unchecked Se
             base.forceReset()
             throw CancellationError()
         }
-        base.emitPCMChunk(postReleasePCM)
+        if retainsPreviewPreRoll {
+            base.emitPCMChunk(postReleasePCM)
+        }
+    }
+
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        let generation: UInt64 = try resetLock.withLock {
+            guard currentOwner == nil else {
+                throw AudioCaptureError.alreadyRecording
+            }
+            currentOwner = owner
+            return resetGeneration
+        }
+        await startGate.waitForRelease()
+        do {
+            try await base.startRecording(
+                owner: owner,
+                configuration: configuration,
+                releaseBoundary: releaseBoundary,
+                onCaptureReady: {
+                    self.resetLock.withLock {
+                        guard self.currentOwner == owner,
+                            self.resetGeneration == generation
+                        else { return }
+                        onCaptureReady()
+                    }
+                })
+        } catch {
+            resetLock.withLock {
+                if currentOwner == owner { currentOwner = nil }
+            }
+            throw error
+        }
+        guard resetLock.withLock({
+            currentOwner == owner && resetGeneration == generation
+        }) else {
+            base.forceReset(owner: owner)
+            throw CancellationError()
+        }
+        if retainsPreviewPreRoll {
+            base.emitPCMChunk(postReleasePCM)
+        }
     }
 
     func stopRecording() async throws -> AudioBuffer {
@@ -667,6 +978,168 @@ private final class PostReleaseStartAudioProvider: AudioProviding, @unchecked Se
         base.forceReset()
         Task { await startGate.release() }
     }
+
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer {
+        let shouldFail = resetLock.withLock {
+            _stopAttemptCount += 1
+            return stopFails
+        }
+        if shouldFail {
+            throw ControlledCaptureError.stopFailed
+        }
+        let buffer = try await base.stopRecording(owner: owner)
+        resetLock.withLock {
+            if currentOwner == owner { currentOwner = nil }
+        }
+        return buffer
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool {
+        base.closeRecordingBoundary(owner: owner)
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool {
+        base.closeRecordingBoundary(owner: owner, atHostTime: releaseHostTime)
+    }
+
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool {
+        let ownsStart = resetLock.withLock { () -> Bool in
+            guard currentOwner == owner else { return false }
+            resetGeneration &+= 1
+            currentOwner = nil
+            return true
+        }
+        guard ownsStart else { return false }
+        _ = base.forceReset(owner: owner)
+        Task { await startGate.release() }
+        return true
+    }
+}
+
+/// Publishes capture readiness while the recovery capability query is in
+/// flight, matching preview promotion clearing its one-shot proof immediately
+/// after `onCaptureReady` runs.
+private final class RecoveryQueryReadinessAudioProvider: AudioProviding,
+    @unchecked Sendable
+{
+    private let base = MockAudioProvider()
+    private let startReturnGate = SuspensionGate()
+    private let lock = NSLock()
+    private var captureReady: (@Sendable () -> Void)?
+
+    init() {
+        base.enablePCMStream = true
+    }
+
+    var isRecording: Bool { base.isRecording }
+    var pcmAudioStream: AsyncStream<Data>? { base.pcmAudioStream }
+    var peakRMS: Float { base.peakRMS }
+    var ambientRMS: Float { base.ambientRMS }
+    var micProximity: MicProximity { base.micProximity }
+
+    func isRecording(owner: AudioCaptureOwner) -> Bool {
+        base.isRecording(owner: owner)
+    }
+
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>? {
+        base.pcmAudioStream(owner: owner)
+    }
+
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>? {
+        base.audioLevelStream(owner: owner)
+    }
+
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics? {
+        base.metrics(owner: owner)
+    }
+
+    func canRecoverCaptureReleasedBeforeReadiness(
+        owner: AudioCaptureOwner,
+        pressHostTime: UInt64
+    ) -> Bool {
+        let callback = lock.withLock {
+            let callback = captureReady
+            captureReady = nil
+            return callback
+        }
+        callback?()
+        Task { await startReturnGate.release() }
+        return false
+    }
+
+    func startRecording() async throws {
+        try await base.startRecording()
+    }
+
+    func startRecording(
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await base.startRecording(onCaptureReady: onCaptureReady)
+    }
+
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try await base.startRecording(
+            owner: owner,
+            configuration: configuration,
+            releaseBoundary: releaseBoundary,
+            onCaptureReady: {})
+        lock.withLock { captureReady = onCaptureReady }
+        await startReturnGate.waitForRelease()
+    }
+
+    func closeRecordingBoundary() {
+        base.closeRecordingBoundary()
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool {
+        base.closeRecordingBoundary(owner: owner)
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool {
+        base.closeRecordingBoundary(
+            owner: owner,
+            atHostTime: releaseHostTime)
+    }
+
+    func stopRecording() async throws -> AudioBuffer {
+        try await base.stopRecording()
+    }
+
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer {
+        try await base.stopRecording(owner: owner)
+    }
+
+    func forceReset() {
+        base.forceReset()
+        Task { await startReturnGate.release() }
+    }
+
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool {
+        let reset = base.forceReset(owner: owner)
+        Task { await startReturnGate.release() }
+        return reset
+    }
+
+    func waitUntilStartEnters() async {
+        await startReturnGate.waitUntilEntered()
+    }
 }
 
 private final class BlockingStartStatusAudioProvider: AudioProviding,
@@ -680,6 +1153,7 @@ private final class BlockingStartStatusAudioProvider: AudioProviding,
     private var statusReleased = false
     private var _statusReadCount = 0
     private var _forceResetCount = 0
+    private var currentOwner: AudioCaptureOwner?
 
     init() {
         base.enablePCMStream = true
@@ -691,6 +1165,18 @@ private final class BlockingStartStatusAudioProvider: AudioProviding,
     var peakRMS: Float { base.peakRMS }
     var ambientRMS: Float { base.ambientRMS }
     var micProximity: MicProximity { base.micProximity }
+    func isRecording(owner: AudioCaptureOwner) -> Bool {
+        base.isRecording(owner: owner)
+    }
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>? {
+        base.pcmAudioStream(owner: owner)
+    }
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>? {
+        base.audioLevelStream(owner: owner)
+    }
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics? {
+        base.metrics(owner: owner)
+    }
 
     var isRecording: Bool {
         stateLock.withLock { _statusReadCount += 1 }
@@ -715,6 +1201,35 @@ private final class BlockingStartStatusAudioProvider: AudioProviding,
         try await base.startRecording(onCaptureReady: onCaptureReady)
     }
 
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws {
+        try stateLock.withLock {
+            guard currentOwner == nil else {
+                throw AudioCaptureError.alreadyRecording
+            }
+            currentOwner = owner
+        }
+        await startGate.waitForRelease()
+        let wasReset = stateLock.withLock { resetRequested }
+        guard !wasReset else { throw CancellationError() }
+        do {
+            try await base.startRecording(
+                owner: owner,
+                configuration: configuration,
+                releaseBoundary: releaseBoundary,
+                onCaptureReady: onCaptureReady)
+        } catch {
+            stateLock.withLock {
+                if currentOwner == owner { currentOwner = nil }
+            }
+            throw error
+        }
+    }
+
     func stopRecording() async throws -> AudioBuffer {
         try await base.stopRecording()
     }
@@ -730,6 +1245,42 @@ private final class BlockingStartStatusAudioProvider: AudioProviding,
         }
         base.forceReset()
         Task { await startGate.release() }
+    }
+
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer {
+        let buffer = try await base.stopRecording(owner: owner)
+        stateLock.withLock {
+            if currentOwner == owner { currentOwner = nil }
+        }
+        return buffer
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool {
+        base.closeRecordingBoundary(owner: owner)
+    }
+
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool {
+        base.closeRecordingBoundary(owner: owner, atHostTime: releaseHostTime)
+    }
+
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool {
+        let ownsStart = stateLock.withLock { () -> Bool in
+            guard currentOwner == owner else { return false }
+            resetRequested = true
+            _forceResetCount += 1
+            currentOwner = nil
+            return true
+        }
+        guard ownsStart else { return false }
+        _ = base.forceReset(owner: owner)
+        Task { await startGate.release() }
+        return true
     }
 
     func waitUntilStartEnters() async {
@@ -1406,6 +1957,53 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(audio.startCallCount, 1)
         XCTAssertEqual(streaming.startCallCount, 1)
         XCTAssertEqual(injector.injectionCount, 0)
+        driver.invalidate()
+    }
+
+    func testKeyUpCompletesActivationAfterSessionOwnershipIsPublished() async {
+        let admittedGate = SuspensionGate()
+        let captureStartGate = SuspensionGate()
+        let preReleasePCM = makeNonSilentPCMChunk()
+        let audio = PostReleaseStartAudioProvider(
+            startGate: captureStartGate,
+            postReleasePCM: preReleasePCM,
+            retainsPreviewPreRoll: true)
+        let streaming = MockStreamingProvider(stubbedText: "short dictation")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .local(streaming: streaming),
+            textInjector: injector,
+            coordinator: coordinator,
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            activationDidPublishSessionOwner: {
+                await admittedGate.waitForRelease()
+            })
+        let driver = HotkeyPipelineDriver(pipeline: pipeline)
+
+        driver.submit(.pressed, hostTime: 10_000)
+        await admittedGate.waitUntilEntered()
+        driver.submit(.released, hostTime: 11_000)
+        await driver.waitForSubmittedCommands()
+        await admittedGate.release()
+        await captureStartGate.waitUntilEntered()
+        await captureStartGate.release()
+        await driver.waitForSubmittedEvents()
+
+        let finalState = await coordinator.state
+        let finalSessionID = await pipeline.currentSessionID
+        XCTAssertEqual(
+            injector.injectionCount,
+            1,
+            "Key-up must complete a session already admitted by the pipeline")
+        XCTAssertEqual(streaming.receivedAudioChunks, [preReleasePCM])
+        XCTAssertEqual(audio.releaseHostTimes, [11_000])
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalSessionID)
         driver.invalidate()
     }
 
@@ -2159,6 +2757,7 @@ final class StreamingPipelineTests: XCTestCase {
         }
         let captureIsLive = await waitUntil { audio.captureReadyCount == 1 }
         XCTAssertTrue(captureIsLive)
+        XCTAssertTrue(audio.emitPCMChunk(makeNonSilentPCMChunk(sampleCount: 160)))
 
         let firstCompletion = Task {
             await pipeline.complete(sessionID: sessionID)
@@ -2552,8 +3151,8 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertTrue(releaseClaimed)
 
         // The hardware start returns only after the key-release boundary.
-        // It may need to start and stop as cleanup, but none of its late PCM
-        // can be forwarded, finalized, or published as the user's dictation.
+        // Exact reset may eliminate a separate cleanup stop; none of its late
+        // PCM can be forwarded, finalized, or published as the dictation.
         await startGate.release()
         await completion.value
 
@@ -2561,12 +3160,213 @@ final class StreamingPipelineTests: XCTestCase {
         let finalSessionID = await pipeline.currentSessionID
 
         XCTAssertEqual(audio.startCallCount, 1)
-        XCTAssertEqual(audio.stopCallCount, 1)
+        XCTAssertEqual(audio.stopCallCount, 0)
         XCTAssertFalse(audio.isRecording)
         XCTAssertEqual(streaming.startCallCount, 0)
         XCTAssertEqual(streaming.sendCallCount, 0)
         XCTAssertEqual(streaming.finishCallCount, 0)
         XCTAssertTrue(streaming.receivedAudioChunks.isEmpty)
+        XCTAssertEqual(injector.injectionCount, 0)
+        XCTAssertEqual(finalState, .dictationFailed)
+        XCTAssertEqual(finalSessionID, sessionID)
+    }
+
+    func testReleaseBeforeDelayedPromotionRetainsPreviewPreRoll() async {
+        let startGate = SuspensionGate()
+        let preReleasePCM = makeNonSilentPCMChunk()
+        let audio = PostReleaseStartAudioProvider(
+            startGate: startGate,
+            postReleasePCM: preReleasePCM,
+            retainsPreviewPreRoll: true)
+        let streaming = MockStreamingProvider(
+            stubbedText: "Speech retained from preview pre-roll")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .local(streaming: streaming),
+            textInjector: injector,
+            coordinator: coordinator)
+
+        let pressHostTime = AudioCaptureReleaseFence.currentHostTime()
+        let releaseBoundary = AudioCaptureReleaseBoundary(
+            pressHostTime: pressHostTime)
+        guard let sessionID = await pipeline.activate(
+            releaseBoundary: releaseBoundary
+        ) else {
+            return XCTFail("Expected session admission")
+        }
+        await startGate.waitUntilEntered()
+
+        let completion = Task {
+            await pipeline.complete(
+                sessionID: sessionID,
+                releaseHostTime: pressHostTime + 1)
+        }
+        let releaseClaimed = await waitUntilState(
+            .processing, coordinator: coordinator)
+        XCTAssertTrue(releaseClaimed)
+
+        await startGate.release()
+        await completion.value
+
+        XCTAssertEqual(audio.startCallCount, 1)
+        XCTAssertEqual(audio.stopCallCount, 1)
+        XCTAssertFalse(audio.isRecording)
+        XCTAssertEqual(streaming.startCallCount, 1)
+        XCTAssertEqual(streaming.receivedAudioChunks, [preReleasePCM])
+        XCTAssertEqual(streaming.finishCallCount, 1)
+        XCTAssertEqual(injector.injectionCount, 1)
+        let finalState = await coordinator.state
+        let finalSessionID = await pipeline.currentSessionID
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalSessionID)
+    }
+
+    func testDuplicateCompletionCannotErasePreviewRecoveryOwnership() async {
+        let startGate = SuspensionGate()
+        let releaseOwnerGate = SuspensionGate()
+        let preReleasePCM = makeNonSilentPCMChunk()
+        let audio = PostReleaseStartAudioProvider(
+            startGate: startGate,
+            postReleasePCM: preReleasePCM,
+            retainsPreviewPreRoll: true)
+        let streaming = MockStreamingProvider(
+            stubbedText: "Speech retained by the release owner")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .local(streaming: streaming),
+            textInjector: injector,
+            coordinator: coordinator,
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            completionDidEstablishReleaseBoundary: {
+                await releaseOwnerGate.waitForRelease()
+            })
+        let pressHostTime = AudioCaptureReleaseFence.currentHostTime()
+        let releaseHostTime = pressHostTime + 1
+        let releaseBoundary = AudioCaptureReleaseBoundary(
+            pressHostTime: pressHostTime)
+
+        guard let sessionID = await pipeline.activate(
+            releaseBoundary: releaseBoundary
+        ) else {
+            return XCTFail("Expected session admission")
+        }
+        await startGate.waitUntilEntered()
+
+        let releaseOwner = Task {
+            await pipeline.complete(
+                sessionID: sessionID,
+                releaseHostTime: releaseHostTime)
+        }
+        await releaseOwnerGate.waitUntilEntered()
+
+        let duplicate = Task {
+            await pipeline.complete(sessionID: sessionID)
+        }
+        let duplicateClaimedProcessing = await waitUntilState(
+            .processing, coordinator: coordinator)
+        XCTAssertTrue(duplicateClaimedProcessing)
+
+        await releaseOwnerGate.release()
+        await releaseOwner.value
+        await startGate.release()
+        await duplicate.value
+
+        let finalState = await coordinator.state
+        let finalSessionID = await pipeline.currentSessionID
+        XCTAssertEqual(
+            audio.releaseHostTimes,
+            [releaseHostTime],
+            "A duplicate completion must not erase the release owner's delayed stop")
+        XCTAssertEqual(streaming.receivedAudioChunks, [preReleasePCM])
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalSessionID)
+    }
+
+    func testReadinessDuringRecoveryQueryStillStopsAcceptedCapture() async {
+        let audio = RecoveryQueryReadinessAudioProvider()
+        let streaming = MockStreamingProvider(
+            stubbedText: "Speech retained across preview promotion")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .local(streaming: streaming),
+            textInjector: injector,
+            coordinator: coordinator)
+        let pressHostTime = AudioCaptureReleaseFence.currentHostTime()
+        let releaseBoundary = AudioCaptureReleaseBoundary(
+            pressHostTime: pressHostTime)
+
+        guard let sessionID = await pipeline.activate(
+            releaseBoundary: releaseBoundary
+        ) else {
+            return XCTFail("Expected session admission")
+        }
+        await audio.waitUntilStartEnters()
+
+        await pipeline.complete(
+            sessionID: sessionID,
+            releaseHostTime: pressHostTime + 1)
+
+        let finalState = await coordinator.state
+        let finalSessionID = await pipeline.currentSessionID
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(streaming.finishCallCount, 1)
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalSessionID)
+    }
+
+    func testLatePreviewCaptureStopFailureSurfacesExplicitFailure() async {
+        let startGate = SuspensionGate()
+        let audio = PostReleaseStartAudioProvider(
+            startGate: startGate,
+            postReleasePCM: makeNonSilentPCMChunk(),
+            retainsPreviewPreRoll: true,
+            stopFails: true)
+        let streaming = MockStreamingProvider(stubbedText: "must not inject")
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .local(streaming: streaming),
+            textInjector: injector,
+            coordinator: coordinator)
+        let pressHostTime = AudioCaptureReleaseFence.currentHostTime()
+        let releaseBoundary = AudioCaptureReleaseBoundary(
+            pressHostTime: pressHostTime)
+
+        guard let sessionID = await pipeline.activate(
+            releaseBoundary: releaseBoundary
+        ) else {
+            return XCTFail("Expected session admission")
+        }
+        await startGate.waitUntilEntered()
+
+        let completion = Task {
+            await pipeline.complete(
+                sessionID: sessionID,
+                releaseHostTime: pressHostTime + 1)
+        }
+        let releaseClaimed = await waitUntilState(
+            .processing, coordinator: coordinator)
+        XCTAssertTrue(releaseClaimed)
+        await startGate.release()
+        await completion.value
+
+        let finalState = await coordinator.state
+        let finalSessionID = await pipeline.currentSessionID
+        XCTAssertEqual(audio.stopAttemptCount, 1)
         XCTAssertEqual(injector.injectionCount, 0)
         XCTAssertEqual(finalState, .dictationFailed)
         XCTAssertEqual(finalSessionID, sessionID)

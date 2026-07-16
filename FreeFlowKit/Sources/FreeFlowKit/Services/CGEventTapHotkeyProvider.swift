@@ -21,24 +21,60 @@ import Foundation
 /// Requires the app to be trusted for accessibility (`AXIsProcessTrusted`).
 public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendable {
 
+    private typealias TimestampedCallback =
+        @Sendable (HotkeyEvent, UInt64) -> Void
+
     private let lock = NSLock()
-    private var callback: (@Sendable (HotkeyEvent, UInt64) -> Void)?
+    private var callback: TimestampedCallback?
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
     private var tapThread: Thread?
     private var _isHotkeyDown = false
+    private var nextRegistrationGeneration: UInt64 = 0
+    private var activeRegistrationGeneration: UInt64?
 
-    /// The retained self-pointer passed to the CGEventTap callback.
-    /// Stored so `tearDownTap` can release it, preventing a dangling
-    /// pointer if the provider is deallocated while events are in flight.
+    /// The raw ownership of the callback context passed to CGEventTap.
+    /// The tap thread separately retains the context across active callbacks.
     /// Visible for testing retain-balance correctness.
-    private(set) var retainedSelfPointer: UnsafeMutableRawPointer?
+    private(set) var retainedCallbackContextPointer: UnsafeMutableRawPointer?
 
     /// The current hotkey configuration.
     private var _hotkeySetting: HotkeySetting = .default
 
     public init() {}
+
+    init(
+        testing setting: HotkeySetting,
+        callback: @escaping @Sendable (HotkeyEvent, UInt64) -> Void
+    ) {
+        nextRegistrationGeneration = 1
+        activeRegistrationGeneration = 1
+        _hotkeySetting = setting
+        self.callback = callback
+    }
+
+    var registrationGenerationForTesting: UInt64 {
+        lock.withLock {
+            guard let activeRegistrationGeneration else {
+                preconditionFailure("Testing registration is not active")
+            }
+            return activeRegistrationGeneration
+        }
+    }
+
+    @discardableResult
+    func replaceRegistrationForTesting(
+        setting: HotkeySetting,
+        callback: @escaping @Sendable (HotkeyEvent, UInt64) -> Void
+    ) -> UInt64 {
+        lock.withLock {
+            invalidateRegistrationStateLocked()
+            return beginRegistrationLocked(
+                setting: setting,
+                callback: callback)
+        }
+    }
 
     deinit {
         unregister()
@@ -90,15 +126,15 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
         // Remove any existing tap before creating a new one.
         tearDownTap()
 
-        self._hotkeySetting = setting
-        self.callback = callback
-        self._isHotkeyDown = false
-
         #if canImport(ApplicationServices)
             // Verify accessibility permission before attempting to create the tap.
             guard AXIsProcessTrusted() else {
                 throw HotkeyRegistrationError.accessibilityNotGranted
             }
+
+            let registrationGeneration = beginRegistrationLocked(
+                setting: setting,
+                callback: callback)
 
             // Determine which events to monitor based on hotkey type.
             var eventMask: CGEventMask = (1 << CGEventType.flagsChanged.rawValue)
@@ -107,11 +143,14 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
                 eventMask |= (1 << CGEventType.keyUp.rawValue)
             }
 
-            // Retain self so the C callback always has a valid pointer,
-            // even if events are in flight when tearDownTap runs.
-            // The balancing release happens in tearDownTap.
-            let selfPointer = Unmanaged.passRetained(self).toOpaque()
-            self.retainedSelfPointer = selfPointer
+            // Each tap carries the generation it was created for. An old C
+            // callback can therefore never read or mutate replacement state.
+            let callbackContext = EventTapCallbackContext(
+                provider: self,
+                registrationGeneration: registrationGeneration)
+            let contextPointer = Unmanaged.passRetained(callbackContext)
+                .toOpaque()
+            retainedCallbackContextPointer = contextPointer
 
             guard
                 let tap = CGEvent.tapCreate(
@@ -120,9 +159,10 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
                     options: .listenOnly,
                     eventsOfInterest: eventMask,
                     callback: cgEventCallback,
-                    userInfo: selfPointer
+                    userInfo: contextPointer
                 )
             else {
+                tearDownTap()
                 throw HotkeyRegistrationError.tapCreationFailed
             }
 
@@ -133,12 +173,16 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
 
             // Run the event tap on a dedicated background thread so it doesn't
             // block the main thread or depend on the caller's run loop.
-            let thread = Thread { [weak self] in
-                guard let self, let source else { return }
-                let rl = CFRunLoopGetCurrent()
-                self.lock.lock()
-                self.tapRunLoop = rl
-                self.lock.unlock()
+            let thread = Self.makeCallbackContextThread(
+                retaining: callbackContext
+            ) { [weak self] in
+                guard let source else { return }
+                guard let rl = CFRunLoopGetCurrent() else { return }
+                guard
+                    self?.publishTapRunLoop(
+                        rl,
+                        registrationGeneration: registrationGeneration) == true
+                else { return }
                 CFRunLoopAddSource(rl, source, .commonModes)
                 CGEvent.tapEnable(tap: tap, enable: true)
                 CFRunLoopRun()
@@ -148,6 +192,7 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
             self.tapThread = thread
             thread.start()
         #else
+            _hotkeySetting = setting
             throw HotkeyRegistrationError.tapCreationFailed
         #endif
     }
@@ -160,13 +205,29 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
 
     // MARK: - Internal
 
+    static func makeCallbackContextThread<Context: AnyObject & Sendable>(
+        retaining context: Context,
+        operation: @escaping @Sendable () -> Void
+    ) -> Thread {
+        Thread {
+            // Invariant: event-tap userInfo outlives the run-loop callout,
+            // even when teardown releases its raw ownership concurrently.
+            withExtendedLifetime(context) {
+                operation()
+            }
+        }
+    }
+
     /// Re-enable the event tap if the system disabled it. Called from the
     /// CGEventTap C callback when a `.tapDisabledByTimeout` or
     /// `.tapDisabledByUserInput` event arrives.
-    fileprivate func reEnableTap() {
-        lock.lock()
-        let tap = eventTap
-        lock.unlock()
+    fileprivate func reEnableTap(registrationGeneration: UInt64) {
+        let tap: CFMachPort? = lock.withLock {
+            guard activeRegistrationGeneration == registrationGeneration else {
+                return nil
+            }
+            return eventTap
+        }
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
@@ -174,37 +235,34 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
 
     /// Handle a flags-changed event for modifier-only hotkeys.
     fileprivate func handleFlagsChanged(_ event: CGEvent) {
-        lock.lock()
-        let setting = _hotkeySetting
-        let wasDown = _isHotkeyDown
-        let cb = callback
-        lock.unlock()
+        guard let registrationGeneration = lock.withLock({
+            activeRegistrationGeneration
+        }) else { return }
+        handleFlagsChanged(
+            event,
+            registrationGeneration: registrationGeneration)
+    }
 
-        // Only handle modifier-only hotkeys here.
-        guard case .modifierOnly(let modifierKey) = setting else {
-            return
+    func handleFlagsChanged(
+        _ event: CGEvent,
+        registrationGeneration: UInt64
+    ) {
+        let flags = event.flags.rawValue
+        let emission: (TimestampedCallback, HotkeyEvent)? = lock.withLock {
+            guard activeRegistrationGeneration == registrationGeneration,
+                case .modifierOnly(let modifierKey) = _hotkeySetting,
+                let callback
+            else { return nil }
+
+            let hotkeyPressed = (flags & modifierKey.deviceFlag) != 0
+            guard hotkeyPressed != _isHotkeyDown else { return nil }
+            _isHotkeyDown = hotkeyPressed
+            return (callback, hotkeyPressed ? .pressed : .released)
         }
 
-        let flags = event.flags.rawValue
-        let deviceFlag = modifierKey.deviceFlag
-
-        // Check the device-dependent flags for the specific modifier.
-        let hotkeyPressed = (flags & deviceFlag) != 0
-
-        if hotkeyPressed && !wasDown {
-            lock.lock()
-            _isHotkeyDown = true
-            lock.unlock()
-            cb?(
-                .pressed,
-                AudioCaptureReleaseFence.hostTime(
-                    eventTimestampNanoseconds: event.timestamp))
-        } else if !hotkeyPressed && wasDown {
-            lock.lock()
-            _isHotkeyDown = false
-            lock.unlock()
-            cb?(
-                .released,
+        if let (callback, hotkeyEvent) = emission {
+            callback(
+                hotkeyEvent,
                 AudioCaptureReleaseFence.hostTime(
                     eventTimestampNanoseconds: event.timestamp))
         }
@@ -215,16 +273,24 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
     private static let deviceIndependentFlagsMask: UInt64 = 0xFFFF_0000
 
     /// Handle a key event for modifier+key hotkeys.
-    fileprivate func handleKeyEvent(_ event: CGEvent, isKeyDown: Bool) {
-        lock.lock()
-        let setting = _hotkeySetting
-        let wasDown = _isHotkeyDown
-        let cb = callback
-        lock.unlock()
+    func handleKeyEvent(_ event: CGEvent, isKeyDown: Bool) {
+        guard let registrationGeneration = lock.withLock({
+            activeRegistrationGeneration
+        }) else { return }
+        handleKeyEvent(
+            event,
+            isKeyDown: isKeyDown,
+            registrationGeneration: registrationGeneration)
+    }
 
-        // Only handle modifier+key hotkeys here.
-        guard case .modifierPlusKey(let expectedFlags, let expectedKeyCode, _) = setting
-        else {
+    func handleKeyEvent(
+        _ event: CGEvent,
+        isKeyDown: Bool,
+        registrationGeneration: UInt64
+    ) {
+        if isKeyDown,
+            event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        {
             return
         }
 
@@ -236,37 +302,76 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
         let flags =
             UInt(event.flags.rawValue & Self.deviceIndependentFlagsMask) & standardModifierMask
 
-        // Check if this is the configured key with exactly the right modifiers.
-        // Using exact match so that ⌃/ does not fire when ⌃⌥/ is pressed.
-        let keyMatches = keyCode == expectedKeyCode
-        let modifiersMatch = flags == (expectedFlags & standardModifierMask)
+        let emission: (TimestampedCallback, HotkeyEvent)? = lock.withLock {
+            guard activeRegistrationGeneration == registrationGeneration,
+                case .modifierPlusKey(
+                    let expectedFlags,
+                    let expectedKeyCode,
+                    _
+                ) = _hotkeySetting,
+                let callback
+            else { return nil }
 
-        if isKeyDown && keyMatches && modifiersMatch && !wasDown {
-            lock.lock()
-            _isHotkeyDown = true
-            lock.unlock()
-            cb?(
-                .pressed,
+            let keyMatches = keyCode == expectedKeyCode
+            if isKeyDown {
+                let modifiersMatch = flags
+                    == (expectedFlags & standardModifierMask)
+                guard keyMatches, modifiersMatch, !_isHotkeyDown else {
+                    return nil
+                }
+                _isHotkeyDown = true
+                return (callback, .pressed)
+            }
+
+            // Modifiers may be released before the physical key-up.
+            guard keyMatches, _isHotkeyDown else { return nil }
+            _isHotkeyDown = false
+            return (callback, .released)
+        }
+
+        if let (callback, hotkeyEvent) = emission {
+            callback(
+                hotkeyEvent,
                 AudioCaptureReleaseFence.hostTime(
                     eventTimestampNanoseconds: event.timestamp))
-        } else if !isKeyDown && wasDown {
-            // On key up, only check the key code (modifiers may have been released).
-            if keyMatches {
-                lock.lock()
-                _isHotkeyDown = false
-                lock.unlock()
-                cb?(
-                    .released,
-                    AudioCaptureReleaseFence.hostTime(
-                        eventTimestampNanoseconds: event.timestamp))
+        }
+    }
+
+    private func beginRegistrationLocked(
+        setting: HotkeySetting,
+        callback: @escaping TimestampedCallback
+    ) -> UInt64 {
+        nextRegistrationGeneration &+= 1
+        let generation = nextRegistrationGeneration
+        activeRegistrationGeneration = generation
+        _hotkeySetting = setting
+        self.callback = callback
+        _isHotkeyDown = false
+        return generation
+    }
+
+    private func invalidateRegistrationStateLocked() {
+        activeRegistrationGeneration = nil
+        callback = nil
+        _isHotkeyDown = false
+    }
+
+    private func publishTapRunLoop(
+        _ runLoop: CFRunLoop,
+        registrationGeneration: UInt64
+    ) -> Bool {
+        lock.withLock {
+            guard activeRegistrationGeneration == registrationGeneration else {
+                return false
             }
+            tapRunLoop = runLoop
+            return true
         }
     }
 
     /// Tear down the event tap and its run loop. Must be called with the lock held.
     private func tearDownTap() {
-        callback = nil
-        _isHotkeyDown = false
+        invalidateRegistrationStateLocked()
 
         #if canImport(ApplicationServices)
             if let tap = eventTap {
@@ -286,12 +391,12 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
             CFMachPortInvalidate(tap)
         }
 
-        // Release the retained self-pointer now that the mach port is
-        // invalidated and no more callbacks can fire.
-        if let pointer = retainedSelfPointer {
-            Unmanaged<CGEventTapHotkeyProvider>.fromOpaque(pointer)
+        // Release the retained callback context now that the mach port is
+        // invalidated. Its generation has already been fenced above.
+        if let pointer = retainedCallbackContextPointer {
+            Unmanaged<EventTapCallbackContext>.fromOpaque(pointer)
                 .release()
-            retainedSelfPointer = nil
+            retainedCallbackContextPointer = nil
         }
 
         eventTap = nil
@@ -302,6 +407,19 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
 }
 
 // MARK: - CGEventTap C callback
+
+private final class EventTapCallbackContext: @unchecked Sendable {
+    weak var provider: CGEventTapHotkeyProvider?
+    let registrationGeneration: UInt64
+
+    init(
+        provider: CGEventTapHotkeyProvider,
+        registrationGeneration: UInt64
+    ) {
+        self.provider = provider
+        self.registrationGeneration = registrationGeneration
+    }
+}
 
 #if canImport(ApplicationServices)
     /// The C-compatible callback invoked by the CGEventTap.
@@ -318,20 +436,33 @@ public final class CGEventTapHotkeyProvider: HotkeyProviding, @unchecked Sendabl
             return Unmanaged.passUnretained(event)
         }
 
-        let provider = Unmanaged<CGEventTapHotkeyProvider>
+        let context = Unmanaged<EventTapCallbackContext>
             .fromOpaque(userInfo)
             .takeUnretainedValue()
+        guard let provider = context.provider else {
+            return Unmanaged.passUnretained(event)
+        }
+        let registrationGeneration = context.registrationGeneration
 
         switch type {
         case .flagsChanged:
-            provider.handleFlagsChanged(event)
+            provider.handleFlagsChanged(
+                event,
+                registrationGeneration: registrationGeneration)
         case .keyDown:
-            provider.handleKeyEvent(event, isKeyDown: true)
+            provider.handleKeyEvent(
+                event,
+                isKeyDown: true,
+                registrationGeneration: registrationGeneration)
         case .keyUp:
-            provider.handleKeyEvent(event, isKeyDown: false)
+            provider.handleKeyEvent(
+                event,
+                isKeyDown: false,
+                registrationGeneration: registrationGeneration)
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // Re-enable the tap if the system disables it.
-            provider.reEnableTap()
+            provider.reEnableTap(
+                registrationGeneration: registrationGeneration)
         default:
             break
         }

@@ -12,6 +12,16 @@ import Foundation
 /// hard-coded.
 public struct ShortcutBinding: Codable, Sendable, Equatable {
 
+    public enum Kind: String, Codable, Sendable {
+        case key
+        case modifierOnly
+    }
+
+    /// Whether this binding includes a non-modifier key. Keeping this explicit
+    /// avoids confusing modifier-only input with the physical A key, whose
+    /// macOS virtual key code is also zero.
+    public var kind: Kind
+
     /// Device-independent modifier flags (NSEvent.ModifierFlags raw values).
     ///
     /// Uses the same constants as `HotkeySetting`:
@@ -44,10 +54,48 @@ public struct ShortcutBinding: Codable, Sendable, Equatable {
 
     // MARK: - Initializers
 
-    public init(modifierFlags: UInt, keyCode: UInt16, label: String) {
+    public init(
+        kind: Kind = .key,
+        modifierFlags: UInt,
+        keyCode: UInt16,
+        label: String
+    ) {
+        self.kind = kind
         self.modifierFlags = modifierFlags
         self.keyCode = keyCode
         self.label = label
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case modifierFlags
+        case keyCode
+        case label
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        modifierFlags = try container.decode(UInt.self, forKey: .modifierFlags)
+        keyCode = try container.decode(UInt16.self, forKey: .keyCode)
+        label = try container.decode(String.self, forKey: .label)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind)
+            ?? Self.inferLegacyKind(keyCode: keyCode, label: label)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(modifierFlags, forKey: .modifierFlags)
+        try container.encode(keyCode, forKey: .keyCode)
+        try container.encode(label, forKey: .label)
+    }
+
+    private static func inferLegacyKind(keyCode: UInt16, label: String) -> Kind {
+        guard keyCode == 0 else { return .key }
+        let modifierGlyphs = CharacterSet(charactersIn: "⌃⌥⇧⌘ ")
+        return label.unicodeScalars.allSatisfy(modifierGlyphs.contains)
+            ? .modifierOnly
+            : .key
     }
 
     // MARK: - Matching
@@ -64,9 +112,26 @@ public struct ShortcutBinding: Codable, Sendable, Equatable {
     ///   device-independent modifier flags.
     /// - Returns: `true` if the event matches this binding.
     public func matches(keyCode eventKeyCode: UInt16, modifierFlags eventFlags: UInt) -> Bool {
+        guard kind == .key else { return false }
         guard eventKeyCode == keyCode else { return false }
-        let mask = Self.controlFlag | Self.optionFlag | Self.shiftFlag | Self.commandFlag
-        return (eventFlags & mask) == (modifierFlags & mask)
+        return (eventFlags & Self.standardModifierMask) == standardModifierFlags
+    }
+
+    public static let standardModifierMask =
+        controlFlag | optionFlag | shiftFlag | commandFlag
+
+    public var standardModifierFlags: UInt {
+        modifierFlags & Self.standardModifierMask
+    }
+
+    public var standardModifierCount: Int {
+        [hasControl, hasOption, hasShift, hasCommand].filter { $0 }.count
+    }
+
+    public func hasSameKeystroke(as other: ShortcutBinding) -> Bool {
+        kind == .key && other.kind == .key
+            && keyCode == other.keyCode
+            && standardModifierFlags == other.standardModifierFlags
     }
 
     // MARK: - Convenience query
@@ -106,10 +171,17 @@ public struct ShortcutBinding: Codable, Sendable, Equatable {
         label: "Escape"
     )
 
-    /// Default private mode shortcut: ⌃⌥P (Control+Option+P, key code 35).
-    public static let defaultPrivateMode = ShortcutBinding(
+    /// Legacy private mode shortcut retained only for exact migration.
+    public static let legacyDefaultPrivateMode = ShortcutBinding(
         modifierFlags: controlFlag | optionFlag,
         keyCode: 35,
         label: "⌃⌥P"
+    )
+
+    /// Default private mode shortcut: ⌃⇧M (Control+Shift+M, key code 46).
+    public static let defaultPrivateMode = ShortcutBinding(
+        modifierFlags: controlFlag | shiftFlag,
+        keyCode: 46,
+        label: "⌃⇧M"
     )
 }

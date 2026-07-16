@@ -11,7 +11,8 @@ public struct HotkeyHeldSession: Sendable {
 
 /// Preserves hotkey callback order and binds release to the session accepted
 /// for its press. Activation runs in one tracked task so a release can cancel
-/// an admission that is suspended behind prior pipeline ownership.
+/// a reservation suspended behind prior ownership. Once the pipeline admits a
+/// session, the activation returns that owner and release completes it.
 public final class HotkeyPipelineDriver: @unchecked Sendable {
     private enum Observation: Sendable {
         case sessionAccepted(HotkeyHeldSession)
@@ -55,11 +56,15 @@ public final class HotkeyPipelineDriver: @unchecked Sendable {
     private let continuation: AsyncStream<Command>.Continuation
     private let consumer: Task<Void, Never>
     private let observationConsumer: Task<Void, Never>
+    private let canAdmitPress: @Sendable (UInt64) -> Bool
     private let ingressLock = NSLock()
     private var ingressPress: PhysicalPress?
+    private var acceptsNewPresses = true
+    private var ingressTerminated = false
 
     public init(
         pipeline: any PipelineProviding,
+        canAdmitPress: @escaping @Sendable (UInt64) -> Bool = { _ in true },
         sessionAccepted: (@Sendable (DictationSessionID) async -> Void)? = nil,
         heldSessionAccepted: (@Sendable (HotkeyHeldSession) async -> Void)? = nil,
         sessionEnded: (@Sendable (DictationSessionID) async -> Void)? = nil
@@ -68,6 +73,7 @@ public final class HotkeyPipelineDriver: @unchecked Sendable {
         let (observations, observationContinuation) =
             AsyncStream<Observation>.makeStream()
         self.continuation = continuation
+        self.canAdmitPress = canAdmitPress
         self.observationConsumer = Task {
             for await observation in observations {
                 switch observation {
@@ -266,10 +272,13 @@ public final class HotkeyPipelineDriver: @unchecked Sendable {
         ingressLock.withLock {
             switch event {
             case .pressed:
-                guard ingressPress == nil else { return }
+                guard acceptsNewPresses, ingressPress == nil,
+                    canAdmitPress(hostTime)
+                else { return }
                 let press = PhysicalPress(
                     id: UUID(),
-                    releaseBoundary: AudioCaptureReleaseBoundary())
+                    releaseBoundary: AudioCaptureReleaseBoundary(
+                        pressHostTime: hostTime))
                 ingressPress = press
                 continuation.yield(
                     .event(event, hostTime: hostTime, press: press))
@@ -280,6 +289,26 @@ public final class HotkeyPipelineDriver: @unchecked Sendable {
                 continuation.yield(
                     .event(event, hostTime: hostTime, press: press))
             }
+        }
+    }
+
+    /// Fence new physical presses without disturbing a press that already owns
+    /// activation. Release events continue through this fence so availability
+    /// changes cannot strand or cancel an accepted dictation.
+    public func suspendNewPresses() {
+        ingressLock.withLock {
+            acceptsNewPresses = false
+        }
+    }
+
+    /// Reopen physical-press admission after the external availability fence
+    /// has fully cleared. Returns `false` after permanent invalidation.
+    @discardableResult
+    public func resumeNewPresses() -> Bool {
+        ingressLock.withLock {
+            guard !ingressTerminated else { return false }
+            acceptsNewPresses = true
+            return true
         }
     }
 
@@ -311,6 +340,9 @@ public final class HotkeyPipelineDriver: @unchecked Sendable {
 
     public func invalidate() {
         ingressLock.withLock {
+            guard !ingressTerminated else { return }
+            ingressTerminated = true
+            acceptsNewPresses = false
             ingressPress?.releaseBoundary.publish(
                 releaseHostTime: AudioCaptureReleaseFence.currentHostTime())
             ingressPress = nil

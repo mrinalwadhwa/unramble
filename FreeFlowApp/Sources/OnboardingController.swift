@@ -2,15 +2,6 @@ import AVFoundation
 import AppKit
 import FreeFlowKit
 
-/// Provide audio capture for mic preview during onboarding.
-protocol AudioPreviewProviding: AnyObject {
-    func startRecording() async throws
-    func stopRecording() async throws -> FreeFlowKit.AudioBuffer
-    var audioLevelStream: AsyncStream<Float>? { get }
-}
-
-extension AudioCaptureProvider: AudioPreviewProviding {}
-
 /// Drive the local onboarding flow: API key entry, accessibility and
 /// microphone permissions, mic selection, and a try-it dictation step.
 ///
@@ -27,7 +18,7 @@ final class OnboardingController {
 
     /// Called when onboarding completes successfully. AppDelegate uses
     /// this to register the hotkey and transition to the active state.
-    var onComplete: (() -> Void)?
+    var onComplete: ((_ credentialedMode: DictationMode?) -> Void)?
 
     /// Called when the user needs to register the hotkey during the
     /// try-it onboarding step. AppDelegate wires this to its own
@@ -44,18 +35,24 @@ final class OnboardingController {
     /// The audio device provider for mic selection, set by AppDelegate.
     var audioDeviceProvider: CoreAudioDeviceProvider?
 
-    /// The audio capture provider for mic preview, set by AppDelegate.
-    var audioPreviewProvider: AudioPreviewProviding?
-
-    /// The sound feedback provider, set by AppDelegate. Used to mute
-    /// start/stop cues during mic preview so onboarding is silent.
-    var soundFeedbackProvider: SoundFeedbackProvider?
+    /// Shared owner of microphone preview demand, set by AppDelegate.
+    var microphoneCaptureCoordinator: MicrophoneCaptureCoordinator?
 
     /// Polling timer for accessibility permission checks.
     private var accessibilityPollTimer: Timer?
 
-    /// Task for streaming audio levels during mic preview.
-    private var audioLevelTask: Task<Void, Never>?
+    private var microphoneListTask: Task<Void, Never>?
+    private var microphoneListGeneration: UInt64 = 0
+    private var microphoneSelectionTask: Task<Void, Never>?
+    private var microphoneSelectionGeneration: UInt64 = 0
+    private var microphonePreviewClient: MicrophonePreviewClient?
+    private var isPreviewWindowSessionActive = false
+    private var isPreviewCaptureAvailable = false
+
+    /// API-key-only onboarding must not persist cloud mode until key storage
+    /// succeeds. The requested mode is delivered with successful completion.
+    private var isAPIKeyOnlyFlow = false
+    private var credentialedMode: DictationMode?
 
     // MARK: - Initialization
 
@@ -71,19 +68,32 @@ final class OnboardingController {
     /// Open the onboarding window showing only the API key entry step.
     /// Used when toggling off private mode without a stored key.
     func showAPIKeyEntry() {
+        dismissWindow()
+        isPreviewWindowSessionActive = true
+        isAPIKeyOnlyFlow = true
+        credentialedMode = .cloud
         let win = OnboardingWindow(bridge: bridge)
         bridge.webView = win.webView
         window = win
 
-        window?.onDidFinishNavigation = { [weak self] in
+        win.onClose = { [weak self, weak win] in
+            guard let self, self.window === win else { return }
+            self.dismissWindow()
+        }
+
+        win.onDidFinishNavigation = { [weak self] in
             self?.bridge.pushStepIcons()
         }
-        window?.loadBundledOnboarding(query: "mode=api-key-only")
-        window?.present()
+        win.loadBundledOnboarding(query: "mode=api-key-only")
+        win.present()
     }
 
     /// Open the onboarding window and load the bundled onboarding page.
     func showWindow() {
+        dismissWindow()
+        isPreviewWindowSessionActive = true
+        isAPIKeyOnlyFlow = false
+        credentialedMode = nil
         // Always create a fresh window. The previous window's bridge
         // handler is removed on close/dismiss, so reusing it would
         // leave the JS bridge non-functional.
@@ -91,17 +101,24 @@ final class OnboardingController {
         bridge.webView = win.webView
         window = win
 
-        window?.onDidFinishNavigation = { [weak self] in
+        win.onClose = { [weak self, weak win] in
+            guard let self, self.window === win else { return }
+            self.dismissWindow()
+        }
+
+        win.onDidFinishNavigation = { [weak self] in
             self?.bridge.pushOnboardingState()
             self?.bridge.pushStepIcons()
         }
-        window?.loadBundledOnboarding()
-        window?.present()
+        win.loadBundledOnboarding()
+        win.present()
     }
 
     /// Dismiss the onboarding window and clean up.
     func dismissWindow() {
+        isPreviewWindowSessionActive = false
         stopAccessibilityPolling()
+        invalidateMicrophoneDeviceTasks()
         handleStopMicPreview()
         window?.dismiss()
         window = nil
@@ -164,6 +181,10 @@ final class OnboardingController {
 
     private func handleSetDictationMode(mode: String) {
         guard let newMode = DictationMode(rawValue: mode) else { return }
+        if isAPIKeyOnlyFlow {
+            credentialedMode = newMode
+            return
+        }
         Settings.shared.dictationMode = newMode
     }
 
@@ -185,9 +206,18 @@ final class OnboardingController {
 
     private func handleListMicrophones() {
         guard let audioDeviceProvider else { return }
-        Task {
+        microphoneListGeneration &+= 1
+        let generation = microphoneListGeneration
+        microphoneListTask?.cancel()
+        microphoneListTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
             let devices = await audioDeviceProvider.availableDevices()
+            guard !Task.isCancelled else { return }
             let current = await audioDeviceProvider.currentDevice()
+            guard !Task.isCancelled,
+                let self,
+                generation == self.microphoneListGeneration
+            else { return }
             let isAutoDetect = audioDeviceProvider.isAutoDetect
 
             let defaultDevice = devices.first(where: { $0.isDefault })
@@ -214,97 +244,105 @@ final class OnboardingController {
                 devices: deviceList,
                 currentId: isAutoDetect ? 0 : current?.id
             )
+            microphoneListTask = nil
         }
     }
 
     // MARK: - Action: selectMicrophone
 
     private func handleSelectMicrophone(id: UInt32) {
-        guard let audioDeviceProvider else { return }
-        Task {
+        guard let microphoneCaptureCoordinator else { return }
+        microphoneListGeneration &+= 1
+        microphoneListTask?.cancel()
+        microphoneListTask = nil
+        microphoneSelectionGeneration &+= 1
+        let generation = microphoneSelectionGeneration
+        microphoneSelectionTask?.cancel()
+        microphoneSelectionTask = Task { [weak self] in
             do {
-                // Stop current preview and wait for it to complete.
-                await stopMicPreviewAsync()
-
-                // Select the device, or clear to auto-detect.
-                if id == 0 {
-                    audioDeviceProvider.clearSelection()
-                } else {
-                    try await audioDeviceProvider.selectDevice(id: id)
-                }
-                bridge.pushMicrophoneSelected(id: id)
-
-                // Small delay to let the audio system settle after device change.
-                try await Task.sleep(nanoseconds: 100_000_000)
-
-                // Start preview with the new device.
-                await startMicPreviewAsync()
+                try Task.checkCancellation()
+                try await microphoneCaptureCoordinator.selectDevice(
+                    id: id == 0 ? nil : id)
+                guard !Task.isCancelled,
+                    let self,
+                    generation == self.microphoneSelectionGeneration
+                else { return }
+                self.bridge.pushMicrophoneSelected(id: id)
             } catch {
+                guard !Task.isCancelled,
+                    let self,
+                    generation == self.microphoneSelectionGeneration
+                else {
+                    return
+                }
                 Log.debug("[OnboardingController] selectMicrophone failed: \(error)")
             }
+            guard !Task.isCancelled,
+                let self,
+                generation == self.microphoneSelectionGeneration
+            else { return }
+            self.microphoneSelectionTask = nil
+            self.pushMicPreviewAvailability(self.isPreviewCaptureAvailable)
+            self.handleListMicrophones()
         }
+    }
+
+    private func invalidateMicrophoneDeviceTasks() {
+        microphoneListGeneration &+= 1
+        microphoneListTask?.cancel()
+        microphoneListTask = nil
+
+        microphoneSelectionGeneration &+= 1
+        microphoneSelectionTask?.cancel()
+        microphoneSelectionTask = nil
     }
 
     // MARK: - Action: startMicPreview
 
     private func handleStartMicPreview() {
-        Task {
-            await startMicPreviewAsync()
+        guard isPreviewWindowSessionActive,
+            let microphoneCaptureCoordinator
+        else { return }
+
+        let client: MicrophonePreviewClient
+        if let microphonePreviewClient {
+            client = microphonePreviewClient
+        } else {
+            client = MicrophonePreviewClient(
+                coordinator: microphoneCaptureCoordinator)
+            microphonePreviewClient = client
         }
+        client.start(
+            isEligible: { [weak self] in
+                self?.isPreviewWindowSessionActive == true
+            },
+            onAudioLevel: { [weak self] level in
+                self?.bridge.pushAudioLevel(level: level)
+            },
+            onAvailability: { [weak self] isAvailable in
+                self?.pushMicPreviewAvailability(isAvailable)
+            })
     }
 
-    private func startMicPreviewAsync() async {
-        guard let audioPreviewProvider else { return }
-
-        // Stop any existing preview first.
-        await stopMicPreviewAsync()
-
-        do {
-            // Mute sound feedback during preview so the mic selection
-            // step does not play the start/stop cues.
-            if let capture = audioPreviewProvider as? AudioCaptureProvider {
-                capture.setSoundFeedbackProvider(nil)
-            }
-
-            try await audioPreviewProvider.startRecording()
-
-            // Stream audio levels to the bridge.
-            audioLevelTask = Task { [weak self] in
-                guard let stream = audioPreviewProvider.audioLevelStream else {
-                    return
-                }
-                for await level in stream {
-                    if Task.isCancelled { break }
-                    await MainActor.run {
-                        self?.bridge.pushAudioLevel(level: level)
-                    }
-                }
-            }
-        } catch {
-            Log.debug("[OnboardingController] startMicPreview failed: \(error)")
-        }
+    private func pushMicPreviewAvailability(_ isAvailable: Bool) {
+        isPreviewCaptureAvailable = isAvailable
+        bridge.pushEvent(
+            name: "micPreviewAvailability",
+            data: ["available": isAvailable])
     }
 
     // MARK: - Action: stopMicPreview
 
     private func handleStopMicPreview() {
-        Task {
-            await stopMicPreviewAsync()
-        }
+        stopMicPreviewSync()
     }
 
-    private func stopMicPreviewAsync() async {
-        audioLevelTask?.cancel()
-        audioLevelTask = nil
-
-        guard let audioPreviewProvider else { return }
-        _ = try? await audioPreviewProvider.stopRecording()
-        // Restore sound feedback after preview stops.
-        if let soundFeedbackProvider,
-            let capture = audioPreviewProvider as? AudioCaptureProvider
-        {
-            capture.setSoundFeedbackProvider(soundFeedbackProvider)
+    private func stopMicPreviewSync() {
+        guard let microphonePreviewClient else {
+            pushMicPreviewAvailability(false)
+            return
         }
+        microphonePreviewClient.stop()
     }
 
     // MARK: - Action: checkAccessibility
@@ -399,7 +437,8 @@ final class OnboardingController {
     // MARK: - Action: completeOnboarding
 
     private func handleCompleteOnboarding() {
+        let completedMode = isAPIKeyOnlyFlow ? credentialedMode : nil
         dismissWindow()
-        onComplete?()
+        onComplete?(completedMode)
     }
 }

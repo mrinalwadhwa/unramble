@@ -11,8 +11,15 @@ import Foundation
     public final class AudioCaptureReleaseBoundary: @unchecked Sendable {
         private let lock = NSLock()
         private var storedReleaseHostTime: UInt64?
+        public let pressHostTime: UInt64
 
-        public init() {}
+        public convenience init() {
+            self.init(pressHostTime: AudioCaptureReleaseFence.currentHostTime())
+        }
+
+        public init(pressHostTime: UInt64) {
+            self.pressHostTime = pressHostTime
+        }
 
         public var releaseHostTime: UInt64? {
             lock.withLock { storedReleaseHostTime }

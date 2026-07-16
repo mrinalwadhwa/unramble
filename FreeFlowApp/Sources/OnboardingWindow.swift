@@ -10,6 +10,11 @@ final class OnboardingWindow: NSWindow, WKNavigationDelegate {
     /// Called when the web view finishes loading the onboarding page.
     var onDidFinishNavigation: (() -> Void)?
 
+    /// Called before a title-bar close hides the window. The controller uses
+    /// this to release native resources that JavaScript cannot clean up once
+    /// its bridge handler is removed.
+    var onClose: (() -> Void)?
+
     private static func log(_ msg: String) {
         #if DEBUG
             Log.debug("[OnboardingWindow] \(msg)")
@@ -128,7 +133,10 @@ final class OnboardingWindow: NSWindow, WKNavigationDelegate {
     /// process) and hides the window so it can be re-presented via the
     /// menu bar "Open Setup…" item.
     override func close() {
-        dismiss()
+        onClose?()
+        if isVisible {
+            dismiss()
+        }
     }
 
     // MARK: - WKNavigationDelegate

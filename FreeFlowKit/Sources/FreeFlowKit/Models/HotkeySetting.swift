@@ -45,6 +45,20 @@ public enum HotkeySetting: Sendable, Equatable {
             }
         }
 
+        /// Device-independent modifier family used for shortcut conflicts.
+        public var standardFlag: UInt {
+            switch self {
+            case .rightOption, .leftOption:
+                ShortcutBinding.optionFlag
+            case .rightCommand, .leftCommand:
+                ShortcutBinding.commandFlag
+            case .rightControl, .leftControl:
+                ShortcutBinding.controlFlag
+            case .rightShift, .leftShift:
+                ShortcutBinding.shiftFlag
+            }
+        }
+
         /// Human-readable display name for the modifier key.
         public var displayName: String {
             switch self {

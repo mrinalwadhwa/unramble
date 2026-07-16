@@ -31,6 +31,84 @@ private actor DictationPipelineSuspensionGate {
     }
 }
 
+private actor DictationPipelineCompletionProbe {
+    private var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+
+    func hasCompleted() -> Bool {
+        completed
+    }
+}
+
+private actor DictationPipelineGatedBatchProvider: BatchDictationProviding {
+    private let text: String
+    private let gatedCall: Int
+    private let failingCalls: Set<Int>
+    private let gate: DictationPipelineSuspensionGate
+    private var audioCalls: [Data] = []
+
+    init(
+        text: String,
+        gatedCall: Int,
+        failingCalls: Set<Int> = [],
+        gate: DictationPipelineSuspensionGate
+    ) {
+        self.text = text
+        self.gatedCall = gatedCall
+        self.failingCalls = failingCalls
+        self.gate = gate
+    }
+
+    func dictate(
+        audio: Data,
+        context: AppContext,
+        language: String?
+    ) async throws -> String {
+        audioCalls.append(audio)
+        let call = audioCalls.count
+        if failingCalls.contains(call) {
+            throw DictationError.requestFailed(
+                statusCode: 500,
+                message: "planned failure")
+        }
+        if call == gatedCall {
+            await gate.waitForRelease()
+        }
+        return text
+    }
+
+    func receivedAudio() -> [Data] {
+        audioCalls
+    }
+}
+
+private actor DictationPipelineGatedTextInjector: TextInjecting {
+    private let gate: DictationPipelineSuspensionGate
+    private var startedTexts: [String] = []
+    private var committedTexts: [String] = []
+
+    init(gate: DictationPipelineSuspensionGate) {
+        self.gate = gate
+    }
+
+    func inject(text: String, into context: AppContext) async throws {
+        startedTexts.append(text)
+        await gate.waitForRelease()
+        committedTexts.append(text)
+    }
+
+    func started() -> [String] {
+        startedTexts
+    }
+
+    func committed() -> [String] {
+        committedTexts
+    }
+}
+
 final class DictationPipelineTests: XCTestCase {
 
     // MARK: - Helpers
@@ -92,6 +170,30 @@ final class DictationPipelineTests: XCTestCase {
         }
 
         XCTFail("Capture did not become ready", file: file, line: line)
+    }
+
+    private func waitForReplacementSeal(
+        _ pipeline: DictationPipeline,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<1_000 {
+            if await pipeline.isSealedForReplacement { return }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("Replacement seal did not publish", file: file, line: line)
+    }
+
+    private func waitForCaptureMaintenanceSeal(
+        _ pipeline: DictationPipeline,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<1_000 {
+            if await pipeline.isSealedForCaptureMaintenance { return }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("Capture maintenance seal did not publish", file: file, line: line)
     }
 
     // MARK: - Initial state
@@ -355,6 +457,586 @@ final class DictationPipelineTests: XCTestCase {
             "Retirement must not leave a coordinator session without a pipeline owner")
 
         _ = await coordinator.reset()
+    }
+
+    func testReplacementSealWaitsForLiveRecordingWithoutCancellingIt() async {
+        let audio = MockAudioProvider()
+        let coordinator = RecordingCoordinator()
+        let injector = MockTextInjector()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: injector,
+            coordinator: coordinator)
+
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+
+        let seal = Task { await pipeline.sealForReplacement() }
+        await waitForReplacementSeal(pipeline)
+
+        XCTAssertTrue(audio.isRecording)
+        XCTAssertEqual(audio.stopCallCount, 0)
+        let recordingState = await coordinator.state
+        XCTAssertEqual(recordingState, .recording)
+
+        await pipeline.complete(sessionID: sessionID)
+        await seal.value
+
+        XCTAssertEqual(audio.stopCallCount, 1)
+        let idleState = await coordinator.state
+        let currentSessionID = await pipeline.currentSessionID
+        XCTAssertEqual(idleState, .idle)
+        XCTAssertNil(currentSessionID)
+        XCTAssertEqual(injector.lastInjectedText, "Mock dictation")
+        let replacementSessionID = await pipeline.activate()
+        XCTAssertNil(
+            replacementSessionID,
+            "A sealed generation must reject replacement capture")
+    }
+
+    func testCaptureMaintenanceDrainsLiveRecordingAndSealsOnlyTransaction()
+        async throws
+    {
+        let audio = MockAudioProvider()
+        let coordinator = RecordingCoordinator()
+        let injector = MockTextInjector()
+        let transcriptBuffer = TranscriptBuffer()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: injector,
+            coordinator: coordinator,
+            transcriptBuffer: transcriptBuffer)
+
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+
+        let maintenanceGate = DictationPipelineSuspensionGate()
+        let maintenance = Task {
+            try await pipeline.withQuiescentCaptureMaintenance {
+                await maintenanceGate.waitForRelease()
+            }
+        }
+        await waitForCaptureMaintenanceSeal(pipeline)
+
+        XCTAssertTrue(audio.isRecording)
+        XCTAssertEqual(audio.stopCallCount, 0)
+
+        await pipeline.complete(sessionID: sessionID)
+        await maintenanceGate.waitUntilEntered()
+
+        XCTAssertFalse(audio.isRecording)
+        XCTAssertEqual(audio.stopCallCount, 1)
+        XCTAssertEqual(injector.lastInjectedText, "Mock dictation")
+        let blockedSessionID = await pipeline.activate()
+        await pipeline.pasteBufferedTranscript()
+        let retainedTranscript = await transcriptBuffer.lastTranscript
+        XCTAssertNil(
+            blockedSessionID,
+            "Capture admission must remain sealed throughout maintenance")
+        XCTAssertEqual(injector.injectionCount, 1)
+        XCTAssertEqual(retainedTranscript, "Mock dictation")
+
+        await maintenanceGate.release()
+        try await maintenance.value
+
+        await pipeline.pasteBufferedTranscript()
+        XCTAssertEqual(injector.injectionCount, 2)
+
+        let replacementSessionID = await activateAndWaitForCapture(
+            pipeline, audioProvider: audio)
+        XCTAssertNotNil(
+            replacementSessionID,
+            "Capture admission must reopen after maintenance")
+        if let replacementSessionID {
+            await pipeline.complete(sessionID: replacementSessionID)
+        }
+    }
+
+    func testCancellingCaptureMaintenanceWaitReopensAdmissionWithoutCancellingSession()
+        async
+    {
+        let audio = MockAudioProvider()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator())
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+
+        let finished = expectation(description: "maintenance cancellation")
+        let maintenance = Task { () -> Bool in
+            defer { finished.fulfill() }
+            do {
+                try await pipeline.withQuiescentCaptureMaintenance {}
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }
+        await waitForCaptureMaintenanceSeal(pipeline)
+        maintenance.cancel()
+
+        let waitResult = await XCTWaiter().fulfillment(
+            of: [finished], timeout: 1)
+        if waitResult != .completed {
+            await pipeline.complete(sessionID: sessionID)
+            _ = await maintenance.value
+            return XCTFail("Cancelled maintenance remained suspended")
+        }
+
+        let cancelled = await maintenance.value
+        let remainsSealed = await pipeline.isSealedForCaptureMaintenance
+        XCTAssertTrue(cancelled)
+        XCTAssertFalse(remainsSealed)
+        XCTAssertTrue(audio.isRecording)
+        XCTAssertEqual(audio.stopCallCount, 0)
+
+        await pipeline.complete(sessionID: sessionID)
+        XCTAssertFalse(audio.isRecording)
+        XCTAssertEqual(audio.stopCallCount, 1)
+    }
+
+    func testReplacementSealWaitsForActiveCaptureMaintenance() async throws {
+        let pipeline = DictationPipeline(
+            audioProvider: MockAudioProvider(),
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator())
+        let maintenanceGate = DictationPipelineSuspensionGate()
+        let maintenance = Task {
+            try await pipeline.withQuiescentCaptureMaintenance {
+                await maintenanceGate.waitForRelease()
+            }
+        }
+        await maintenanceGate.waitUntilEntered()
+
+        let sealProbe = DictationPipelineCompletionProbe()
+        let replacementSeal = Task {
+            await pipeline.sealForReplacement()
+            await sealProbe.markCompleted()
+        }
+        await waitForReplacementSeal(pipeline)
+
+        let completedDuringMaintenance = await sealProbe.hasCompleted()
+        XCTAssertFalse(completedDuringMaintenance)
+
+        await maintenanceGate.release()
+        try await maintenance.value
+        await replacementSeal.value
+
+        let completedAfterMaintenance = await sealProbe.hasCompleted()
+        let sealedSessionID = await pipeline.activate()
+        XCTAssertTrue(completedAfterMaintenance)
+        XCTAssertNil(sealedSessionID)
+    }
+
+    func testRetirementWaitsForActiveCaptureMaintenance() async throws {
+        let pipeline = DictationPipeline(
+            audioProvider: MockAudioProvider(),
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator())
+        let maintenanceGate = DictationPipelineSuspensionGate()
+        let maintenance = Task {
+            try await pipeline.withQuiescentCaptureMaintenance {
+                await maintenanceGate.waitForRelease()
+            }
+        }
+        await maintenanceGate.waitUntilEntered()
+
+        let retirementProbe = DictationPipelineCompletionProbe()
+        let retirement = Task {
+            await pipeline.beginRetirement()
+            await retirementProbe.markCompleted()
+        }
+        await waitForReplacementSeal(pipeline)
+
+        let completedDuringMaintenance = await retirementProbe.hasCompleted()
+        XCTAssertFalse(completedDuringMaintenance)
+
+        await maintenanceGate.release()
+        try await maintenance.value
+        await retirement.value
+
+        let completedAfterMaintenance = await retirementProbe.hasCompleted()
+        let retiredSessionID = await pipeline.activate()
+        XCTAssertTrue(completedAfterMaintenance)
+        XCTAssertNil(retiredSessionID)
+    }
+
+    func testReplacementSealDrainsGatedProcessingWithoutLosingCapturedSpeech()
+        async
+    {
+        let audio = MockAudioProvider()
+        let exactCapturedAudio = audio.stubbedBuffer.data
+        let processingGate = DictationPipelineSuspensionGate()
+        let batch = DictationPipelineGatedBatchProvider(
+            text: "speech admitted before replacement",
+            gatedCall: 1,
+            gate: processingGate)
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: batch),
+            textInjector: injector,
+            coordinator: coordinator)
+
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+
+        let completion = Task {
+            await pipeline.complete(sessionID: sessionID)
+        }
+        await processingGate.waitUntilEntered()
+
+        let sealProbe = DictationPipelineCompletionProbe()
+        let seal = Task {
+            await pipeline.sealForReplacement()
+            await sealProbe.markCompleted()
+        }
+        await waitForReplacementSeal(pipeline)
+
+        let processingState = await coordinator.state
+        let sealCompletedBeforeProcessing = await sealProbe.hasCompleted()
+        let replacementSessionID = await pipeline.activate()
+        let receivedAudio = await batch.receivedAudio()
+        XCTAssertEqual(processingState, .processing)
+        XCTAssertFalse(sealCompletedBeforeProcessing)
+        XCTAssertNil(replacementSessionID)
+        XCTAssertEqual(receivedAudio, [exactCapturedAudio])
+        XCTAssertNil(injector.lastInjectedText)
+
+        await processingGate.release()
+        await completion.value
+        await seal.value
+
+        let finalState = await coordinator.state
+        let finalOwner = await pipeline.currentSessionID
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalOwner)
+        XCTAssertEqual(injector.injections.map(\.text), [
+            "speech admitted before replacement"
+        ])
+    }
+
+    func testReplacementSealDrainsGatedInjectionWithoutDroppingPublication()
+        async
+    {
+        let audio = MockAudioProvider()
+        let injectionGate = DictationPipelineSuspensionGate()
+        let injector = DictationPipelineGatedTextInjector(gate: injectionGate)
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider(
+                    stubbedText: "publication admitted before replacement")),
+            textInjector: injector,
+            coordinator: coordinator)
+
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+
+        let completion = Task {
+            await pipeline.complete(sessionID: sessionID)
+        }
+        await injectionGate.waitUntilEntered()
+
+        let sealProbe = DictationPipelineCompletionProbe()
+        let seal = Task {
+            await pipeline.sealForReplacement()
+            await sealProbe.markCompleted()
+        }
+        await waitForReplacementSeal(pipeline)
+
+        let injectingState = await coordinator.state
+        let sealCompletedBeforeInjection = await sealProbe.hasCompleted()
+        let replacementSessionID = await pipeline.activate()
+        let startedTexts = await injector.started()
+        let committedTextsBeforeRelease = await injector.committed()
+        XCTAssertEqual(injectingState, .injecting)
+        XCTAssertFalse(sealCompletedBeforeInjection)
+        XCTAssertNil(replacementSessionID)
+        XCTAssertEqual(startedTexts, [
+            "publication admitted before replacement"
+        ])
+        XCTAssertEqual(committedTextsBeforeRelease, [])
+
+        await injectionGate.release()
+        await completion.value
+        await seal.value
+
+        let finalState = await coordinator.state
+        let finalOwner = await pipeline.currentSessionID
+        let committedTexts = await injector.committed()
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalOwner)
+        XCTAssertEqual(committedTexts, [
+            "publication admitted before replacement"
+        ])
+    }
+
+    func testReplacementSealAllowsOwnedRecoveryRetryToFinishExactCapturedSpeech()
+        async
+    {
+        let audio = MockAudioProvider()
+        let exactCapturedAudio = audio.stubbedBuffer.data
+        let retryGate = DictationPipelineSuspensionGate()
+        let batch = DictationPipelineGatedBatchProvider(
+            text: "recovered speech admitted before replacement",
+            gatedCall: 2,
+            failingCalls: [1],
+            gate: retryGate)
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: batch),
+            textInjector: injector,
+            coordinator: coordinator)
+
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+        await pipeline.complete(sessionID: sessionID)
+
+        let failedState = await coordinator.state
+        let canRetry = await pipeline.canRetryDictation(sessionID: sessionID)
+        let initialAudioAttempts = await batch.receivedAudio()
+        XCTAssertEqual(failedState, .dictationFailed)
+        XCTAssertTrue(canRetry)
+        XCTAssertEqual(initialAudioAttempts, [exactCapturedAudio])
+
+        let sealProbe = DictationPipelineCompletionProbe()
+        let seal = Task {
+            await pipeline.sealForReplacement()
+            await sealProbe.markCompleted()
+        }
+        await waitForReplacementSeal(pipeline)
+
+        let replacementSessionID = await pipeline.activate()
+        let sealCompletedBeforeRetry = await sealProbe.hasCompleted()
+        XCTAssertNil(replacementSessionID)
+        XCTAssertFalse(sealCompletedBeforeRetry)
+
+        let retry = Task {
+            await pipeline.retryDictation(sessionID: sessionID)
+        }
+        await retryGate.waitUntilEntered()
+
+        let retryingState = await coordinator.state
+        let audioAttempts = await batch.receivedAudio()
+        let sealCompletedDuringRetry = await sealProbe.hasCompleted()
+        XCTAssertEqual(retryingState, .processing)
+        XCTAssertEqual(audioAttempts, [exactCapturedAudio, exactCapturedAudio])
+        XCTAssertFalse(sealCompletedDuringRetry)
+
+        await retryGate.release()
+        await retry.value
+        await seal.value
+
+        let finalState = await coordinator.state
+        let finalOwner = await pipeline.currentSessionID
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalOwner)
+        XCTAssertEqual(injector.injections.map(\.text), [
+            "recovered speech admitted before replacement"
+        ])
+    }
+
+    func testReplacementSealDrainsAdmittedCancellationBeforeReturning() async {
+        let audio = MockAudioProvider()
+        let cancellationGate = DictationPipelineSuspensionGate()
+        let batch = MockBatchProvider()
+        let injector = MockTextInjector()
+        let coordinator = RecordingCoordinator()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: batch),
+            textInjector: injector,
+            coordinator: coordinator,
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            cancellationDrainDidStart: {
+                await cancellationGate.waitForRelease()
+            })
+
+        guard
+            let sessionID = await activateAndWaitForCapture(
+                pipeline, audioProvider: audio)
+        else {
+            return XCTFail("Expected session admission")
+        }
+
+        let cancellation = Task {
+            await pipeline.cancel(sessionID: sessionID)
+        }
+        await cancellationGate.waitUntilEntered()
+
+        let sealProbe = DictationPipelineCompletionProbe()
+        let seal = Task {
+            await pipeline.sealForReplacement()
+            await sealProbe.markCompleted()
+        }
+        await waitForReplacementSeal(pipeline)
+
+        let replacementSessionID = await pipeline.activate()
+        let sealCompletedBeforeCancellation = await sealProbe.hasCompleted()
+        XCTAssertNil(replacementSessionID)
+        XCTAssertFalse(sealCompletedBeforeCancellation)
+
+        await cancellationGate.release()
+        await cancellation.value
+        await seal.value
+
+        let finalState = await coordinator.state
+        let finalOwner = await pipeline.currentSessionID
+        XCTAssertEqual(finalState, .idle)
+        XCTAssertNil(finalOwner)
+        XCTAssertFalse(audio.isRecording)
+        XCTAssertGreaterThanOrEqual(audio.stopCallCount, 1)
+        XCTAssertEqual(batch.dictateCallCount, 0)
+        XCTAssertEqual(injector.injectionCount, 0)
+    }
+
+    func testActivationReservedBeforeReplacementSealFinishesOnOldPipeline() async {
+        let audio = MockAudioProvider()
+        let activationGate = DictationPipelineSuspensionGate()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator(),
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            activationDidReserve: {
+                await activationGate.waitForRelease()
+            })
+
+        let activation = Task { await pipeline.activate() }
+        await activationGate.waitUntilEntered()
+
+        let seal = Task { await pipeline.sealForReplacement() }
+        await waitForReplacementSeal(pipeline)
+        await activationGate.release()
+
+        let sessionID = await activation.value
+        XCTAssertNotNil(
+            sessionID,
+            "An activation that reserved admission before the seal must keep its backend")
+        await waitForCaptureReady(audio, after: 0)
+        XCTAssertTrue(audio.isRecording)
+
+        if let sessionID {
+            await pipeline.complete(sessionID: sessionID)
+        }
+        await seal.value
+        let currentSessionID = await pipeline.currentSessionID
+        XCTAssertNil(currentSessionID)
+    }
+
+    func testReplacementSealWinsBeforeActivationAdmission() async {
+        let audio = MockAudioProvider()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator())
+
+        await pipeline.sealForReplacement()
+
+        let sessionID = await pipeline.activate()
+        XCTAssertNil(sessionID)
+        XCTAssertEqual(audio.startCallCount, 0)
+    }
+
+    func testFailedReplacementCanReopenExactQuiescentPipeline() async {
+        let audio = MockAudioProvider()
+        let pipeline = DictationPipeline(
+            audioProvider: audio,
+            contextProvider: MockAppContextProvider(),
+            backend: .cloud(
+                realtime: MockStreamingProvider(),
+                fallback: MockBatchProvider()),
+            textInjector: MockTextInjector(),
+            coordinator: RecordingCoordinator())
+
+        await pipeline.sealForReplacement()
+        let sealedSessionID = await pipeline.activate()
+        XCTAssertNil(sealedSessionID)
+
+        let reopened = await pipeline.reopenAfterFailedReplacement()
+        XCTAssertTrue(reopened)
+
+        let sessionID = await activateAndWaitForCapture(
+            pipeline, audioProvider: audio)
+        XCTAssertNotNil(sessionID)
+        if let sessionID {
+            await pipeline.complete(sessionID: sessionID)
+        }
     }
 
     func testFullCycleStartsAndStopsAudioCapture() async {

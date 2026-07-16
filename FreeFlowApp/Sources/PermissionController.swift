@@ -11,6 +11,8 @@ import FreeFlowKit
 final class PermissionController {
 
     private let permissionProvider: PermissionProviding
+    private var permissionCheckTask: Task<Void, Never>?
+    private var permissionCheckGeneration: UInt64 = 0
     private var pollingTask: Task<Void, Never>?
 
     /// Called when both permissions are granted and the app can proceed.
@@ -29,11 +31,19 @@ final class PermissionController {
     /// Otherwise the controller requests microphone access and shows
     /// guidance for accessibility.
     func checkPermissions() {
-        Task {
+        permissionCheckGeneration &+= 1
+        let generation = permissionCheckGeneration
+        permissionCheckTask?.cancel()
+        permissionCheckTask = Task { [weak self] in
+            guard let self else { return }
             let micState = await ensureMicrophonePermission()
+            guard !Task.isCancelled,
+                generation == permissionCheckGeneration
+            else { return }
             let axState = permissionProvider.checkAccessibility()
 
             if micState == .granted && axState == .granted {
+                permissionCheckTask = nil
                 onPermissionsGranted?()
                 return
             }
@@ -46,11 +56,17 @@ final class PermissionController {
                 showAccessibilityAlert()
                 startAccessibilityPolling()
             }
+            if generation == permissionCheckGeneration {
+                permissionCheckTask = nil
+            }
         }
     }
 
     /// Stop any ongoing polling and clean up.
     func stop() {
+        permissionCheckGeneration &+= 1
+        permissionCheckTask?.cancel()
+        permissionCheckTask = nil
         pollingTask?.cancel()
         pollingTask = nil
     }
@@ -140,6 +156,7 @@ final class PermissionController {
     }
 
     deinit {
+        permissionCheckTask?.cancel()
         pollingTask?.cancel()
     }
 }

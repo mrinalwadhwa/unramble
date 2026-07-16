@@ -15,7 +15,7 @@ public final class Settings: @unchecked Sendable {
     /// Shared singleton instance.
     public static let shared = Settings()
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     // MARK: - Keys
 
@@ -36,7 +36,12 @@ public final class Settings: @unchecked Sendable {
 
     // MARK: - Init
 
-    private init() {
+    private convenience init() {
+        self.init(defaults: .standard)
+    }
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
         // Register default values for settings that need them.
         defaults.register(defaults: [
             Key.soundFeedbackEnabled.rawValue: true
@@ -75,6 +80,11 @@ public final class Settings: @unchecked Sendable {
             return setting
         }
         set {
+            let retainedModeBinding = privateModeShortcutBinding
+            guard
+                modeShortcutPolicy(dictation: newValue)
+                    .validate(retainedModeBinding) == nil
+            else { return }
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Key.hotkeyConfiguration.rawValue)
                 NotificationCenter.default.post(
@@ -199,11 +209,16 @@ public final class Settings: @unchecked Sendable {
             return binding
         }
         set {
+            let retainedModeBinding = privateModeShortcutBinding
+            guard
+                modeShortcutPolicy(handsfree: newValue)
+                    .validate(retainedModeBinding) == nil
+            else { return }
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Key.handsfreeShortcutBinding.rawValue)
+                // Also update the label to stay in sync.
+                handsfreeShortcutLabel = newValue.label
             }
-            // Also update the label to stay in sync.
-            handsfreeShortcutLabel = newValue.label
         }
     }
 
@@ -219,11 +234,16 @@ public final class Settings: @unchecked Sendable {
             return binding
         }
         set {
+            let retainedModeBinding = privateModeShortcutBinding
+            guard
+                modeShortcutPolicy(paste: newValue)
+                    .validate(retainedModeBinding) == nil
+            else { return }
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Key.pasteShortcutBinding.rawValue)
+                // Also update the label to stay in sync.
+                pasteShortcutLabel = newValue.label
             }
-            // Also update the label to stay in sync.
-            pasteShortcutLabel = newValue.label
         }
     }
 
@@ -239,19 +259,31 @@ public final class Settings: @unchecked Sendable {
             return binding
         }
         set {
+            let retainedModeBinding = privateModeShortcutBinding
+            guard
+                modeShortcutPolicy(cancel: newValue)
+                    .validate(retainedModeBinding) == nil
+            else { return }
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Key.cancelShortcutBinding.rawValue)
+                // Also update the label to stay in sync.
+                cancelShortcutLabel = newValue.label
             }
-            // Also update the label to stay in sync.
-            cancelShortcutLabel = newValue.label
         }
     }
 
     /// The display label for the private mode shortcut.
     public var privateModeShortcutLabel: String {
         get {
-            defaults.string(forKey: Key.privateModeShortcutLabel.rawValue)
-                ?? privateModeShortcutBinding.label
+            let bindingLabel = privateModeShortcutBinding.label
+            if defaults.string(forKey: Key.privateModeShortcutLabel.rawValue)
+                != bindingLabel
+            {
+                defaults.set(
+                    bindingLabel,
+                    forKey: Key.privateModeShortcutLabel.rawValue)
+            }
+            return bindingLabel
         }
         set {
             defaults.set(newValue, forKey: Key.privateModeShortcutLabel.rawValue)
@@ -264,22 +296,105 @@ public final class Settings: @unchecked Sendable {
     }
 
     /// The key binding for the private mode toggle shortcut.
-    /// Defaults to ⌃⌥P (Control+Option+P, key code 35).
+    /// Defaults to ⌃⇧M (Control+Shift+M, key code 46).
     public var privateModeShortcutBinding: ShortcutBinding {
         get {
             guard let data = defaults.data(forKey: Key.privateModeShortcutBinding.rawValue),
                 let binding = try? JSONDecoder().decode(ShortcutBinding.self, from: data)
             else {
-                return .defaultPrivateMode
+                let repaired = compatibleDefaultPrivateModeShortcut
+                persistPrivateModeShortcut(repaired)
+                return repaired
+            }
+            if binding == .legacyDefaultPrivateMode {
+                let repaired = compatibleDefaultPrivateModeShortcut
+                persistPrivateModeShortcut(repaired)
+                return repaired
+            }
+            guard modeShortcutPolicy.validate(binding) == nil else {
+                let repaired = compatibleDefaultPrivateModeShortcut
+                persistPrivateModeShortcut(repaired)
+                return repaired
             }
             return binding
         }
         set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: Key.privateModeShortcutBinding.rawValue)
-            }
-            privateModeShortcutLabel = newValue.label
+            guard modeShortcutPolicy.validate(newValue) == nil else { return }
+            persistPrivateModeShortcut(newValue)
+            NotificationCenter.default.post(
+                name: .settingsDidChange,
+                object: self,
+                userInfo: ["key": Key.privateModeShortcutBinding.rawValue]
+            )
         }
+    }
+
+    private var modeShortcutPolicy: ModeShortcutPolicy {
+        modeShortcutPolicy()
+    }
+
+    /// Prefer Control+Shift+M, but preserve an older dictation trigger when
+    /// that chord would be ambiguous. With one dictation command and three
+    /// other exact commands, at least one modifier subset for M is available.
+    private var compatibleDefaultPrivateModeShortcut: ShortcutBinding {
+        let modifierCandidates: [UInt] = [
+            ShortcutBinding.controlFlag | ShortcutBinding.shiftFlag,
+            ShortcutBinding.controlFlag | ShortcutBinding.optionFlag,
+            ShortcutBinding.optionFlag | ShortcutBinding.shiftFlag,
+            ShortcutBinding.controlFlag | ShortcutBinding.commandFlag,
+            ShortcutBinding.optionFlag | ShortcutBinding.commandFlag,
+            ShortcutBinding.shiftFlag | ShortcutBinding.commandFlag,
+            ShortcutBinding.controlFlag | ShortcutBinding.optionFlag
+                | ShortcutBinding.shiftFlag,
+            ShortcutBinding.controlFlag | ShortcutBinding.optionFlag
+                | ShortcutBinding.commandFlag,
+            ShortcutBinding.controlFlag | ShortcutBinding.shiftFlag
+                | ShortcutBinding.commandFlag,
+            ShortcutBinding.optionFlag | ShortcutBinding.shiftFlag
+                | ShortcutBinding.commandFlag,
+            ShortcutBinding.standardModifierMask,
+        ]
+
+        for flags in modifierCandidates {
+            let binding = ShortcutBinding(
+                modifierFlags: flags,
+                keyCode: 46,
+                label: modeShortcutLabel(modifierFlags: flags))
+            if modeShortcutPolicy.validate(binding) == nil {
+                return binding
+            }
+        }
+
+        preconditionFailure("No valid private-mode shortcut candidate")
+    }
+
+    private func modeShortcutLabel(modifierFlags: UInt) -> String {
+        var label = ""
+        if modifierFlags & ShortcutBinding.controlFlag != 0 { label += "⌃" }
+        if modifierFlags & ShortcutBinding.optionFlag != 0 { label += "⌥" }
+        if modifierFlags & ShortcutBinding.shiftFlag != 0 { label += "⇧" }
+        if modifierFlags & ShortcutBinding.commandFlag != 0 { label += "⌘" }
+        return label + "M"
+    }
+
+    private func modeShortcutPolicy(
+        dictation: HotkeySetting? = nil,
+        handsfree: ShortcutBinding? = nil,
+        paste: ShortcutBinding? = nil,
+        cancel: ShortcutBinding? = nil
+    ) -> ModeShortcutPolicy {
+        ModeShortcutPolicy(
+            dictation: dictation ?? hotkeySetting,
+            handsfree: handsfree ?? handsfreeShortcutBinding,
+            paste: paste ?? pasteShortcutBinding,
+            cancel: cancel ?? cancelShortcutBinding)
+    }
+
+    private func persistPrivateModeShortcut(_ binding: ShortcutBinding) {
+        if let data = try? JSONEncoder().encode(binding) {
+            defaults.set(data, forKey: Key.privateModeShortcutBinding.rawValue)
+        }
+        defaults.set(binding.label, forKey: Key.privateModeShortcutLabel.rawValue)
     }
 
     // MARK: - Reset

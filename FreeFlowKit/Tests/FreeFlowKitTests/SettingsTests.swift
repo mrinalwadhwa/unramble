@@ -138,8 +138,8 @@ struct SettingsTests {
     @Test("Removing hotkey UserDefaults key falls back to default")
     func hotkeyFallbackAfterRemoval() {
         let settings = Settings.shared
-        settings.hotkeySetting = HotkeySetting.modifierOnly( .leftShift)
-        #expect(settings.hotkeySetting.modifierKey == .leftShift)
+        settings.hotkeySetting = HotkeySetting.modifierOnly(.leftCommand)
+        #expect(settings.hotkeySetting.modifierKey == .leftCommand)
 
         // Remove the persisted key.
         UserDefaults.standard.removeObject(forKey: "hotkeyConfiguration")
@@ -270,6 +270,154 @@ struct SettingsTests {
 
         // Restore.
         settings.privateModeShortcutLabel = original
+    }
+
+    @Test("Exact legacy mode shortcut migrates to Control Shift M")
+    func legacyModeShortcutMigration() throws {
+        let suiteName = "SettingsTests.legacyModeShortcutMigration"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            try JSONEncoder().encode(ShortcutBinding.legacyDefaultPrivateMode),
+            forKey: "privateModeShortcutBinding")
+        defaults.set("⌃⌥P", forKey: "privateModeShortcutLabel")
+
+        let settings = Settings(defaults: defaults)
+
+        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+        #expect(settings.privateModeShortcutLabel == "⌃⇧M")
+    }
+
+    @Test("Valid custom mode shortcut survives legacy migration")
+    func customModeShortcutPreserved() throws {
+        let suiteName = "SettingsTests.customModeShortcutPreserved"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let custom = ShortcutBinding(
+            modifierFlags: ShortcutBinding.controlFlag
+                | ShortcutBinding.commandFlag,
+            keyCode: 37,
+            label: "⌃⌘L")
+        defaults.set(
+            try JSONEncoder().encode(custom),
+            forKey: "privateModeShortcutBinding")
+
+        let settings = Settings(defaults: defaults)
+
+        #expect(settings.privateModeShortcutBinding == custom)
+    }
+
+    @Test("Missing mode binding repairs around a retained Control dictation key")
+    func missingModeShortcutRepairsAroundControlDictation() throws {
+        let suiteName =
+            "SettingsTests.missingModeShortcutRepairsAroundControlDictation"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            try JSONEncoder().encode(
+                HotkeySetting.modifierOnly(.leftControl)),
+            forKey: "hotkeyConfiguration")
+
+        let settings = Settings(defaults: defaults)
+        let repaired = settings.privateModeShortcutBinding
+
+        #expect(repaired.standardModifierCount >= 2)
+        #expect(!repaired.hasControl)
+        #expect(repaired.keyCode == 46)
+        #expect(settings.privateModeShortcutLabel == repaired.label)
+    }
+
+    @Test("Legacy mode binding repairs around a retained Shift dictation key")
+    func legacyModeShortcutRepairsAroundShiftDictation() throws {
+        let suiteName =
+            "SettingsTests.legacyModeShortcutRepairsAroundShiftDictation"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(
+            try JSONEncoder().encode(
+                HotkeySetting.modifierOnly(.rightShift)),
+            forKey: "hotkeyConfiguration")
+        defaults.set(
+            try JSONEncoder().encode(ShortcutBinding.legacyDefaultPrivateMode),
+            forKey: "privateModeShortcutBinding")
+
+        let settings = Settings(defaults: defaults)
+        let repaired = settings.privateModeShortcutBinding
+
+        #expect(repaired.standardModifierCount >= 2)
+        #expect(!repaired.hasShift)
+        #expect(repaired.keyCode == 46)
+        #expect(settings.privateModeShortcutLabel == repaired.label)
+    }
+
+    @Test("Dictation shortcut cannot invalidate retained mode shortcut")
+    func dictationShortcutCannotInvalidateModeShortcut() throws {
+        let suiteName = "SettingsTests.dictationShortcutCannotInvalidateModeShortcut"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = Settings(defaults: defaults)
+
+        let original = settings.hotkeySetting
+        settings.hotkeySetting = .modifierOnly(.leftControl)
+
+        #expect(settings.hotkeySetting == original)
+        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+    }
+
+    @Test("Hands-free shortcut cannot invalidate retained mode shortcut")
+    func handsfreeShortcutCannotInvalidateModeShortcut() throws {
+        let suiteName = "SettingsTests.handsfreeShortcutCannotInvalidateModeShortcut"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = Settings(defaults: defaults)
+        let original = settings.handsfreeShortcutBinding
+        let originalLabel = settings.handsfreeShortcutLabel
+
+        settings.handsfreeShortcutBinding = .defaultPrivateMode
+
+        #expect(settings.handsfreeShortcutBinding == original)
+        #expect(settings.handsfreeShortcutLabel == originalLabel)
+        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+    }
+
+    @Test("Paste shortcut cannot invalidate retained mode shortcut")
+    func pasteShortcutCannotInvalidateModeShortcut() throws {
+        let suiteName = "SettingsTests.pasteShortcutCannotInvalidateModeShortcut"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = Settings(defaults: defaults)
+        let original = settings.pasteShortcutBinding
+        let originalLabel = settings.pasteShortcutLabel
+
+        settings.pasteShortcutBinding = .defaultPrivateMode
+
+        #expect(settings.pasteShortcutBinding == original)
+        #expect(settings.pasteShortcutLabel == originalLabel)
+        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+    }
+
+    @Test("Cancel shortcut cannot invalidate retained mode shortcut")
+    func cancelShortcutCannotInvalidateModeShortcut() throws {
+        let suiteName = "SettingsTests.cancelShortcutCannotInvalidateModeShortcut"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = Settings(defaults: defaults)
+        let original = settings.cancelShortcutBinding
+        let originalLabel = settings.cancelShortcutLabel
+
+        settings.cancelShortcutBinding = .defaultPrivateMode
+
+        #expect(settings.cancelShortcutBinding == original)
+        #expect(settings.cancelShortcutLabel == originalLabel)
+        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
     }
 
     // MARK: - Single Source of Truth

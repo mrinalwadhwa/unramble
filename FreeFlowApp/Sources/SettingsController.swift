@@ -20,12 +20,8 @@ final class SettingsController {
     /// The audio device provider for mic selection, set by AppDelegate.
     var audioDeviceProvider: CoreAudioDeviceProvider?
 
-    /// The audio capture provider for mic preview, set by AppDelegate.
-    var audioPreviewProvider: AudioPreviewProviding?
-
-    /// The sound feedback provider, set by AppDelegate. Used to mute
-    /// start/stop cues during mic preview so opening settings is silent.
-    var soundFeedbackProvider: SoundFeedbackProvider?
+    /// Shared owner of microphone preview demand, set by AppDelegate.
+    var microphoneCaptureCoordinator: MicrophoneCaptureCoordinator?
 
     /// The dictation pipeline for applying language changes, set by AppDelegate.
     weak var pipeline: DictationPipeline?
@@ -34,21 +30,28 @@ final class SettingsController {
     /// The AppDelegate should use this to re-register the hotkey provider.
     var onHotkeyChanged: (() -> Void)?
 
-    /// Callback invoked when dictation mode changes (cloud ↔ local).
-    /// The AppDelegate should rebuild the pipeline with new providers.
-    var onDictationModeChanged: (() -> Void)?
+    /// Callback invoked after the private-mode shortcut is accepted.
+    /// The AppDelegate should use this to re-register its mode hotkey provider.
+    var onModeShortcutChanged: (() -> Void)?
+
+    /// Callback invoked when a different dictation mode is requested. The
+    /// AppDelegate owns publication and persistence of the installed backend.
+    var onDictationModeChanged: ((_ mode: DictationMode) -> Void)?
 
     /// Callback invoked when the user clicks Reset in settings.
     /// The AppDelegate should clear state and return to onboarding.
     var onResetApp: (() -> Void)?
 
-    /// Task for streaming audio levels during mic preview.
-    private var audioLevelTask: Task<Void, Never>?
+    /// Device reads and writes are generation-fenced so an older bridge
+    /// request cannot repaint the page after a newer selection.
+    private var microphoneListTask: Task<Void, Never>?
+    private var microphoneListGeneration: UInt64 = 0
+    private var microphoneSelectionTask: Task<Void, Never>?
+    private var microphoneSelectionGeneration: UInt64 = 0
 
-    /// Task for the most recent stop-preview operation. Stored so that
-    /// `startMicPreviewAsync` can await it before starting a new preview,
-    /// preventing a race where start executes before stop completes.
-    private var stopPreviewTask: Task<Void, Never>?
+    private var microphonePreviewClient: MicrophonePreviewClient?
+    private var isPreviewWindowSessionActive = false
+    private var isPreviewCaptureAvailable = false
 
     // MARK: - Initialization
 
@@ -66,6 +69,11 @@ final class SettingsController {
     /// window already exists, it brings it to the front and reloads
     /// the page to refresh state.
     func showWindow() {
+        isPreviewWindowSessionActive = true
+        // Treat every page load as a new bridge session. An operation started
+        // by the previous page must not publish into the reloaded page.
+        invalidateMicrophoneDeviceTasks()
+
         if let existingWindow = window {
             // Reload bundled page to refresh state, then present.
             // The JS init() will send startMicPreview via the bridge
@@ -80,7 +88,10 @@ final class SettingsController {
         let win = SettingsWindow(bridge: bridge)
         bridge.webView = win.webView
         win.onClose = { [weak self] in
-            self?.stopMicPreviewSync()
+            guard let self else { return }
+            self.isPreviewWindowSessionActive = false
+            self.invalidateMicrophoneDeviceTasks()
+            self.stopMicPreviewSync()
         }
         window = win
 
@@ -90,6 +101,8 @@ final class SettingsController {
 
     /// Close the settings window and stop mic preview.
     func closeWindow() {
+        isPreviewWindowSessionActive = false
+        invalidateMicrophoneDeviceTasks()
         stopMicPreviewSync()
         window?.orderOut(nil)
     }
@@ -150,6 +163,11 @@ final class SettingsController {
     // MARK: - Action: getSettings
 
     private func handleGetSettings() {
+        pushCurrentSettingsState()
+        bridge.pushSettingsIcons()
+    }
+
+    private func pushCurrentSettingsState() {
         let soundEnabled = Settings.shared.soundFeedbackEnabled
         let language = Settings.shared.language.rawValue
 
@@ -177,7 +195,6 @@ final class SettingsController {
             language: language,
             languages: languages
         )
-        bridge.pushSettingsIcons()
     }
 
     // MARK: - Action: setSoundFeedback
@@ -191,47 +208,93 @@ final class SettingsController {
     private func handleSetShortcut(shortcut: String, data: [String: Any]) {
         let label = data["label"] as? String ?? ""
         let type = data["type"] as? String ?? ""
+        let settings = Settings.shared
 
         switch shortcut {
         case "dictate":
+            let proposed: HotkeySetting
             if type == "modifier", let modId = data["modifierId"] as? String,
                 let modifier = HotkeySetting.ModifierKey(rawValue: modId)
             {
-                Settings.shared.hotkeySetting = .modifierOnly(modifier)
-                onHotkeyChanged?()
+                proposed = .modifierOnly(modifier)
             } else if type == "combo" {
+                guard let keyCode = keyCodeFromData(data) else {
+                    pushCurrentSettingsState()
+                    return
+                }
                 let flags = modifierFlagsFromData(data)
-                let keyCode = keyCodeFromData(data)
                 let keyName = keyNameFromData(data)
-                Settings.shared.hotkeySetting = .modifierPlusKey(
+                proposed = .modifierPlusKey(
                     modifierFlags: flags, keyCode: keyCode, keyName: keyName)
-                onHotkeyChanged?()
-            } else if type == "modifiers" {
+            } else {
                 // Multi-modifier-only shortcuts are not supported for
-                // hold-to-talk dictation. The JS side should prevent
-                // this from being sent, but log a warning just in case.
+                // hold-to-talk dictation. Reject malformed bridge data too.
                 #if DEBUG
                     Log.debug(
-                        "[SettingsController] Ignoring unsupported 'modifiers' type for dictate shortcut (label: \(label))"
+                        "[SettingsController] Rejecting unsupported '\(type)' type for dictate shortcut (label: \(label))"
                     )
                 #endif
+                pushCurrentSettingsState()
+                return
+            }
+
+            let previous = settings.hotkeySetting
+            settings.hotkeySetting = proposed
+            guard settings.hotkeySetting == proposed else {
+                pushCurrentSettingsState()
+                return
+            }
+            if previous != proposed {
+                onHotkeyChanged?()
             }
 
         case "handsfree":
-            let binding = shortcutBindingFromData(data, label: label)
-            Settings.shared.handsfreeShortcutBinding = binding
+            guard let binding = shortcutBindingFromData(data, label: label) else {
+                pushCurrentSettingsState()
+                return
+            }
+            settings.handsfreeShortcutBinding = binding
+            guard settings.handsfreeShortcutBinding == binding else {
+                pushCurrentSettingsState()
+                return
+            }
 
         case "paste":
-            let binding = shortcutBindingFromData(data, label: label)
-            Settings.shared.pasteShortcutBinding = binding
+            guard let binding = shortcutBindingFromData(data, label: label) else {
+                pushCurrentSettingsState()
+                return
+            }
+            settings.pasteShortcutBinding = binding
+            guard settings.pasteShortcutBinding == binding else {
+                pushCurrentSettingsState()
+                return
+            }
 
         case "cancel":
-            let binding = shortcutBindingFromData(data, label: label)
-            Settings.shared.cancelShortcutBinding = binding
+            guard let binding = shortcutBindingFromData(data, label: label) else {
+                pushCurrentSettingsState()
+                return
+            }
+            settings.cancelShortcutBinding = binding
+            guard settings.cancelShortcutBinding == binding else {
+                pushCurrentSettingsState()
+                return
+            }
 
         case "privateMode":
-            let binding = shortcutBindingFromData(data, label: label)
-            Settings.shared.privateModeShortcutBinding = binding
+            guard let binding = shortcutBindingFromData(data, label: label) else {
+                pushCurrentSettingsState()
+                return
+            }
+            let previous = settings.privateModeShortcutBinding
+            settings.privateModeShortcutBinding = binding
+            guard settings.privateModeShortcutBinding == binding else {
+                pushCurrentSettingsState()
+                return
+            }
+            if previous != binding {
+                onModeShortcutChanged?()
+            }
 
         default:
             break
@@ -243,16 +306,37 @@ final class SettingsController {
     /// For combo shortcuts (modifier + key), extracts modifier flags and
     /// key code. For modifier-only shortcuts, stores the modifier flags
     /// with key code 0.
-    private func shortcutBindingFromData(_ data: [String: Any], label: String) -> ShortcutBinding {
+    private func shortcutBindingFromData(
+        _ data: [String: Any],
+        label: String
+    ) -> ShortcutBinding? {
         let type = data["type"] as? String ?? ""
-        let flags = modifierFlagsFromData(data)
-        let keyCode: UInt16
-        if type == "combo" {
-            keyCode = keyCodeFromData(data)
-        } else {
-            keyCode = 0
+        switch type {
+        case "combo":
+            guard let keyCode = keyCodeFromData(data) else { return nil }
+            return ShortcutBinding(
+                kind: .key,
+                modifierFlags: modifierFlagsFromData(data),
+                keyCode: keyCode,
+                label: label)
+        case "modifier":
+            guard let modifierID = data["modifierId"] as? String,
+                let modifier = HotkeySetting.ModifierKey(rawValue: modifierID)
+            else { return nil }
+            return ShortcutBinding(
+                kind: .modifierOnly,
+                modifierFlags: modifier.standardFlag,
+                keyCode: 0,
+                label: label)
+        case "modifiers":
+            return ShortcutBinding(
+                kind: .modifierOnly,
+                modifierFlags: modifierFlagsFromData(data),
+                keyCode: 0,
+                label: label)
+        default:
+            return nil
         }
-        return ShortcutBinding(modifierFlags: flags, keyCode: keyCode, label: label)
     }
 
     /// Build device-independent modifier flags from bridge shortcut data.
@@ -267,12 +351,12 @@ final class SettingsController {
 
     /// Extract a virtual key code from the bridge data's `code` field.
     /// Maps common KeyboardEvent.code values to macOS virtual key codes.
-    private func keyCodeFromData(_ data: [String: Any]) -> UInt16 {
-        guard let code = data["code"] as? String else { return 0 }
+    private func keyCodeFromData(_ data: [String: Any]) -> UInt16? {
+        guard let code = data["code"] as? String else { return nil }
         // Mappings from KeyboardEvent.code to macOS virtual key codes.
         // Must cover every key the JS recorder's CODE_TO_KEY_NAME map
-        // can produce, otherwise the key code defaults to 0 and the
-        // shortcut never matches at runtime.
+        // can produce. Unknown codes are rejected so they cannot alias
+        // the physical A key, whose virtual key code is legitimately 0.
         let map: [String: UInt16] = [
             // Letters
             "KeyA": 0, "KeyS": 1, "KeyD": 2, "KeyF": 3, "KeyH": 4,
@@ -308,7 +392,7 @@ final class SettingsController {
             "Numpad4": 86, "Numpad5": 87, "Numpad6": 88, "Numpad7": 89,
             "Numpad8": 91, "Numpad9": 92,
         ]
-        return map[code] ?? 0
+        return map[code]
     }
 
     /// Extract a human-readable key name from bridge data.
@@ -358,20 +442,28 @@ final class SettingsController {
 
     private func handleSetDictationMode(mode: String) {
         guard let newMode = DictationMode(rawValue: mode) else { return }
-        let oldMode = Settings.shared.dictationMode
-        guard newMode != oldMode else { return }
-
-        Settings.shared.dictationMode = newMode
-        onDictationModeChanged?()
+        guard newMode != Settings.shared.dictationMode else { return }
+        onDictationModeChanged?(newMode)
+        // Keep optimistic web UI tied to the still-effective persisted mode.
+        pushCurrentSettingsState()
     }
 
     // MARK: - Action: listMicrophones
 
     private func handleListMicrophones() {
         guard let audioDeviceProvider else { return }
-        Task {
+        microphoneListGeneration &+= 1
+        let generation = microphoneListGeneration
+        microphoneListTask?.cancel()
+        microphoneListTask = Task { [weak self] in
+            guard !Task.isCancelled else { return }
             let devices = await audioDeviceProvider.availableDevices()
+            guard !Task.isCancelled else { return }
             let current = await audioDeviceProvider.currentDevice()
+            guard !Task.isCancelled,
+                let self,
+                generation == self.microphoneListGeneration
+            else { return }
             let isAutoDetect = audioDeviceProvider.isAutoDetect
 
             // Build display names matching the menu bar.
@@ -399,126 +491,110 @@ final class SettingsController {
                 devices: deviceList,
                 currentId: isAutoDetect ? 0 : current?.id
             )
+            microphoneListTask = nil
         }
     }
 
     // MARK: - Action: selectMicrophone
 
     private func handleSelectMicrophone(id: UInt32) {
-        guard let audioDeviceProvider, let audioPreviewProvider else { return }
-        Task {
+        guard let microphoneCaptureCoordinator else { return }
+        microphoneListGeneration &+= 1
+        microphoneListTask?.cancel()
+        microphoneListTask = nil
+        microphoneSelectionGeneration &+= 1
+        let generation = microphoneSelectionGeneration
+        microphoneSelectionTask?.cancel()
+        microphoneSelectionTask = Task { [weak self] in
             do {
-                // Stop current preview and wait for it to complete.
-                await stopMicPreviewAsync()
-
-                // Select the device, or clear to auto-detect.
-                if id == 0 {
-                    audioDeviceProvider.clearSelection()
-                } else {
-                    try await audioDeviceProvider.selectDevice(id: id)
-                }
-                bridge.pushMicrophoneSelected(id: id)
-
-                // Small delay to let the audio system settle after device change.
-                try await Task.sleep(nanoseconds: 100_000_000)  // 100ms
-
-                // Refresh the device list so the selection indicator updates.
-                handleListMicrophones()
-
-                // Start preview with the new device.
-                await startMicPreviewAsync()
+                try Task.checkCancellation()
+                try await microphoneCaptureCoordinator.selectDevice(
+                    id: id == 0 ? nil : id)
+                guard !Task.isCancelled,
+                    let self,
+                    generation == self.microphoneSelectionGeneration
+                else { return }
+                self.bridge.pushMicrophoneSelected(id: id)
             } catch {
+                guard !Task.isCancelled,
+                    let self,
+                    generation == self.microphoneSelectionGeneration
+                else {
+                    return
+                }
                 #if DEBUG
                     Log.debug("[SettingsController] selectMicrophone failed: \(error)")
                 #endif
             }
+            guard !Task.isCancelled,
+                let self,
+                generation == self.microphoneSelectionGeneration
+            else { return }
+            self.microphoneSelectionTask = nil
+            self.pushMicPreviewAvailability(self.isPreviewCaptureAvailable)
+            // The provider is authoritative on both success and failure. A
+            // reload also rolls back the dropdown after an external request
+            // supersedes this one in the shared coordinator.
+            self.handleListMicrophones()
         }
+    }
+
+    private func invalidateMicrophoneDeviceTasks() {
+        microphoneListGeneration &+= 1
+        microphoneListTask?.cancel()
+        microphoneListTask = nil
+
+        microphoneSelectionGeneration &+= 1
+        microphoneSelectionTask?.cancel()
+        microphoneSelectionTask = nil
     }
 
     // MARK: - Action: startMicPreview
 
     private func handleStartMicPreview() {
-        Task {
-            await startMicPreviewAsync()
+        guard isPreviewWindowSessionActive,
+            let microphoneCaptureCoordinator
+        else { return }
+
+        let client: MicrophonePreviewClient
+        if let microphonePreviewClient {
+            client = microphonePreviewClient
+        } else {
+            client = MicrophonePreviewClient(
+                coordinator: microphoneCaptureCoordinator)
+            microphonePreviewClient = client
         }
+        client.start(
+            isEligible: { [weak self] in
+                self?.isPreviewWindowSessionActive == true
+            },
+            onAudioLevel: { [weak self] level in
+                self?.bridge.pushAudioLevel(level: level)
+            },
+            onAvailability: { [weak self] isAvailable in
+                self?.pushMicPreviewAvailability(isAvailable)
+            })
     }
 
-    private func startMicPreviewAsync() async {
-        guard let audioPreviewProvider else { return }
-
-        // Await any in-flight stop task from stopMicPreviewSync before
-        // starting a new preview. This prevents the race where a quick
-        // close-then-reopen causes start to execute before stop completes.
-        if let pending = stopPreviewTask {
-            await pending.value
-            stopPreviewTask = nil
-        }
-
-        // Stop any existing preview first.
-        await stopMicPreviewAsync()
-
-        do {
-            // Mute sound feedback during preview so opening the
-            // settings window does not play the start/stop cues.
-            if let capture = audioPreviewProvider as? AudioCaptureProvider {
-                capture.setSoundFeedbackProvider(nil)
-            }
-
-            try await audioPreviewProvider.startRecording()
-
-            audioLevelTask = Task { [weak self] in
-                guard let stream = audioPreviewProvider.audioLevelStream else { return }
-                for await level in stream {
-                    if Task.isCancelled { break }
-                    await MainActor.run {
-                        self?.bridge.pushAudioLevel(level: level)
-                    }
-                }
-            }
-        } catch {
-            #if DEBUG
-                Log.debug("[SettingsController] startMicPreview failed: \(error)")
-            #endif
-        }
+    private func pushMicPreviewAvailability(_ isAvailable: Bool) {
+        isPreviewCaptureAvailable = isAvailable
+        bridge.pushEvent(
+            name: "micPreviewAvailability",
+            data: ["available": isAvailable])
     }
 
     // MARK: - Action: stopMicPreview
 
     private func handleStopMicPreview() {
-        Task {
-            await stopMicPreviewAsync()
-        }
+        stopMicPreviewSync()
     }
 
-    /// Fire-and-forget stop for use in closeWindow. The spawned task is
-    /// stored in `stopPreviewTask` so that a subsequent
-    /// `startMicPreviewAsync` can await it before starting a new preview.
     private func stopMicPreviewSync() {
-        audioLevelTask?.cancel()
-        audioLevelTask = nil
-
-        guard let audioPreviewProvider else { return }
-        let provider = soundFeedbackProvider
-        stopPreviewTask = Task {
-            _ = try? await audioPreviewProvider.stopRecording()
-            // Restore sound feedback after preview stops.
-            if let provider, let capture = audioPreviewProvider as? AudioCaptureProvider {
-                capture.setSoundFeedbackProvider(provider)
-            }
+        guard let microphonePreviewClient else {
+            pushMicPreviewAvailability(false)
+            return
         }
+        microphonePreviewClient.stop()
     }
 
-    private func stopMicPreviewAsync() async {
-        audioLevelTask?.cancel()
-        audioLevelTask = nil
-
-        guard let audioPreviewProvider else { return }
-        _ = try? await audioPreviewProvider.stopRecording()
-        // Restore sound feedback after preview stops.
-        if let soundFeedbackProvider,
-            let capture = audioPreviewProvider as? AudioCaptureProvider
-        {
-            capture.setSoundFeedbackProvider(soundFeedbackProvider)
-        }
-    }
 }

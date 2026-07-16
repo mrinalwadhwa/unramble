@@ -6,6 +6,46 @@ import Foundation
 /// A mock implementation returns stub AudioBuffer values for testing.
 public protocol AudioProviding: Sendable {
 
+    /// Begin one owner-fenced capture generation.
+    func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration,
+        releaseBoundary: AudioCaptureReleaseBoundary?,
+        onCaptureReady: @escaping @Sendable () -> Void
+    ) async throws
+
+    /// Close only the named owner's publication boundary.
+    @discardableResult
+    func closeRecordingBoundary(owner: AudioCaptureOwner) -> Bool
+
+    /// Close only the named owner at a physical-event host timestamp.
+    @discardableResult
+    func closeRecordingBoundary(
+        owner: AudioCaptureOwner,
+        atHostTime releaseHostTime: UInt64
+    ) -> Bool
+
+    /// Stop only the named capture. Concurrent duplicate calls for the same
+    /// owner must join the same physical drain.
+    func stopRecording(owner: AudioCaptureOwner) async throws -> AudioBuffer
+
+    func isRecording(owner: AudioCaptureOwner) -> Bool
+    func pcmAudioStream(owner: AudioCaptureOwner) -> AsyncStream<Data>?
+    func audioLevelStream(owner: AudioCaptureOwner) -> AsyncStream<Float>?
+    func metrics(owner: AudioCaptureOwner) -> AudioCaptureMetrics?
+
+    /// Whether a capture that was not ready at key-up can still recover every
+    /// sample from an already-running preview tap. This query must not wait on
+    /// the provider's engine-start state lock.
+    func canRecoverCaptureReleasedBeforeReadiness(
+        owner: AudioCaptureOwner,
+        pressHostTime: UInt64
+    ) -> Bool
+
+    /// Invalidate only the named capture or in-flight start.
+    @discardableResult
+    func forceReset(owner: AudioCaptureOwner) -> Bool
+
     /// Begin capturing audio from the default input device.
     ///
     /// Throws if the microphone is unavailable or permission has not been granted.
@@ -125,6 +165,32 @@ public protocol AudioProviding: Sendable {
 }
 
 extension AudioProviding {
+    public func canRecoverCaptureReleasedBeforeReadiness(
+        owner: AudioCaptureOwner,
+        pressHostTime: UInt64
+    ) -> Bool {
+        false
+    }
+
+    public func startRecording(owner: AudioCaptureOwner) async throws {
+        try await startRecording(
+            owner: owner,
+            configuration: .dictation,
+            releaseBoundary: nil,
+            onCaptureReady: {})
+    }
+
+    public func startRecording(
+        owner: AudioCaptureOwner,
+        configuration: AudioCaptureConfiguration
+    ) async throws {
+        try await startRecording(
+            owner: owner,
+            configuration: configuration,
+            releaseBoundary: nil,
+            onCaptureReady: {})
+    }
+
     public func startRecording(
         releaseBoundary: AudioCaptureReleaseBoundary,
         onCaptureReady: @escaping @Sendable () -> Void

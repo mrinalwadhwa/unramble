@@ -30,6 +30,10 @@ public enum DictationBackend: Sendable {
     }
 }
 
+public enum DictationPipelineCaptureMaintenanceError: Error, Equatable, Sendable {
+    case pipelineUnavailable
+}
+
 /// Orchestrate the full dictation flow from hotkey press to text injection.
 ///
 /// `DictationPipeline` implements `PipelineProviding` by coordinating an
@@ -64,6 +68,7 @@ public actor DictationPipeline: PipelineProviding {
             case starting
             case live
             case releasedBeforeLive
+            case liveAfterReleasePendingStop
             case releasedAfterLive
             case deadlineBeforeLive
         }
@@ -73,8 +78,15 @@ public actor DictationPipeline: PipelineProviding {
 
         func markCaptureLive() {
             lock.withLock {
-                guard state == .starting else { return }
-                state = .live
+                switch state {
+                case .starting:
+                    state = .live
+                case .releasedBeforeLive:
+                    state = .liveAfterReleasePendingStop
+                case .live, .liveAfterReleasePendingStop,
+                    .releasedAfterLive, .deadlineBeforeLive:
+                    break
+                }
             }
         }
 
@@ -87,6 +99,9 @@ public actor DictationPipeline: PipelineProviding {
                     state = .releasedBeforeLive
                     return false
                 case .live:
+                    state = .releasedAfterLive
+                    return true
+                case .liveAfterReleasePendingStop:
                     state = .releasedAfterLive
                     return true
                 case .releasedBeforeLive, .releasedAfterLive,
@@ -111,7 +126,7 @@ public actor DictationPipeline: PipelineProviding {
         var captureWasPublished: Bool {
             lock.withLock {
                 switch state {
-                case .live, .releasedAfterLive:
+                case .live, .liveAfterReleasePendingStop, .releasedAfterLive:
                     return true
                 case .starting, .releasedBeforeLive, .deadlineBeforeLive:
                     return false
@@ -315,9 +330,11 @@ public actor DictationPipeline: PipelineProviding {
         (sessionID: DictationSessionID, ledger: CaptureBoundaryLedger)?
 
     /// A release that arrived before capture became live owns the hard audio
-    /// boundary. Late hardware startup may be stopped for cleanup, but none of
-    /// its post-release PCM can become a transcript candidate.
+    /// boundary. A cold late start cannot become a transcript candidate; only
+    /// a running preview tap that proves complete pre-release coverage may
+    /// recover the session from its retained pre-roll.
     private var captureBoundaryMissedSessionID: DictationSessionID?
+    private var previewPreRollRecoverySessionID: DictationSessionID?
 
     private struct RecoveryRecord: Sendable {
         let sessionID: DictationSessionID
@@ -347,6 +364,7 @@ public actor DictationPipeline: PipelineProviding {
     private let cloudRecordingLimit: Duration
     private let cloudRecordingLimitSleep: @Sendable (Duration) async -> Void
     private let cloudRecordingLimitDidClaim: @Sendable () async -> Void
+    private let completionDidEstablishReleaseBoundary: @Sendable () async -> Void
     private let completionWillHandoff: @Sendable () async -> Void
     private let captureStopDidClaim: @Sendable () async -> Void
     private let cancellationDrainDidStart: @Sendable () async -> Void
@@ -369,6 +387,30 @@ public actor DictationPipeline: PipelineProviding {
 
     /// A retired pipeline cannot accept work after composition replacement.
     private var isRetired = false
+
+    /// A replacement seal blocks only new capture and idle-paste admissions.
+    /// Work already owned by this generation remains live until it reaches a
+    /// user-visible terminal state and releases its session.
+    private(set) var isSealedForReplacement = false
+    private var replacementSealWaiters: [CheckedContinuation<Void, Never>] = []
+
+    /// A capture-maintenance owner seals new microphone and idle-paste work,
+    /// waits for previously admitted work to drain naturally, and retains the
+    /// seal until its hardware transaction returns.
+    private(set) var isSealedForCaptureMaintenance = false
+    private var captureMaintenanceID: UUID?
+    private var captureMaintenanceQuiescenceWaiters: [
+        CheckedContinuation<Void, Never>
+    ] = []
+    private var captureMaintenanceCompletionWaiters: [
+        CheckedContinuation<Void, Never>
+    ] = []
+    private var cancellableCaptureMaintenanceQuiescenceWaiters: [
+        UUID: CheckedContinuation<Void, Error>
+    ] = [:]
+    private var cancellableCaptureMaintenanceCompletionWaiters: [
+        UUID: CheckedContinuation<Void, Error>
+    ] = [:]
 
     /// Public operations that entered before retirement. Retirement waits for
     /// them, then performs a final task-slot sweep before model shutdown.
@@ -424,6 +466,7 @@ public actor DictationPipeline: PipelineProviding {
         cloudRecordingLimit: Duration = .seconds(300),
         cloudRecordingLimitSleep: @escaping @Sendable (Duration) async -> Void,
         cloudRecordingLimitDidClaim: @escaping @Sendable () async -> Void = {},
+        completionDidEstablishReleaseBoundary: @escaping @Sendable () async -> Void = {},
         completionWillHandoff: @escaping @Sendable () async -> Void = {},
         captureStopDidClaim: @escaping @Sendable () async -> Void = {},
         cancellationDrainDidStart: @escaping @Sendable () async -> Void = {},
@@ -455,6 +498,8 @@ public actor DictationPipeline: PipelineProviding {
         self.cloudRecordingLimit = cloudRecordingLimit
         self.cloudRecordingLimitSleep = cloudRecordingLimitSleep
         self.cloudRecordingLimitDidClaim = cloudRecordingLimitDidClaim
+        self.completionDidEstablishReleaseBoundary =
+            completionDidEstablishReleaseBoundary
         self.completionWillHandoff = completionWillHandoff
         self.captureStopDidClaim = captureStopDidClaim
         self.cancellationDrainDidStart = cancellationDrainDidStart
@@ -484,16 +529,25 @@ public actor DictationPipeline: PipelineProviding {
     /// For near-field mics (AirPods, USB, etc.), uses an adaptive
     /// threshold based on ambient noise when calibration has completed.
     /// Otherwise falls back to the fixed `silenceThreshold`.
-    private func effectiveSilenceThreshold() -> Float {
+    private func audioOwner(_ sessionID: DictationSessionID) -> AudioCaptureOwner {
+        .dictation(sessionID)
+    }
+
+    private func effectiveSilenceThreshold(
+        sessionID: DictationSessionID
+    ) -> Float {
+        guard let metrics = audioProvider.metrics(owner: audioOwner(sessionID)) else {
+            return max(silenceThreshold, minimumAdaptiveThreshold)
+        }
         // Built-in mic: skip adaptive threshold entirely.
-        if audioProvider.micProximity == .farField {
+        if metrics.micProximity == .farField {
             return farFieldSilenceThreshold
         }
         // Near-field mic: use adaptive threshold when ambient is known.
         // Clamp between floor and ceiling so variable ambient (e.g.
         // AirPods noise cancellation adjusting) cannot push the
         // threshold above whisper-range speech.
-        let ambient = audioProvider.ambientRMS
+        let ambient = metrics.ambientRMS
         if ambient > 0 {
             let raw = ambient * ambientMultiplier
             return min(max(raw, minimumAdaptiveThreshold), maximumAdaptiveThreshold)
@@ -509,10 +563,12 @@ public actor DictationPipeline: PipelineProviding {
 
     private func endOperation() {
         activeOperationCount -= 1
-        guard activeOperationCount == 0 else { return }
-        let waiters = activeOperationWaiters
-        activeOperationWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
+        if activeOperationCount == 0 {
+            let waiters = activeOperationWaiters
+            activeOperationWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+        }
+        resumeLifecycleWaitersIfQuiescent()
     }
 
     private func waitForActiveOperations() async {
@@ -593,6 +649,10 @@ public actor DictationPipeline: PipelineProviding {
             || audioStartOperation != nil
     }
 
+    private var isCaptureAdmissionSealed: Bool {
+        isSealedForReplacement || isSealedForCaptureMaintenance
+    }
+
     private func canContinueBufferedPaste(_ id: UUID) -> Bool {
         canRetainBufferedPasteReservation(id)
             && activeSession == nil
@@ -670,6 +730,7 @@ public actor DictationPipeline: PipelineProviding {
             }
             if captureBoundaryMissedSessionID == sessionID {
                 captureBoundaryMissedSessionID = nil
+                previewPreRollRecoverySessionID = nil
             }
             if captureBoundary?.sessionID == sessionID {
                 _ = captureBoundary?.ledger.release()
@@ -712,30 +773,33 @@ public actor DictationPipeline: PipelineProviding {
             boundary.ledger.release()
         else { return nil }
 
+        let owner = audioOwner(sessionID)
+
         // Publish the sample-time boundary before spawning the asynchronous
         // drain. The provider keeps queued callbacks and its PCM stream alive
         // until stopRecording() has retained every pre-release sample prefix.
         if let releaseHostTime {
             audioProvider.closeRecordingBoundary(
+                owner: owner,
                 atHostTime: releaseHostTime)
         } else {
-            audioProvider.closeRecordingBoundary()
+            audioProvider.closeRecordingBoundary(owner: owner)
         }
-        if let pcmStream = audioProvider.pcmAudioStream {
+        if let pcmStream = audioProvider.pcmAudioStream(owner: owner) {
             completionRetainedPCMStream = (
                 sessionID: sessionID,
                 stream: pcmStream)
         }
         let id = UUID()
         let task: Task<Result<AudioBuffer, Error>, Never> = Task.detached {
-            [audioProvider] in
+            [audioProvider, owner] in
             do {
-                return .success(try await audioProvider.stopRecording())
+                return .success(try await audioProvider.stopRecording(owner: owner))
             } catch {
                 // A failed stop is not a terminal hardware state. Force-reset
                 // before publishing failure so every joining teardown owner can
                 // return knowing the microphone has been closed.
-                audioProvider.forceReset()
+                audioProvider.forceReset(owner: owner)
                 return .failure(error)
             }
         }
@@ -784,12 +848,13 @@ public actor DictationPipeline: PipelineProviding {
             // post-start work remains to drain.
             _ = await operation.task.result
         } else {
-            audioProvider.forceReset()
+            let owner = audioOwner(operation.sessionID)
+            audioProvider.forceReset(owner: owner)
             _ = await operation.task.result
             // A cancellation-insensitive pre-ready start can publish hardware
             // after the first reset. Clean it again after the owner returns.
-            audioProvider.forceReset()
-            _ = try? await audioProvider.stopRecording()
+            audioProvider.forceReset(owner: owner)
+            _ = try? await audioProvider.stopRecording(owner: owner)
         }
         if audioStartOperation?.id == operation.id {
             audioStartOperation = nil
@@ -906,7 +971,10 @@ public actor DictationPipeline: PipelineProviding {
             return nil
         }
         defer { endOperation() }
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, !isCaptureAdmissionSealed else {
+            Log.debug("[Pipeline] activate() ignored - pipeline is sealed")
+            return nil
+        }
 
         guard activationReservation == nil,
             activeSession == nil
@@ -967,7 +1035,7 @@ public actor DictationPipeline: PipelineProviding {
         activationReservation = nil
         activeSession = session
         await activationDidPublishSessionOwner()
-        guard !Task.isCancelled, !isRetired, ownsSession(session.id) else {
+        guard !isRetired, ownsSession(session.id) else {
             if ownsSession(session.id) {
                 activeSession = nil
             }
@@ -989,7 +1057,7 @@ public actor DictationPipeline: PipelineProviding {
             activeSession = nil
             return nil
         }
-        guard !Task.isCancelled, !isRetired else {
+        guard !isRetired else {
             await resetOwnedSession(session.id)
             return nil
         }
@@ -1004,12 +1072,13 @@ public actor DictationPipeline: PipelineProviding {
             sessionID: session.id,
             ledger: CaptureBoundaryLedger())
         captureBoundaryMissedSessionID = nil
-        guard !Task.isCancelled else {
+        previewPreRollRecoverySessionID = nil
+        guard !isRetired else {
             await resetOwnedSession(session.id)
             return nil
         }
         armCloudRecordingLimit(sessionID: session.id)
-        guard !Task.isCancelled else {
+        guard !isRetired else {
             cancelPendingCloudRecordingLimit()
             await resetOwnedSession(session.id)
             return nil
@@ -1081,6 +1150,7 @@ public actor DictationPipeline: PipelineProviding {
         // negotiation and lets the pipeline fall back to batch mode.
         let t3 = CFAbsoluteTimeGetCurrent()
         let audioProviderRef = audioProvider
+        let captureOwner = audioOwner(session.id)
         enum StartRecordingFailure: Error {
             case timedOutBeforeCapture
             case returnedWithoutReadiness
@@ -1090,14 +1160,11 @@ public actor DictationPipeline: PipelineProviding {
                 let onCaptureReady: @Sendable () -> Void = {
                     captureLedger.markCaptureLive()
                 }
-                if let releaseBoundary = session.releaseBoundary {
-                    try await audioProviderRef.startRecording(
-                        releaseBoundary: releaseBoundary,
-                        onCaptureReady: onCaptureReady)
-                } else {
-                    try await audioProviderRef.startRecording(
-                        onCaptureReady: onCaptureReady)
-                }
+                try await audioProviderRef.startRecording(
+                    owner: captureOwner,
+                    configuration: .dictation,
+                    releaseBoundary: session.releaseBoundary,
+                    onCaptureReady: onCaptureReady)
                 return .success(())
             } catch {
                 return .failure(error)
@@ -1145,7 +1212,7 @@ public actor DictationPipeline: PipelineProviding {
                 )
                 startDeadlineBeforeCapture = true
                 detachedStart.task.cancel()
-                audioProvider.forceReset()
+                audioProvider.forceReset(owner: captureOwner)
                 startResult = .failure(
                     StartRecordingFailure.timedOutBeforeCapture)
             } else if captureLedger.captureWasPublished {
@@ -1173,7 +1240,7 @@ public actor DictationPipeline: PipelineProviding {
             if !startDeadlineBeforeCapture,
                 captureStopOperation?.sessionID != session.id
             {
-                _ = try? await audioProvider.stopRecording()
+                _ = try? await audioProvider.stopRecording(owner: captureOwner)
             }
             return
         }
@@ -1184,12 +1251,12 @@ public actor DictationPipeline: PipelineProviding {
         case .failure(let error):
             Log.debug("[Pipeline] Failed to start recording: \(error)")
             if !startDeadlineBeforeCapture {
-                audioProvider.forceReset()
+                audioProvider.forceReset(owner: captureOwner)
             }
             if !startDeadlineBeforeCapture,
                 captureStopOperation?.sessionID != session.id
             {
-                _ = try? await audioProvider.stopRecording()
+                _ = try? await audioProvider.stopRecording(owner: captureOwner)
             }
             if pendingContext?.sessionID == session.id {
                 pendingContext?.operation.task.cancel()
@@ -1206,7 +1273,7 @@ public actor DictationPipeline: PipelineProviding {
         if Task.isCancelled || !ownsSession(session.id) {
             Log.debug("[Pipeline] performAudioSetup() cancelled after startRecording")
             if captureStopOperation?.sessionID != session.id {
-                _ = try? await audioProvider.stopRecording()
+                _ = try? await audioProvider.stopRecording(owner: captureOwner)
             }
             if pendingContext?.sessionID == session.id {
                 pendingContext?.operation.task.cancel()
@@ -1215,16 +1282,21 @@ public actor DictationPipeline: PipelineProviding {
             return
         }
 
-        if captureBoundaryMissedSessionID == session.id {
+        if captureBoundaryMissedSessionID == session.id,
+            previewPreRollRecoverySessionID == session.id
+        {
             Log.debug(
-                "[Pipeline] Audio capture became live after key release; discarding late PCM"
+                "[Pipeline] Audio capture became live after key release; draining exact pre-roll"
             )
-            _ = try? await audioProvider.stopRecording()
-            if pendingContext?.sessionID == session.id {
-                pendingContext?.operation.task.cancel()
-                pendingContext = nil
+            if let lateStop = claimCaptureStop(
+                sessionID: session.id,
+                releaseHostTime: session.releaseBoundary?.releaseHostTime)
+            {
+                captureBoundaryMissedSessionID = nil
+                previewPreRollRecoverySessionID = nil
+                await captureStopDidClaim()
+                _ = lateStop
             }
-            return
         }
         let t4 = CFAbsoluteTimeGetCurrent()
         Log.debug(
@@ -1234,7 +1306,7 @@ public actor DictationPipeline: PipelineProviding {
         // Both supported backends stream when PCM capture is available. A
         // local release may already have stopped the provider, so claim the
         // stream retained by complete() before stopRecording cleared it.
-        let pcmStream = audioProvider.pcmAudioStream
+        let pcmStream = audioProvider.pcmAudioStream(owner: captureOwner)
             ?? completionRetainedPCMStream.flatMap { retained in
                 retained.sessionID == session.id ? retained.stream : nil
             }
@@ -1261,13 +1333,14 @@ public actor DictationPipeline: PipelineProviding {
             guard !Task.isCancelled, ownsSession(session.id) else {
                 isStreamingSession = false
                 if captureStopOperation?.sessionID != session.id {
-                    _ = try? await audioProvider.stopRecording()
+                    _ = try? await audioProvider.stopRecording(owner: captureOwner)
                 }
                 return
             }
 
             let t5 = CFAbsoluteTimeGetCurrent()
-            let micProximity = audioProvider.micProximity
+            let micProximity = audioProvider.metrics(owner: captureOwner)?
+                .micProximity ?? .nearField
             let language = session.language
 
             // Neither mode injects mid-stream. Local assembles one final
@@ -1281,7 +1354,8 @@ public actor DictationPipeline: PipelineProviding {
             // than only the size cap.
             if backend.isLocal {
                 (streaming as? LocalStreamingProvider)?
-                    .setSilenceThreshold(effectiveSilenceThreshold())
+                    .setSilenceThreshold(
+                        effectiveSilenceThreshold(sessionID: session.id))
             }
 
             // Cloud setup has a bounded fallback path. Local setup has no
@@ -1332,9 +1406,9 @@ public actor DictationPipeline: PipelineProviding {
                 await streaming.cancelStreaming(sessionID: session.id)
                 isStreamingSession = false
                 if captureStopOperation?.sessionID != session.id,
-                    audioProvider.isRecording
+                    audioProvider.isRecording(owner: captureOwner)
                 {
-                    _ = try? await audioProvider.stopRecording()
+                    _ = try? await audioProvider.stopRecording(owner: captureOwner)
                 }
                 return
             }
@@ -1371,6 +1445,34 @@ public actor DictationPipeline: PipelineProviding {
         } else {
             isStreamingSession = false
         }
+    }
+
+    private func handleCaptureStopFailure(
+        sessionID: DictationSessionID,
+        streamingProvider: any StreamingDictationProviding
+    ) async {
+        Log.debug(
+            "[Pipeline] Capture stop failed after terminal reset; refusing transcription"
+        )
+        let setupTask = audioSetupTask
+        audioSetupTask = nil
+        setupTask?.cancel()
+        await setupTask?.value
+
+        let forwardingOperation = audioForwardingOperation
+        audioForwardingOperation = nil
+        streamingProvider.setChunkHandler(nil)
+        if let forwardingOperation {
+            await forwardingOperation.cancel {
+                await streamingProvider.cancelStreaming(sessionID: sessionID)
+            }
+        } else {
+            await streamingProvider.cancelStreaming(sessionID: sessionID)
+        }
+        isStreamingSession = false
+        audioSetupFailed = false
+        recordingStartedAt = nil
+        _ = await coordinator.failDictation(sessionID: sessionID)
     }
 
     public func complete() async {
@@ -1416,7 +1518,25 @@ public actor DictationPipeline: PipelineProviding {
             Log.debug("[Pipeline] complete() ignored - no active session")
             return
         }
+        let captureOwner = audioOwner(session.id)
         ownedCompletionSessionID = session.id
+        if let releaseHostTime {
+            _ = session.releaseBoundary?.publish(
+                releaseHostTime: releaseHostTime)
+        }
+        let canRecoverPreviewPreRoll: Bool
+        if establishesReleaseBoundary, let boundary = session.releaseBoundary {
+            // Snapshot preview proof before releasing the readiness ledger. A
+            // concurrent promotion publishes readiness and then clears its
+            // one-shot proof; readiness before this snapshot wins through the
+            // stop claim below, while readiness after it cannot erase proof.
+            canRecoverPreviewPreRoll =
+                audioProvider.canRecoverCaptureReleasedBeforeReadiness(
+                    owner: captureOwner,
+                    pressHostTime: boundary.pressHostTime)
+        } else {
+            canRecoverPreviewPreRoll = false
+        }
         let releaseCaptureStopOperation: CaptureStopOperation?
         if establishesReleaseBoundary {
             releaseCaptureStopOperation = claimCaptureStop(
@@ -1433,9 +1553,18 @@ public actor DictationPipeline: PipelineProviding {
             establishesReleaseBoundary && releaseCaptureStopOperation == nil
         if missedCaptureBoundary {
             captureBoundaryMissedSessionID = session.id
-            audioSetupTask?.cancel()
-            audioStartOperation?.task.cancel()
-            audioProvider.forceReset()
+            if canRecoverPreviewPreRoll {
+                previewPreRollRecoverySessionID = session.id
+            } else {
+                previewPreRollRecoverySessionID = nil
+                Log.debug(
+                    "[Pipeline] Capture was not live at key release and has no retained preview coverage; resetting"
+                )
+                audioProvider.forceReset(owner: captureOwner)
+            }
+        }
+        if establishesReleaseBoundary {
+            await completionDidEstablishReleaseBoundary()
         }
         if establishesReleaseBoundary, releaseCaptureStopOperation != nil {
             await captureStopDidClaim()
@@ -1461,9 +1590,11 @@ public actor DictationPipeline: PipelineProviding {
         }
         guard currentState == .recording else {
             if missedCaptureBoundary,
+                completionOwnerCount == 1,
                 captureBoundaryMissedSessionID == session.id
             {
                 captureBoundaryMissedSessionID = nil
+                previewPreRollRecoverySessionID = nil
             }
             Log.debug("[Pipeline] complete() ignored — state is \(currentState)")
             return
@@ -1483,8 +1614,8 @@ public actor DictationPipeline: PipelineProviding {
         // The already-created AsyncStream keeps buffered PCM available for the
         // forwarding owner after setup drains. No backend may observe PCM that
         // arrived after the user released the dictation key.
-        let releasedAudioBuffer: AudioBuffer?
-        let captureStopFailed: Bool
+        var releasedAudioBuffer: AudioBuffer?
+        var captureStopFailed: Bool
         if let releaseCaptureStopOperation {
             switch await releaseCaptureStopOperation.task.value {
             case .success(let audioBuffer):
@@ -1507,28 +1638,9 @@ public actor DictationPipeline: PipelineProviding {
         }
 
         if captureStopFailed {
-            Log.debug(
-                "[Pipeline] Capture stop failed after terminal reset; refusing transcription"
-            )
-            let setupTask = audioSetupTask
-            audioSetupTask = nil
-            setupTask?.cancel()
-            await setupTask?.value
-
-            let forwardingOperation = audioForwardingOperation
-            audioForwardingOperation = nil
-            streamingProvider.setChunkHandler(nil)
-            if let forwardingOperation {
-                await forwardingOperation.cancel {
-                    await streamingProvider.cancelStreaming(sessionID: session.id)
-                }
-            } else {
-                await streamingProvider.cancelStreaming(sessionID: session.id)
-            }
-            isStreamingSession = false
-            audioSetupFailed = false
-            recordingStartedAt = nil
-            _ = await coordinator.failDictation(sessionID: session.id)
+            await handleCaptureStopFailure(
+                sessionID: session.id,
+                streamingProvider: streamingProvider)
             return
         }
 
@@ -1549,11 +1661,14 @@ public actor DictationPipeline: PipelineProviding {
         // recording, so it reflects the loudest moment. When it is below
         // the silence threshold, there is nothing to transcribe and
         // waiting 5-6s for a stale WebSocket ping to time out is waste.
-        let earlyThreshold = effectiveSilenceThreshold()
+        let earlyThreshold = effectiveSilenceThreshold(sessionID: session.id)
         // A peakRMS of exactly 0 means no audio was captured yet (the
         // tap hasn't fired). Skip the early silence gate in this case
         // so rapid hotkey taps don't silently discard speech.
-        if audioProvider.peakRMS > 0, audioProvider.peakRMS <= earlyThreshold {
+        if let earlyMetrics = audioProvider.metrics(owner: captureOwner),
+            earlyMetrics.peakRMS > 0,
+            earlyMetrics.peakRMS <= earlyThreshold
+        {
             let setupTask = audioSetupTask
             setupTask?.cancel()
             audioSetupTask = nil
@@ -1570,17 +1685,17 @@ public actor DictationPipeline: PipelineProviding {
             await setupTask?.value
 
             Log.debug(
-                "[Pipeline] Early silence short-circuit: peak RMS \(audioProvider.peakRMS) <= \(earlyThreshold) (ambient: \(audioProvider.ambientRMS)), skipping setup wait"
+                "[Pipeline] Early silence short-circuit: peak RMS \(earlyMetrics.peakRMS) <= \(earlyThreshold) (ambient: \(earlyMetrics.ambientRMS)), skipping setup wait"
             )
 
             if let store = micDiagnosticStore {
                 await store.record(
                     MicDiagnosticEntry(
-                        deviceName: audioProvider.deviceName,
-                        proximity: audioProvider.micProximity.rawValue,
-                        ambientRMS: audioProvider.ambientRMS,
-                        peakRMS: audioProvider.peakRMS,
-                        gain: audioProvider.gainFactor,
+                        deviceName: earlyMetrics.deviceName,
+                        proximity: earlyMetrics.micProximity.rawValue,
+                        ambientRMS: earlyMetrics.ambientRMS,
+                        peakRMS: earlyMetrics.peakRMS,
+                        gain: earlyMetrics.gainFactor,
                         threshold: earlyThreshold,
                         duration: 0,
                         latency: 0,
@@ -1590,7 +1705,7 @@ public actor DictationPipeline: PipelineProviding {
 
             // Stop audio and reset immediately if release did not already do so.
             if releasedAudioBuffer == nil {
-                _ = try? await audioProvider.stopRecording()
+                _ = try? await audioProvider.stopRecording(owner: captureOwner)
             }
             await resetOwnedSession(session.id)
             return
@@ -1639,21 +1754,22 @@ public actor DictationPipeline: PipelineProviding {
 
                     // Silence observer: bail after 200ms of confirmed silence
                     // without coupling the hard watchdog to wall-clock polling.
-                    Task.detached { [audioProvider, earlyThreshold] in
+                    Task.detached { [audioProvider, captureOwner, earlyThreshold] in
                         var silentTicks = 0
                         while true {
                             try? await Task.sleep(nanoseconds: 50_000_000)
                             let alreadyDone = lock.withLock { resumed }
                             if alreadyDone { return }
 
-                            if audioProvider.peakRMS > 0,
-                                audioProvider.peakRMS <= earlyThreshold
+                            if let metrics = audioProvider.metrics(owner: captureOwner),
+                                metrics.peakRMS > 0,
+                                metrics.peakRMS <= earlyThreshold
                             {
                                 silentTicks += 1
                                 // 4 ticks × 50ms = 200ms of confirmed silence
                                 if silentTicks >= 4 {
                                     Log.debug(
-                                        "[Pipeline] Setup wait bailing early: silent audio (peak RMS \(audioProvider.peakRMS), threshold \(earlyThreshold))"
+                                        "[Pipeline] Setup wait bailing early: silent audio (peak RMS \(metrics.peakRMS), threshold \(earlyThreshold))"
                                     )
                                     let alreadyResumed = lock.withLock {
                                         let was = resumed
@@ -1687,6 +1803,26 @@ public actor DictationPipeline: PipelineProviding {
             audioSetupTask = nil
         }
 
+        if releasedAudioBuffer == nil,
+            !captureStopFailed,
+            let lateStop = captureStopOperation,
+            lateStop.sessionID == session.id
+        {
+            switch await lateStop.task.value {
+            case .success(let audioBuffer):
+                releasedAudioBuffer = audioBuffer
+            case .failure(let error):
+                Log.debug("[Pipeline] Failed to drain late capture: \(error)")
+                captureStopFailed = true
+            }
+        }
+        if captureStopFailed {
+            await handleCaptureStopFailure(
+                sessionID: session.id,
+                streamingProvider: streamingProvider)
+            return
+        }
+
         await completionWillHandoff()
         if await abortCompletionIfCancelledOrRetired(
             completionGeneration: completionGeneration,
@@ -1700,12 +1836,13 @@ public actor DictationPipeline: PipelineProviding {
                 "[Pipeline] Capture was not live at key release; retaining explicit failure"
             )
             captureBoundaryMissedSessionID = nil
+            previewPreRollRecoverySessionID = nil
             audioSetupFailed = false
             isStreamingSession = false
             recordingStartedAt = nil
             let drainedLateStart = await drainRetainedAudioStartOperation()
             if !drainedLateStart {
-                _ = try? await audioProvider.stopRecording()
+                _ = try? await audioProvider.stopRecording(owner: captureOwner)
             }
             _ = await coordinator.failDictation(sessionID: session.id)
             return
@@ -1719,7 +1856,7 @@ public actor DictationPipeline: PipelineProviding {
             isStreamingSession = false
             let drainedLateStart = await drainRetainedAudioStartOperation()
             if releasedAudioBuffer == nil, !drainedLateStart {
-                _ = try? await audioProvider.stopRecording()
+                _ = try? await audioProvider.stopRecording(owner: captureOwner)
             }
             await resetOwnedSession(session.id)
             return
@@ -1770,7 +1907,8 @@ public actor DictationPipeline: PipelineProviding {
                 audioBuffer = releasedAudioBuffer
             } else {
                 do {
-                    audioBuffer = try await audioProvider.stopRecording()
+                    audioBuffer = try await audioProvider.stopRecording(
+                        owner: captureOwner)
                 } catch {
                     guard ownsSession(session.id) else { return }
                     Log.debug("[Pipeline] Failed to stop recording: \(error)")
@@ -1791,6 +1929,25 @@ public actor DictationPipeline: PipelineProviding {
                 "[Pipeline] audio stopped (\(String(format: "%.2f", audioBuffer.duration))s, \(audioBuffer.data.count)B)"
             )
 
+            guard !audioBuffer.data.isEmpty else {
+                Log.debug("[Pipeline] Capture produced no accepted audio")
+                if let forwardingOperation {
+                    await forwardingOperation.cancel {
+                        await streamingProvider.cancelStreaming(
+                            sessionID: session.id)
+                    }
+                } else if useStreaming {
+                    await streamingProvider.cancelStreaming(sessionID: session.id)
+                }
+                guard ownsSession(session.id) else { return }
+                if missedCaptureBoundary {
+                    _ = await coordinator.failDictation(sessionID: session.id)
+                } else {
+                    await resetOwnedSession(session.id)
+                }
+                return
+            }
+
             // Early silence check: use the peak RMS tracked during
             // recording to reject silent presses immediately, before
             // waiting on the streaming forwarding operation or any network
@@ -1800,21 +1957,23 @@ public actor DictationPipeline: PipelineProviding {
             // have finished during recording. Use effectiveSilenceThreshold()
             // which respects far-field mic proximity (built-in mics use
             // a low fixed threshold instead of the adaptive calculation).
-            let postRecordThreshold = effectiveSilenceThreshold()
+            let postRecordThreshold = effectiveSilenceThreshold(
+                sessionID: session.id)
 
-            let peakLevel = audioProvider.peakRMS
-            if peakLevel <= postRecordThreshold {
+            if let postRecordMetrics = audioProvider.metrics(owner: captureOwner),
+                postRecordMetrics.peakRMS <= postRecordThreshold
+            {
                 Log.debug(
-                    "[Pipeline] Early silence gate: peak RMS \(peakLevel) <= \(postRecordThreshold) (ambient: \(audioProvider.ambientRMS)), skipping"
+                    "[Pipeline] Early silence gate: peak RMS \(postRecordMetrics.peakRMS) <= \(postRecordThreshold) (ambient: \(postRecordMetrics.ambientRMS)), skipping"
                 )
                 if let store = micDiagnosticStore {
                     await store.record(
                         MicDiagnosticEntry(
-                            deviceName: audioProvider.deviceName,
-                            proximity: audioProvider.micProximity.rawValue,
-                            ambientRMS: audioProvider.ambientRMS,
-                            peakRMS: audioProvider.peakRMS,
-                            gain: audioProvider.gainFactor,
+                            deviceName: postRecordMetrics.deviceName,
+                            proximity: postRecordMetrics.micProximity.rawValue,
+                            ambientRMS: postRecordMetrics.ambientRMS,
+                            peakRMS: postRecordMetrics.peakRMS,
+                            gain: postRecordMetrics.gainFactor,
                             threshold: postRecordThreshold,
                             duration: audioBuffer.duration,
                             latency: 0,
@@ -2174,6 +2333,7 @@ public actor DictationPipeline: PipelineProviding {
     private func finishCancellationDrain(id: UUID) {
         guard cancellationDrain?.id == id else { return }
         cancellationDrain = nil
+        resumeLifecycleWaitersIfQuiescent()
     }
 
     private func performCancellationDrain(
@@ -2221,10 +2381,11 @@ public actor DictationPipeline: PipelineProviding {
         runningStreamingSetupOperation?.task.cancel()
         runningRetryOperation?.task.cancel()
         runningInjectionOperation?.task.cancel()
-        if runningAudioStartOperation != nil,
+        if let runningAudioStartOperation,
             runningCaptureStopOperation == nil
         {
-            audioProvider.forceReset()
+            audioProvider.forceReset(
+                owner: audioOwner(runningAudioStartOperation.sessionID))
         }
         _ = await runningCaptureStopOperation?.task.value
 
@@ -2257,8 +2418,9 @@ public actor DictationPipeline: PipelineProviding {
             if runningCaptureStopOperation == nil {
                 // The retained start may have ignored cancellation and published
                 // a live engine after the pre-drain reset.
-                audioProvider.forceReset()
-                _ = try? await audioProvider.stopRecording()
+                let owner = audioOwner(runningAudioStartOperation.sessionID)
+                audioProvider.forceReset(owner: owner)
+                _ = try? await audioProvider.stopRecording(owner: owner)
             }
         }
         _ = await runningStreamingSetupOperation?.task.result
@@ -2304,13 +2466,14 @@ public actor DictationPipeline: PipelineProviding {
         audioStartOperation = nil
         if let lateAudioStartOperation {
             lateAudioStartOperation.task.cancel()
+            let owner = audioOwner(lateAudioStartOperation.sessionID)
             if runningCaptureStopOperation == nil {
-                audioProvider.forceReset()
+                audioProvider.forceReset(owner: owner)
             }
             _ = await lateAudioStartOperation.task.result
             if runningCaptureStopOperation == nil {
-                audioProvider.forceReset()
-                _ = try? await audioProvider.stopRecording()
+                audioProvider.forceReset(owner: owner)
+                _ = try? await audioProvider.stopRecording(owner: owner)
             }
         }
         let lateStreamingSetupOperation = streamingSetupOperation
@@ -2330,6 +2493,7 @@ public actor DictationPipeline: PipelineProviding {
         isStreamingSession = false
         audioSetupFailed = false
         captureBoundaryMissedSessionID = nil
+        previewPreRollRecoverySessionID = nil
         recovery = nil
         if sessionID == nil || captureBoundary?.sessionID == sessionID {
             captureBoundary = nil
@@ -2351,11 +2515,17 @@ public actor DictationPipeline: PipelineProviding {
         }
     }
 
-    /// Mark this pipeline terminal and start cancellation without waiting.
+    /// Seal this pipeline immediately, then mark it terminal and start
+    /// cancellation after any capture-maintenance owner has returned.
     ///
     /// Composition uses this fence before beginning model shutdown so an
     /// invisible old recording cannot continue while Qwen cancellation drains.
-    public func beginRetirement() {
+    public func beginRetirement() async {
+        isSealedForReplacement = true
+        while captureMaintenanceID != nil {
+            await waitForCaptureMaintenanceCompletion()
+        }
+        guard !isRetired else { return }
         isRetired = true
         let sessionID = activeSession?.id
         if let sessionID {
@@ -2367,9 +2537,185 @@ public actor DictationPipeline: PipelineProviding {
         _ = startCancellationDrain(sessionID: sessionID)
     }
 
+    /// Atomically stop new admissions and wait for work already owned by this
+    /// generation to finish. Unlike retirement, sealing never cancels capture,
+    /// transcription, recovery, or publication.
+    public func sealForReplacement() async {
+        guard !isRetired else { return }
+        isSealedForReplacement = true
+        while !isQuiescentForReplacement {
+            await withCheckedContinuation { continuation in
+                replacementSealWaiters.append(continuation)
+            }
+        }
+    }
+
+    /// Reopen a generation when its replacement cannot be built after the
+    /// quiescence fence. This is legal only before retirement and while no
+    /// admitted work remains, so callers cannot reopen beneath an old owner.
+    @discardableResult
+    public func reopenAfterFailedReplacement() -> Bool {
+        guard isSealedForReplacement, !isRetired,
+            isQuiescentForReplacement
+        else { return false }
+        isSealedForReplacement = false
+        return true
+    }
+
+    /// Run a microphone/device transaction only after previously admitted
+    /// capture and publication work reaches quiescence. The temporary seal is
+    /// visible before waiting, remains held across the operation, and is always
+    /// released when the operation returns or throws.
+    public func withQuiescentCaptureMaintenance<Result: Sendable>(
+        _ operation: @escaping @Sendable () async throws -> Result
+    ) async throws -> Result {
+        while captureMaintenanceID != nil {
+            try await waitForCaptureMaintenanceCompletionUnlessCancelled()
+        }
+        try Task.checkCancellation()
+        guard !isRetired, !isSealedForReplacement else {
+            throw DictationPipelineCaptureMaintenanceError.pipelineUnavailable
+        }
+
+        let maintenanceID = UUID()
+        captureMaintenanceID = maintenanceID
+        isSealedForCaptureMaintenance = true
+
+        do {
+            while !isQuiescentPipelineWork {
+                try await waitForCaptureMaintenanceQuiescence(
+                    id: maintenanceID)
+            }
+            try Task.checkCancellation()
+            let result = try await operation()
+            finishCaptureMaintenance(id: maintenanceID)
+            return result
+        } catch {
+            finishCaptureMaintenance(id: maintenanceID)
+            throw error
+        }
+    }
+
+    private func waitForCaptureMaintenanceCompletion() async {
+        guard captureMaintenanceID != nil else { return }
+        await withCheckedContinuation { continuation in
+            captureMaintenanceCompletionWaiters.append(continuation)
+        }
+    }
+
+    private func waitForCaptureMaintenanceCompletionUnlessCancelled()
+        async throws
+    {
+        guard captureMaintenanceID != nil else { return }
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { continuation in
+                guard captureMaintenanceID != nil else {
+                    continuation.resume()
+                    return
+                }
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                cancellableCaptureMaintenanceCompletionWaiters[waiterID] =
+                    continuation
+            }
+        } onCancel: {
+            Task {
+                await self.cancelCaptureMaintenanceCompletionWaiter(waiterID)
+            }
+        }
+    }
+
+    private func waitForCaptureMaintenanceQuiescence(id: UUID) async throws {
+        guard captureMaintenanceID == id, !isQuiescentPipelineWork else {
+            return
+        }
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await withCheckedThrowingContinuation { continuation in
+                guard captureMaintenanceID == id,
+                    !isQuiescentPipelineWork
+                else {
+                    continuation.resume()
+                    return
+                }
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                cancellableCaptureMaintenanceQuiescenceWaiters[waiterID] =
+                    continuation
+            }
+        } onCancel: {
+            Task {
+                await self.cancelCaptureMaintenanceQuiescenceWaiter(waiterID)
+            }
+        }
+    }
+
+    private func cancelCaptureMaintenanceCompletionWaiter(_ id: UUID) {
+        cancellableCaptureMaintenanceCompletionWaiters.removeValue(forKey: id)?
+            .resume(throwing: CancellationError())
+    }
+
+    private func cancelCaptureMaintenanceQuiescenceWaiter(_ id: UUID) {
+        cancellableCaptureMaintenanceQuiescenceWaiters.removeValue(forKey: id)?
+            .resume(throwing: CancellationError())
+    }
+
+    private func finishCaptureMaintenance(id: UUID) {
+        guard captureMaintenanceID == id else { return }
+        captureMaintenanceID = nil
+        isSealedForCaptureMaintenance = false
+
+        let waiters = captureMaintenanceCompletionWaiters
+        captureMaintenanceCompletionWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        let cancellableWaiters = Array(
+            cancellableCaptureMaintenanceCompletionWaiters.values)
+        cancellableCaptureMaintenanceCompletionWaiters.removeAll()
+        for waiter in cancellableWaiters { waiter.resume() }
+        resumeLifecycleWaitersIfQuiescent()
+    }
+
+    private var isQuiescentPipelineWork: Bool {
+        activeSession == nil
+            && activationReservation == nil
+            && activeOperationCount == 0
+            && cancellationDrain == nil
+            && bufferedPasteReservationID == nil
+            && terminalIdleTransitionID == nil
+            && completionOwnerCount == 0
+    }
+
+    private var isQuiescentForReplacement: Bool {
+        isQuiescentPipelineWork && captureMaintenanceID == nil
+    }
+
+    private func resumeLifecycleWaitersIfQuiescent() {
+        if captureMaintenanceID != nil, isQuiescentPipelineWork {
+            let waiters = captureMaintenanceQuiescenceWaiters
+            captureMaintenanceQuiescenceWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+            let cancellableWaiters = Array(
+                cancellableCaptureMaintenanceQuiescenceWaiters.values)
+            cancellableCaptureMaintenanceQuiescenceWaiters.removeAll()
+            for waiter in cancellableWaiters { waiter.resume() }
+        }
+        if isSealedForReplacement, isQuiescentForReplacement {
+            let waiters = replacementSealWaiters
+            replacementSealWaiters.removeAll()
+            for waiter in waiters { waiter.resume() }
+        }
+    }
+
     /// Permanently stop this pipeline before its providers are released.
     public func retire() async {
-        beginRetirement()
+        await beginRetirement()
         await cancelAndDrain()
         await waitForActiveOperations()
         await cancelAndDrain()
@@ -2646,19 +2992,21 @@ public actor DictationPipeline: PipelineProviding {
         mode: String
     ) async {
         guard ownsSession(sessionID) else { return }
+        let captureMetrics = audioProvider.metrics(
+            owner: audioOwner(sessionID))
         Log.debug("[Pipeline] dictation returned, injecting text: \"\(text)\"")
 
         let finalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !finalText.isEmpty else {
             Log.debug("[Pipeline] Empty dictation result, skipping injection")
-            if let store = micDiagnosticStore {
+            if let store = micDiagnosticStore, let captureMetrics {
                 await store.record(
                     MicDiagnosticEntry(
-                        deviceName: audioProvider.deviceName,
-                        proximity: audioProvider.micProximity.rawValue,
-                        ambientRMS: audioProvider.ambientRMS,
-                        peakRMS: audioProvider.peakRMS,
-                        gain: audioProvider.gainFactor,
+                        deviceName: captureMetrics.deviceName,
+                        proximity: captureMetrics.micProximity.rawValue,
+                        ambientRMS: captureMetrics.ambientRMS,
+                        peakRMS: captureMetrics.peakRMS,
+                        gain: captureMetrics.gainFactor,
                         threshold: silenceThreshold,
                         duration: audioBuffer.duration,
                         latency: CFAbsoluteTimeGetCurrent() - t0,
@@ -2716,14 +3064,14 @@ public actor DictationPipeline: PipelineProviding {
                 + " mode=\(mode)"
         )
 
-        if let store = micDiagnosticStore {
+        if let store = micDiagnosticStore, let captureMetrics {
             await store.record(
                 MicDiagnosticEntry(
-                    deviceName: audioProvider.deviceName,
-                    proximity: audioProvider.micProximity.rawValue,
-                    ambientRMS: audioProvider.ambientRMS,
-                    peakRMS: audioProvider.peakRMS,
-                    gain: audioProvider.gainFactor,
+                    deviceName: captureMetrics.deviceName,
+                    proximity: captureMetrics.micProximity.rawValue,
+                    ambientRMS: captureMetrics.ambientRMS,
+                    peakRMS: captureMetrics.peakRMS,
+                    gain: captureMetrics.gainFactor,
                     threshold: silenceThreshold,
                     duration: audioBuffer.duration,
                     latency: t5 - t0,
@@ -2774,14 +3122,17 @@ public actor DictationPipeline: PipelineProviding {
             guard ownsSession(sessionID) else { return nil }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 Log.debug("[Pipeline] Batch returned no text; retaining complete WAV")
-                if let store = micDiagnosticStore {
+                if let store = micDiagnosticStore,
+                    let captureMetrics = audioProvider.metrics(
+                        owner: audioOwner(sessionID))
+                {
                     await store.record(
                         MicDiagnosticEntry(
-                            deviceName: audioProvider.deviceName,
-                            proximity: audioProvider.micProximity.rawValue,
-                            ambientRMS: audioProvider.ambientRMS,
-                            peakRMS: audioProvider.peakRMS,
-                            gain: audioProvider.gainFactor,
+                            deviceName: captureMetrics.deviceName,
+                            proximity: captureMetrics.micProximity.rawValue,
+                            ambientRMS: captureMetrics.ambientRMS,
+                            peakRMS: captureMetrics.peakRMS,
+                            gain: captureMetrics.gainFactor,
                             threshold: silenceThreshold,
                             duration: audioBuffer.duration,
                             latency: CFAbsoluteTimeGetCurrent() - diagnosticStartedAt,
@@ -2827,13 +3178,16 @@ public actor DictationPipeline: PipelineProviding {
         language: String?
     ) {
         guard ownsSession(sessionID) else { return }
+        let owner = audioOwner(sessionID)
         recovery = RecoveryRecord(
             sessionID: sessionID,
             audio: audio,
             context: context,
             language: language,
-            micProximity: audioProvider.micProximity,
-            silenceThreshold: effectiveSilenceThreshold())
+            micProximity: audioProvider.metrics(owner: owner)?.micProximity
+                ?? .nearField,
+            silenceThreshold: effectiveSilenceThreshold(
+                sessionID: sessionID))
     }
 
     // MARK: - Session expiry
@@ -3054,6 +3408,8 @@ public actor DictationPipeline: PipelineProviding {
             await retryBufferedInjection(sessionID: sessionID)
             return
         }
+
+        guard !isCaptureAdmissionSealed else { return }
 
         guard activationReservation == nil,
             bufferedPasteReservationID == nil,

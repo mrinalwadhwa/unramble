@@ -100,6 +100,36 @@ final class BufferedPasteOwnershipTests: XCTestCase {
         XCTAssertEqual(injectionCount, 1)
     }
 
+    func testReplacementSealDrainsAdmittedPasteAndRejectsLaterIdlePaste() async {
+        let buffer = TranscriptBuffer()
+        await buffer.store("admitted before seal")
+        let injector = BufferedPasteGateInjector()
+        let (pipeline, _) = makePipeline(
+            buffer: buffer,
+            injector: injector)
+
+        let admittedPaste = Task { await pipeline.pasteBufferedTranscript() }
+        await injector.waitUntilInjectionStarts()
+
+        let seal = Task { await pipeline.sealForReplacement() }
+        let didSeal = await waitUntilAsync {
+            await pipeline.isSealedForReplacement
+        }
+        XCTAssertTrue(didSeal)
+
+        await buffer.store("retained after seal")
+        await pipeline.pasteBufferedTranscript()
+
+        await injector.releaseInjection()
+        await admittedPaste.value
+        await seal.value
+
+        let injectionCount = await injector.injectionCount
+        let retained = await buffer.lastTranscript
+        XCTAssertEqual(injectionCount, 1)
+        XCTAssertEqual(retained, "retained after seal")
+    }
+
     func testBufferedPasteFailureRestoresTranscript() async {
         let buffer = TranscriptBuffer()
         await buffer.store("restore me")
@@ -320,6 +350,17 @@ final class BufferedPasteOwnershipTests: XCTestCase {
             await Task.yield()
         }
         return condition()
+    }
+
+    private func waitUntilAsync(
+        attempts: Int = 1_000,
+        _ condition: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        for _ in 0..<attempts {
+            if await condition() { return true }
+            await Task.yield()
+        }
+        return await condition()
     }
 
 }

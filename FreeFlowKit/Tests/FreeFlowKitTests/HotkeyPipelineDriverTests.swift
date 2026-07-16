@@ -6,13 +6,15 @@ final class HotkeyPipelineDriverTests: XCTestCase {
     func testReleasePublishesCaptureBoundaryBeforeQueuedCompletion() async throws {
         let pipeline = GatedHotkeyPipeline()
         let driver = HotkeyPipelineDriver(pipeline: pipeline)
+        let pressHostTime: UInt64 = 40_000
         let releaseHostTime: UInt64 = 41_000
 
-        driver.submit(.pressed)
+        driver.submit(.pressed, hostTime: pressHostTime)
         await pipeline.waitUntilActivationStarts()
         let boundaries = await pipeline.activationReleaseBoundaries
         let boundary = try XCTUnwrap(boundaries.first)
 
+        XCTAssertEqual(boundary.pressHostTime, pressHostTime)
         driver.submit(.released, hostTime: releaseHostTime)
 
         XCTAssertEqual(boundary.releaseHostTime, releaseHostTime)
@@ -309,6 +311,105 @@ final class HotkeyPipelineDriverTests: XCTestCase {
         XCTAssertEqual(unscopedCancelCount, 0)
     }
 
+    func testSuspensionPreservesHeldSessionAndFencesNewPresses() async {
+        let pipeline = GatedHotkeyPipeline()
+        let driver = HotkeyPipelineDriver(pipeline: pipeline)
+        let heldSessionID = DictationSessionID()
+        let resumedSessionID = DictationSessionID()
+
+        await pipeline.releaseActivation(with: heldSessionID)
+        driver.submit(.pressed)
+        await driver.waitForSubmittedEvents()
+
+        driver.suspendNewPresses()
+        driver.submit(.released, hostTime: 45_000)
+        await pipeline.waitUntilCompletionFinishes(for: heldSessionID)
+
+        await pipeline.releaseActivation(with: resumedSessionID)
+        driver.submit(.pressed)
+        driver.submit(.released)
+        await driver.waitForSubmittedCommands()
+        let suspendedActivationCount = await pipeline.activationStartCount
+        XCTAssertEqual(suspendedActivationCount, 1)
+
+        driver.resumeNewPresses()
+        driver.submit(.pressed)
+        driver.submit(.released, hostTime: 46_000)
+        await pipeline.waitUntilCompletionFinishes(for: resumedSessionID)
+
+        let completions = await pipeline.timestampedCompletionAttempts
+        XCTAssertEqual(
+            completions.map(\.sessionID),
+            [heldSessionID, resumedSessionID])
+        XCTAssertEqual(completions.map(\.releaseHostTime), [45_000, 46_000])
+        driver.invalidate()
+    }
+
+    func testSuspensionPreservesActivationAcceptedAfterFence() async {
+        let pipeline = GatedHotkeyPipeline()
+        let driver = HotkeyPipelineDriver(pipeline: pipeline)
+        let sessionID = DictationSessionID()
+
+        driver.submit(.pressed)
+        await pipeline.waitUntilActivationStarts()
+        driver.suspendNewPresses()
+
+        await pipeline.releaseActivation(with: sessionID)
+        await driver.waitForSubmittedEvents()
+        driver.submit(.released, hostTime: 47_000)
+        await pipeline.waitUntilCompletionFinishes(for: sessionID)
+
+        let completions = await pipeline.timestampedCompletionAttempts
+        let cancellations = await pipeline.scopedCancellationAttempts
+        XCTAssertEqual(completions.map(\.sessionID), [sessionID])
+        XCTAssertEqual(completions.map(\.releaseHostTime), [47_000])
+        XCTAssertEqual(cancellations, [])
+        driver.invalidate()
+    }
+
+    func testSynchronousAdmissionRejectsPressWithoutPreviewProof() async {
+        let pipeline = GatedHotkeyPipeline()
+        let admission = HotkeyPressAdmissionGate(isOpen: false)
+        let driver = HotkeyPipelineDriver(
+            pipeline: pipeline,
+            canAdmitPress: { admission.admit(at: $0) })
+        let pressHostTime: UInt64 = 48_000
+
+        driver.submit(.pressed, hostTime: pressHostTime)
+        driver.submit(.released, hostTime: 49_000)
+        await driver.waitForSubmittedEvents()
+
+        let activationCount = await pipeline.activationStartCount
+        XCTAssertEqual(activationCount, 0)
+        XCTAssertEqual(admission.observedHostTimes, [pressHostTime])
+        driver.invalidate()
+    }
+
+    func testAdmittedPressCompletesAfterSynchronousAdmissionCloses() async {
+        let pipeline = GatedHotkeyPipeline()
+        let admission = HotkeyPressAdmissionGate(isOpen: true)
+        let driver = HotkeyPipelineDriver(
+            pipeline: pipeline,
+            canAdmitPress: { admission.admit(at: $0) })
+        let sessionID = DictationSessionID()
+        let pressHostTime: UInt64 = 50_000
+        let releaseHostTime: UInt64 = 51_000
+
+        await pipeline.releaseActivation(with: sessionID)
+        driver.submit(.pressed, hostTime: pressHostTime)
+        await driver.waitForSubmittedEvents()
+
+        admission.close()
+        driver.submit(.released, hostTime: releaseHostTime)
+        await pipeline.waitUntilCompletionFinishes(for: sessionID)
+
+        let completions = await pipeline.timestampedCompletionAttempts
+        XCTAssertEqual(completions.map(\.sessionID), [sessionID])
+        XCTAssertEqual(completions.map(\.releaseHostTime), [releaseHostTime])
+        XCTAssertEqual(admission.observedHostTimes, [pressHostTime])
+        driver.invalidate()
+    }
+
     func testTransferReturnsHeldSessionAndMakesPhysicalReleaseANoOp() async {
         let pipeline = GatedHotkeyPipeline()
         let accepted = expectation(description: "held session accepted")
@@ -472,6 +573,31 @@ private actor HotkeyObserverGate {
         let pending = waiters
         waiters.removeAll()
         pending.forEach { $0.resume() }
+    }
+}
+
+private final class HotkeyPressAdmissionGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen: Bool
+    private var hostTimes: [UInt64] = []
+
+    init(isOpen: Bool) {
+        self.isOpen = isOpen
+    }
+
+    func admit(at hostTime: UInt64) -> Bool {
+        lock.withLock {
+            hostTimes.append(hostTime)
+            return isOpen
+        }
+    }
+
+    func close() {
+        lock.withLock { isOpen = false }
+    }
+
+    var observedHostTimes: [UInt64] {
+        lock.withLock { hostTimes }
     }
 }
 

@@ -21,6 +21,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private weak var pipeline: DictationPipeline?
     private var transcriptBuffer: TranscriptBuffer?
     private var audioDeviceProvider: (any AudioDeviceProviding)?
+    private var microphoneCaptureCoordinator: MicrophoneCaptureCoordinator?
     private var updaterService: UpdaterService?
     private var micDiagnosticStore: MicDiagnosticStore?
     private var shortcuts: ShortcutConfiguration = .default
@@ -68,6 +69,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     ///   - coordinator: The recording coordinator to observe.
     ///   - transcriptBuffer: The buffer holding the last transcript for re-paste.
     ///   - audioDeviceProvider: The provider for mic enumeration and selection.
+    ///   - microphoneCaptureCoordinator: The owner of atomic mic changes.
     ///   - shortcuts: The shortcut configuration for display hints.
     ///   - hotkeyRegistered: Whether the global hotkey registered successfully.
     func start(
@@ -76,6 +78,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pipeline: DictationPipeline? = nil,
         transcriptBuffer: TranscriptBuffer? = nil,
         audioDeviceProvider: (any AudioDeviceProviding)? = nil,
+        microphoneCaptureCoordinator: MicrophoneCaptureCoordinator? = nil,
         updaterService: UpdaterService? = nil,
         micDiagnosticStore: MicDiagnosticStore? = nil,
         shortcuts: ShortcutConfiguration = .default,
@@ -86,6 +89,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.pipeline = pipeline
         self.transcriptBuffer = transcriptBuffer
         self.audioDeviceProvider = audioDeviceProvider
+        self.microphoneCaptureCoordinator = microphoneCaptureCoordinator
         self.updaterService = updaterService
         self.micDiagnosticStore = micDiagnosticStore
         self.shortcuts = shortcuts
@@ -182,9 +186,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let privateMode = NSMenuItem(
                 title: "Private Mode",
                 action: #selector(togglePrivateModeAction),
-                keyEquivalent: "p"
+                keyEquivalent: ""
             )
-            privateMode.keyEquivalentModifierMask = [.control, .option]
             privateMode.target = self
             privateMode.image = NSImage(
                 systemSymbolName: "lock.shield",
@@ -596,12 +599,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {
-        guard let audioDeviceProvider else { return }
+        guard let microphoneCaptureCoordinator else { return }
         let deviceID = UInt32(sender.tag)
+        let deviceName = sender.title
         Task {
             do {
-                try await audioDeviceProvider.selectDevice(id: deviceID)
-                Log.debug("[MenuBar] Selected microphone: \(sender.title) (id: \(deviceID))")
+                try await microphoneCaptureCoordinator.selectDevice(id: deviceID)
+                Log.debug("[MenuBar] Selected microphone: \(deviceName) (id: \(deviceID))")
             } catch {
                 Log.debug("[MenuBar] Failed to select microphone: \(error)")
             }
@@ -609,9 +613,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func selectAutoDetect(_ sender: NSMenuItem) {
-        guard let audioDeviceProvider else { return }
-        audioDeviceProvider.clearSelection()
-        Log.debug("[MenuBar] Selected auto-detect")
+        guard let microphoneCaptureCoordinator else { return }
+        Task {
+            do {
+                try await microphoneCaptureCoordinator.selectDevice(id: nil)
+                Log.debug("[MenuBar] Selected auto-detect")
+            } catch {
+                Log.debug("[MenuBar] Failed to select auto-detect: \(error)")
+            }
+        }
     }
 
     @objc private func contributeMicData() {
@@ -684,12 +694,35 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         onTogglePrivateMode?()
     }
 
-    /// Update the private mode menu item checkmark and status text.
-    func setPrivateMode(_ isPrivate: Bool) {
+    /// Keep the checkmark tied to the installed backend while separately
+    /// exposing a replacement that is waiting for admitted work to drain.
+    func setDictationMode(
+        effective: DictationMode,
+        requested: DictationMode?
+    ) {
+        let isPrivate = effective == .local
         privateModeItem?.state = isPrivate ? .on : .off
-        privateModeStatusItem?.title = isPrivate
-            ? "Transcribing on this Mac"
-            : "Transcribing in the cloud"
+        privateModeItem?.isEnabled = requested == nil
+        privateModeItem?.title = requested == nil
+            ? "Private Mode"
+            : "Private Mode (switching...)"
+
+        if let requested {
+            privateModeStatusItem?.title = requested == .local
+                ? "Switching to on-device transcription..."
+                : "Switching to cloud transcription..."
+        } else {
+            privateModeStatusItem?.title = isPrivate
+                ? "Transcribing on this Mac"
+                : "Transcribing in the cloud"
+        }
+    }
+
+    /// Compatibility for call sites that only publish an effective mode.
+    func setPrivateMode(_ isPrivate: Bool) {
+        setDictationMode(
+            effective: isPrivate ? .local : .cloud,
+            requested: nil)
     }
 
     @objc private func resetAPIKeyAction() {

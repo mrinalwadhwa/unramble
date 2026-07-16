@@ -447,6 +447,10 @@
                 border-top: 1px solid var(--color-border-light);
             }
 
+            .mic-preview.is-unavailable .mic-level-track {
+                opacity: 0.45;
+            }
+
             .mic-preview-row {
                 display: flex;
                 align-items: center;
@@ -576,10 +580,10 @@
                                 type="button"
                                 class="key-recorder"
                                 data-shortcut="privateMode"
-                                data-default="&#x2303;&#x2325;P"
+                                data-default="&#x2303;&#x21E7;M"
                                 tabindex="0"
                             >
-                                &#x2303;&#x2325;P
+                                &#x2303;&#x21E7;M
                             </button>
                         </div>
                     </div>
@@ -591,16 +595,17 @@
                     <div class="setting-row">
                         <div class="setting-label-group">
                             <div class="setting-label">Input device</div>
+                            <div class="setting-hint">Kept ready while FreeFlow runs; macOS shows its microphone indicator</div>
                         </div>
                         <select id="mic-select" class="setting-select setting-select-wide">
                             <!-- Populated by JS from native bridge -->
                         </select>
                     </div>
-                    <div class="mic-preview">
+                    <div id="mic-preview" class="mic-preview is-unavailable">
                         <div class="mic-preview-row">
                             <div class="mic-preview-icon"><img id="mic-icon-img" data-symbol="mic.fill" style="width: 0.875rem; height: 0.875rem; opacity: 0.5" /></div>
                             <div class="mic-preview-label">Level</div>
-                            <div class="mic-level-track">
+                            <div id="mic-level-track" class="mic-level-track" aria-disabled="true">
                                 <div class="mic-level-bar" id="mic-level-bar"></div>
                             </div>
                         </div>
@@ -807,6 +812,7 @@
              *   - settingsState      — { soundFeedback, hotkey, language, languages }
              *   - microphoneList     — { devices: [...], currentId }
              *   - microphoneSelected — { id }
+             *   - micPreviewAvailability — { available }
              *   - audioLevel         — { level }
              *
              * Depends on bridge.js (window.freeflowbridge).
@@ -818,6 +824,7 @@
 
                 // Track whether mic preview is active so we can clean up.
                 var micPreviewActive = false;
+                var micPreviewAvailable = false;
 
                 // ----------------------------------------------------------------
                 // Initialization
@@ -829,6 +836,7 @@
                     bridge.on("settingsIcons", handleSettingsIcons);
                     bridge.on("microphoneList", handleMicrophoneList);
                     bridge.on("microphoneSelected", handleMicrophoneSelected);
+                    bridge.on("micPreviewAvailability", handleMicPreviewAvailability);
                     bridge.on("audioLevel", handleAudioLevel);
 
                     // Wire up UI event handlers.
@@ -838,6 +846,7 @@
                     bridge.send("getSettings");
 
                     // Request mic list and start preview.
+                    setMicPreviewAvailable(false);
                     bridge.send("listMicrophones");
                     bridge.send("startMicPreview");
                     micPreviewActive = true;
@@ -863,6 +872,7 @@
                         if (s.handsfree) window._setShortcutLabel("handsfree", s.handsfree);
                         if (s.paste) window._setShortcutLabel("paste", s.paste);
                         if (s.cancel) window._setShortcutLabel("cancel", s.cancel);
+                        if (s.privateMode) window._setShortcutLabel("privateMode", s.privateMode);
                     }
 
                     // Private mode shortcut (visible when local mode available)
@@ -969,6 +979,10 @@
                 // ----------------------------------------------------------------
 
                 function handleAudioLevel(data) {
+                    if (!micPreviewAvailable) {
+                        resetMicLevel();
+                        return;
+                    }
                     var level = (data && data.level) || 0;
                     var bar = document.getElementById("mic-level-bar");
                     if (!bar) return;
@@ -991,6 +1005,23 @@
                         bar.style.width = "0%";
                         bar.classList.remove("active");
                     }
+                }
+
+                function handleMicPreviewAvailability(data) {
+                    setMicPreviewAvailable(!!(data && data.available));
+                }
+
+                function setMicPreviewAvailable(available) {
+                    micPreviewAvailable = available;
+                    var preview = document.getElementById("mic-preview");
+                    var track = document.getElementById("mic-level-track");
+                    if (preview) {
+                        preview.classList.toggle("is-unavailable", !available);
+                    }
+                    if (track) {
+                        track.setAttribute("aria-disabled", available ? "false" : "true");
+                    }
+                    if (!available) resetMicLevel();
                 }
 
                 // ----------------------------------------------------------------
@@ -1031,6 +1062,7 @@
                         micSelect.addEventListener("change", function () {
                             var id = parseInt(micSelect.value, 10);
                             if (!isNaN(id)) {
+                                setMicPreviewAvailable(false);
                                 bridge.send("selectMicrophone", { id: id });
                             }
                         });
@@ -1055,7 +1087,7 @@
                     if (micPreviewActive) {
                         bridge.send("stopMicPreview");
                         micPreviewActive = false;
-                        resetMicLevel();
+                        setMicPreviewAvailable(false);
                     }
                 }
 
@@ -1095,8 +1127,11 @@
              *       else. This commits a modifier-only shortcut like
              *       Right Option ⌥.
              *
-             * Escape always cancels recording and resets the button to
-             * its default value (from the data-default attribute).
+             * The private-mode shortcut is stricter: it requires a
+             * non-modifier key plus at least two modifier families.
+             *
+             * Escape always cancels recording and restores the button's
+             * persisted value (kept in the data-default attribute).
              *
              * Clicking outside the active recorder also cancels and
              * resets to default.
@@ -1338,6 +1373,30 @@
                     return heldModPreview();
                 }
 
+                function modifierCount(event) {
+                    var groups = {};
+                    for (var code in heldModCodes) {
+                        groups[CODE_TO_MOD[code]] = true;
+                    }
+                    if (event) {
+                        if (event.ctrlKey) groups["Control"] = true;
+                        if (event.altKey) groups["Alt"] = true;
+                        if (event.shiftKey) groups["Shift"] = true;
+                        if (event.metaKey) groups["Meta"] = true;
+                    }
+                    return Object.keys(groups).length;
+                }
+
+                function rejectRecording(btn, message) {
+                    btn.textContent = message;
+                    var btnRef = btn;
+                    activeBtn = null;
+                    heldModCodes = {};
+                    setTimeout(function () {
+                        resetToDefault(btnRef);
+                    }, 1200);
+                }
+
                 function buildData(btn, label, event) {
                     var data = {
                         shortcut: btn.getAttribute("data-shortcut"),
@@ -1449,7 +1508,7 @@
                         e.preventDefault();
                         e.stopPropagation();
 
-                        // Escape always cancels, resets to default.
+                        // Escape always cancels and restores the persisted value.
                         if (e.code === "Escape") {
                             resetToDefault(activeBtn);
                             return;
@@ -1462,6 +1521,18 @@
                         }
 
                         // Non-modifier key pressed.
+                        var shortcutName = activeBtn.getAttribute("data-shortcut");
+                        if (shortcutName === "privateMode") {
+                            if (!keyNameFromCode(e.code)) {
+                                rejectRecording(activeBtn, "Use a supported key");
+                                return;
+                            }
+                            if (modifierCount(e) < 2) {
+                                rejectRecording(activeBtn, "Use two modifier keys");
+                                return;
+                            }
+                        }
+
                         // Check if we have any modifiers (from our tracking
                         // or the event flags).
                         var hasModifier = false;
@@ -1511,19 +1582,18 @@
                         }
 
                         if (remaining === 0) {
+                            if (activeBtn.getAttribute("data-shortcut") === "privateMode") {
+                                rejectRecording(activeBtn, "Add a key and two modifiers");
+                                return;
+                            }
+
                             // For the dictate shortcut, only single-modifier
                             // bindings are valid (hold-to-talk needs one key).
                             // Reject multi-modifier-only combos with a brief
                             // flash and reset to default.
                             var codes = Object.keys(heldModCodes);
                             if (activeBtn.getAttribute("data-shortcut") === "dictate" && codes.length > 1) {
-                                activeBtn.textContent = "Use one modifier key";
-                                var btnRef = activeBtn;
-                                setTimeout(function () {
-                                    resetToDefault(btnRef);
-                                }, 1200);
-                                activeBtn = null;
-                                heldModCodes = {};
+                                rejectRecording(activeBtn, "Use one modifier key");
                                 return;
                             }
                             var label = modifierOnlyLabel();
@@ -1545,6 +1615,7 @@
                     var btn = document.querySelector('.key-recorder[data-shortcut="' + shortcutName + '"]');
                     if (btn) {
                         btn.textContent = label;
+                        btn.setAttribute("data-default", label);
                     }
                 };
             })();
