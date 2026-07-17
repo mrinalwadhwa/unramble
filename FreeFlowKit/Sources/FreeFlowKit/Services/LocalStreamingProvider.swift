@@ -476,7 +476,8 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         } else if snapshot.carry.isEmpty {
             combined = finalUnit
         } else {
-            combined = Self.stripTerminator(snapshot.carry) + " " + finalUnit
+            combined = Self.joinCarryUnit(
+                carry: snapshot.carry, unit: finalUnit)
         }
 
         let polishStart = CFAbsoluteTimeGetCurrent()
@@ -702,10 +703,12 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
 
         // Prepend the held sentence so a sentence split across this boundary is
         // re-polished whole; the model, seeing the full clause, decides where
-        // the real sentence break is.
+        // the real sentence break is. Dedup any span the unit re-recognizes from
+        // the carry (a size-cap soft-close can fall mid-word and the recognizer,
+        // not reset, re-emits it).
         let combined = heldCarry.isEmpty
             ? unit
-            : Self.stripTerminator(heldCarry) + " " + unit
+            : Self.joinCarryUnit(carry: heldCarry, unit: unit)
 
         let polishStart = CFAbsoluteTimeGetCurrent()
         let polished = await polishWithPreceding(
@@ -738,6 +741,14 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             newCarry = drop.continuation
                 ? Self.joinPolished(Self.stripTerminator(newCarry), drop.suffix)
                 : Self.joinPolished(newCarry, drop.suffix)
+        }
+        // The polish can also complete an un-terminated fragment by inventing a
+        // trailing word ("...the internet" -> "...the internet blinked"); that
+        // fabrication would carry forward and corrupt the next join. Drop any
+        // content the carry adds past the raw fragment's last content word.
+        if Self.isUnterminatedFragment(inputTail) {
+            newCarry = Self.stripFabricatedCarryTail(
+                carry: newCarry, inputTail: inputTail)
         }
 
         // A hard pause is a safe point to reset recognition and shed the audio
@@ -859,7 +870,7 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
     /// the drop begins at the first content word missing from the output. Keying
     /// off the missing word (not the last output word) is robust to a polish that
     /// completes the fragment by inventing a trailing word.
-    private static func droppedTailSuffix(
+    static func droppedTailSuffix(
         inputTail: String, polished: String
     ) -> (suffix: String, continuation: Bool)? {
         let tailWords = inputTail.split(separator: " ").map(String.init)
@@ -873,16 +884,116 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         for (i, w) in tailWords.enumerated() {
             let n = seamNorm(Substring(w))
             if seamStopwords.contains(n) { continue }
-            if polishedSet.contains(n) { lastKept = i } else { break }
+            // A partial word the polish completed ("grabb" -> "grabbed") is kept,
+            // not dropped: count the fragment word as present when it is a prefix
+            // of some output word. Require a length so a short coincidental prefix
+            // does not mask a real drop.
+            let completed = n.count >= 3 && polishedSet.contains {
+                $0.count > n.count && $0.hasPrefix(n)
+            }
+            if polishedSet.contains(n) || completed { lastKept = i } else { break }
         }
         let suffixWords = Array(tailWords[(lastKept + 1)...])
         guard !suffixWords.isEmpty, suffixWords.count <= 6 else { return nil }
         // Only carry when the dropped suffix holds real content (a trailing bare
         // connector polish trimmed is not a loss).
-        guard suffixWords.contains(where: {
+        let contentSuffix = suffixWords.filter {
             !seamStopwords.contains(seamNorm(Substring($0)))
-        }) else { return nil }
+        }
+        guard !contentSuffix.isEmpty else { return nil }
+        // A suffix whose content words are already present in the output was not
+        // dropped — it is a merge or reorder artifact. When polish rejoins two
+        // recognized words ("half way" -> "halfway"), the second looks missing
+        // though the rest is kept; re-appending it would duplicate content. Only
+        // recover a genuine loss: a majority of the content absent from output.
+        let absent = contentSuffix.filter {
+            !polishedSet.contains(seamNorm(Substring($0)))
+        }
+        guard absent.count * 2 > contentSuffix.count else { return nil }
         return (suffixWords.joined(separator: " "), lastKept >= 0)
+    }
+
+    /// Alphanumeric-only lowercase key, used to detect a re-recognized overlap at
+    /// a unit seam across tokenization, hyphenation, and punctuation differences.
+    private static func seamAlnum(_ s: String) -> [Character] {
+        s.lowercased().unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(Character.init)
+    }
+
+    /// Smallest overlap, in alphanumeric characters, treated as a re-recognized
+    /// repeat rather than coincidence.
+    private static let minSeamOverlapChars = 3
+
+    /// Join a held carry fragment to the next unit, removing the leading span the
+    /// unit re-recognizes from the carry. A size-cap soft-close can fall mid-word:
+    /// the recognizer, not reset, re-emits the completed word, so the carry's
+    /// polished tail ("...grabbed it") and the unit's raw head ("ed it for...")
+    /// name the same speech. Match on an alphanumeric-only key so a mid-word split
+    /// or a hyphenation/comma difference cannot hide the repeat, then drop the
+    /// duplicated head of `unit` — but only when the drop ends on a word boundary
+    /// in `unit`, so a legitimate word ("sawdust" after "saw") is never chopped.
+    /// With no overlap this is exactly the previous behavior:
+    /// `stripTerminator(carry) + " " + unit`.
+    static func joinCarryUnit(carry: String, unit: String) -> String {
+        let c = stripTerminator(carry)
+        let u = unit.trimmingCharacters(in: .whitespaces)
+        guard !c.isEmpty else { return u }
+        guard !u.isEmpty else { return c }
+        let ck = seamAlnum(c)
+        // Map each alphanumeric position in `u` back to its original index, so the
+        // overlap can be dropped while the remainder keeps casing and punctuation.
+        let uChars = Array(u)
+        var alnumIndex: [Int] = []
+        for (i, ch) in uChars.enumerated()
+        where String(ch).rangeOfCharacter(from: .alphanumerics) != nil {
+            alnumIndex.append(i)
+        }
+        let uk = alnumIndex.map { Character(uChars[$0].lowercased()) }
+        let maxL = min(ck.count, uk.count)
+        guard maxL >= minSeamOverlapChars else { return c + " " + u }
+        var overlap = 0
+        var length = maxL
+        while length >= minSeamOverlapChars {
+            if Array(ck.suffix(length)) == Array(uk.prefix(length)) {
+                // The dropped head must end on a word boundary in `u` (a non-
+                // alphanumeric follows, or the string ends); otherwise the match
+                // fell mid-word and is coincidental, not a repeat.
+                let boundary = length >= alnumIndex.count
+                    || alnumIndex[length] > alnumIndex[length - 1] + 1
+                if boundary { overlap = length; break }
+            }
+            length -= 1
+        }
+        guard overlap > 0 else { return c + " " + u }
+        let dropTo = alnumIndex[overlap - 1] + 1
+        let rest = String(uChars[dropTo...]).drop(while: { $0 == " " })
+        return rest.isEmpty ? c : c + " " + String(rest)
+    }
+
+    /// After a mid-sentence soft-close, the polish sometimes completes the
+    /// un-terminated fragment by appending a trailing word ("...the internet" ->
+    /// "...the internet blinked"), which would carry forward and corrupt the next
+    /// join. Drop content the carry adds past the raw fragment's last content
+    /// word; align on that word so a word the polish legitimately kept stays, and
+    /// only strip a short completion (a long tail means the anchor is unreliable).
+    static func stripFabricatedCarryTail(
+        carry: String, inputTail: String
+    ) -> String {
+        let rawContent = inputTail.split(separator: " ")
+            .map { seamNorm($0) }
+            .filter { !$0.isEmpty && !seamStopwords.contains($0) }
+        guard let lastRaw = rawContent.last else { return carry }
+        let tokens = carry.split(separator: " ").map(String.init)
+        guard let anchor = tokens.lastIndex(where: {
+            seamNorm(Substring($0)) == lastRaw
+        }), anchor < tokens.count - 1 else { return carry }
+        let tailContent = tokens[(anchor + 1)...].filter {
+            let n = seamNorm(Substring($0))
+            return !n.isEmpty && !seamStopwords.contains(n)
+        }
+        guard !tailContent.isEmpty, tailContent.count <= 3 else { return carry }
+        return tokens[...anchor].joined(separator: " ")
     }
 
     private static let trailingNewPattern = try! NSRegularExpression(
