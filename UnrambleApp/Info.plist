@@ -27,7 +27,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Unramble needs access to your microphone to capture speech for transcription.</string>
 	<key>SUFeedURL</key>
-	<string>https://updates.apps.mrinal.com/unramble/appcast.xml</string>
+	<string>https://unramble.computer/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>/iKZfX06+N0efqsWHijcRNE1rfY1VJygEIXJEN3pNPQ=</string>
 </dict>
