@@ -1,6 +1,6 @@
-name: FreeFlow
+name: Unramble
 options:
-  bundleIdPrefix: computer.autonomy
+  bundleIdPrefix: computer.unramble
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
@@ -24,40 +24,40 @@ settings:
       OTHER_CODE_SIGN_FLAGS: "--timestamp"
 
 packages:
-  FreeFlowKit:
-    path: FreeFlowKit
+  UnrambleKit:
+    path: UnrambleKit
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.9.0
 
 targets:
-  FreeFlowApp:
+  UnrambleApp:
     type: application
     platform: macOS
     sources:
-      - path: FreeFlowApp/Sources
-      - path: FreeFlowApp/Resources
+      - path: UnrambleApp/Sources
+      - path: UnrambleApp/Resources
         buildPhase: resources
         excludes:
           - "models/**"
-      - path: FreeFlowApp/Resources/models
+      - path: UnrambleApp/Resources/models
         buildPhase: resources
         type: folder
     settings:
       base:
-        PRODUCT_NAME: FreeFlow
-        PRODUCT_BUNDLE_IDENTIFIER: computer.autonomy.freeflow
-        INFOPLIST_FILE: FreeFlowApp/Info.plist
-        CODE_SIGN_ENTITLEMENTS: FreeFlowApp/FreeFlow.entitlements
+        PRODUCT_NAME: Unramble
+        PRODUCT_BUNDLE_IDENTIFIER: computer.unramble
+        INFOPLIST_FILE: UnrambleApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: UnrambleApp/Unramble.entitlements
         ENABLE_APP_SANDBOX: false
         LD_RUNPATH_SEARCH_PATHS:
           - "@executable_path/../Frameworks"
         COMBINE_HIDPI_IMAGES: true
     dependencies:
-      - package: FreeFlowKit
+      - package: UnrambleKit
       - package: Sparkle
     entitlements:
-      path: FreeFlowApp/FreeFlow.entitlements
+      path: UnrambleApp/Unramble.entitlements
       properties:
         com.apple.security.app-sandbox: false
         com.apple.security.device.audio-input: true

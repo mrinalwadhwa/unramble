@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Release FreeFlow: app or service image.
+# Release Unramble: app or service image.
 #
 # Usage:
 #   ./scripts/release.sh app                    # release macOS app (current Info.plist version)
@@ -10,12 +10,12 @@ set -euo pipefail
 #   ./scripts/release.sh image                  # build and push service image to ECR
 #
 # Expects:
-#   - Working directory is the freeflow repo root
+#   - Working directory is the unramble repo root
 #   - gh CLI is authenticated
 #   - No uncommitted changes
 #
 # For app releases:
-#   - ../homebrew is the homebrew-freeflow repo checkout
+#   - ../homebrew is the homebrew-unramble repo checkout
 #   - The release environment on GitHub has required secrets configured
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -57,8 +57,8 @@ preflight_common() {
 
 release_app() {
   local HOMEBREW_ROOT="$REPO_ROOT/../homebrew"
-  local CASK_FILE="$HOMEBREW_ROOT/Casks/freeflow.rb"
-  local PLIST="$REPO_ROOT/FreeFlowApp/Info.plist"
+  local CASK_FILE="$HOMEBREW_ROOT/Casks/unramble.rb"
+  local PLIST="$REPO_ROOT/UnrambleApp/Info.plist"
   local NEW_VERSION=""
   local TAG_OVERRIDE=""
 
@@ -91,7 +91,7 @@ release_app() {
 
   if [ ! -f "$CASK_FILE" ]; then
     echo "Error: $CASK_FILE not found" >&2
-    echo "Expected homebrew-freeflow checkout at ../homebrew" >&2
+    echo "Expected homebrew-unramble checkout at ../homebrew" >&2
     exit 1
   fi
 
@@ -114,7 +114,7 @@ release_app() {
   VERSION=$(make version)
   local TAG="${TAG_OVERRIDE:-v${VERSION}}"
 
-  echo "Releasing FreeFlow ${VERSION} (tag: ${TAG})"
+  echo "Releasing Unramble ${VERSION} (tag: ${TAG})"
   echo ""
 
   if git rev-parse "$TAG" &>/dev/null; then
@@ -124,13 +124,13 @@ release_app() {
 
   # Tag and push
   echo "── Tagging ${TAG} ──"
-  git tag -m "FreeFlow ${TAG}" "$TAG"
+  git tag -m "Unramble ${TAG}" "$TAG"
   git push origin "$TAG"
 
   echo ""
   echo "── Waiting for CI ──"
   echo "The release environment requires your approval."
-  echo "Approve at: https://github.com/mrinalwadhwa/freeflow/actions"
+  echo "Approve at: https://github.com/mrinalwadhwa/unramble/actions"
   echo ""
 
   sleep 5
@@ -141,7 +141,7 @@ release_app() {
     exit 1
   fi
 
-  echo "Run: https://github.com/mrinalwadhwa/freeflow/actions/runs/${RUN_ID}"
+  echo "Run: https://github.com/mrinalwadhwa/unramble/actions/runs/${RUN_ID}"
   echo ""
 
   gh run watch "$RUN_ID" --exit-status
@@ -151,8 +151,8 @@ release_app() {
   echo "── Downloading DMG ──"
   local DMG_DIR
   DMG_DIR=$(mktemp -d)
-  local DMG_PATH="$DMG_DIR/FreeFlow.dmg"
-  gh release download "$TAG" --pattern "FreeFlow.dmg" --output "$DMG_PATH"
+  local DMG_PATH="$DMG_DIR/Unramble.dmg"
+  gh release download "$TAG" --pattern "Unramble.dmg" --output "$DMG_PATH"
 
   local SHA256
   SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
@@ -165,23 +165,23 @@ release_app() {
   echo "── Updating Homebrew Cask ──"
   cd "$HOMEBREW_ROOT"
 
-  sed -i '' "s/version \".*\"/version \"${TAG#v}\"/" Casks/freeflow.rb
-  sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/freeflow.rb
+  sed -i '' "s/version \".*\"/version \"${TAG#v}\"/" Casks/unramble.rb
+  sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/unramble.rb
 
-  echo "  Updated Casks/freeflow.rb:"
-  head -3 Casks/freeflow.rb | sed 's/^/    /'
+  echo "  Updated Casks/unramble.rb:"
+  head -3 Casks/unramble.rb | sed 's/^/    /'
   echo ""
 
-  git add Casks/freeflow.rb
-  git commit -m "Update FreeFlow to ${TAG#v}"
+  git add Casks/unramble.rb
+  git commit -m "Update Unramble to ${TAG#v}"
   git push
 
   echo ""
   echo "══════════════════════════════════════════════════"
   echo "  Release complete!"
   echo "  Tag:      ${TAG}"
-  echo "  Release:  https://github.com/mrinalwadhwa/freeflow/releases/tag/${TAG}"
-  echo "  Install:  brew install mrinalwadhwa/freeflow/freeflow"
+  echo "  Release:  https://github.com/mrinalwadhwa/unramble/releases/tag/${TAG}"
+  echo "  Install:  brew install mrinalwadhwa/unramble/unramble"
   echo "══════════════════════════════════════════════════"
 }
 
@@ -201,7 +201,7 @@ release_image() {
     exit 1
   fi
 
-  echo "Run: https://github.com/mrinalwadhwa/freeflow/actions/runs/${RUN_ID}"
+  echo "Run: https://github.com/mrinalwadhwa/unramble/actions/runs/${RUN_ID}"
   echo ""
 
   gh run watch "$RUN_ID" --exit-status

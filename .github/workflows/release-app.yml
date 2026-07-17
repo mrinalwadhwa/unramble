@@ -1,4 +1,4 @@
-name: Release FreeFlow App
+name: Release Unramble App
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
       contents: read
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
-      TEST_LOG_DIR: ${{ runner.temp }}/freeflow-test-runs
+      TEST_LOG_DIR: ${{ runner.temp }}/unramble-test-runs
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -127,7 +127,7 @@ jobs:
           API_KEY_PATH="$RUNNER_TEMP/api-key.p8"
           echo "$APPLE_API_KEY" | base64 --decode > "$API_KEY_PATH"
 
-          xcrun notarytool store-credentials "freeflow-notarize" \
+          xcrun notarytool store-credentials "unramble-notarize" \
             --key "$API_KEY_PATH" \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID"
@@ -142,7 +142,7 @@ jobs:
           SPARKLE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          make appcast DOWNLOAD_URL="https://github.com/mrinalwadhwa/freeflow/releases/download/${TAG}/"
+          make appcast DOWNLOAD_URL="https://github.com/mrinalwadhwa/unramble/releases/download/${TAG}/"
 
       - name: Create GitHub Release
         env:
@@ -154,10 +154,10 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
           gh release create "$TAG" \
-            --title "FreeFlow ${TAG#v}" \
+            --title "Unramble ${TAG#v}" \
             --generate-notes \
             $PRERELEASE_FLAG \
-            releases/FreeFlow.dmg \
+            releases/Unramble.dmg \
             releases/appcast.xml
 
       - name: Clean up keychain

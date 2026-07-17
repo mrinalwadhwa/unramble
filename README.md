@@ -1,8 +1,8 @@
-# FreeFlow – seamless speech to text in any app
+# Unramble – seamless speech to text in any app
 
 Press a hotkey, dictate naturally, polished text appears in any app.
 
-Ramble, use filler words, correct yourself mid-sentence. FreeFlow turns messy
+Ramble, use filler words, correct yourself mid-sentence. Unramble turns messy
 speech into clean writing and injects it wherever your cursor is: your messaging app,
 your editor, your coding agent, the terminal, email, anything.
 
@@ -18,13 +18,13 @@ https://github.com/user-attachments/assets/da62c769-d56b-4c16-be04-148197536dfa
 
 ## Install
 
-Requires **macOS 14** or later. Install with [Homebrew](https://brew.sh) or [download the DMG](https://github.com/mrinalwadhwa/freeflow/releases/latest/download/FreeFlow.dmg) directly.
+Requires **macOS 14** or later. Install with [Homebrew](https://brew.sh) or [download the DMG](https://github.com/mrinalwadhwa/unramble/releases/latest/download/Unramble.dmg) directly.
 
 ```
-brew install mrinalwadhwa/freeflow/freeflow
+brew install mrinalwadhwa/unramble/unramble
 ```
 
-On first launch, FreeFlow asks for your OpenAI API key and stores it in the macOS
+On first launch, Unramble asks for your OpenAI API key and stores it in the macOS
 Keychain. Create one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
 After that, grant accessibility and microphone permissions and you are ready to dictate.
 
@@ -41,12 +41,12 @@ dictations can skip the WebSocket handshake.
 
 The same Realtime connection transcribes the audio and returns one polished
 response after key release. If that streaming path fails before delivery,
-FreeFlow recovers through HTTP file transcription and deterministic cleanup
+Unramble recovers through HTTP file transcription and deterministic cleanup
 using the exact complete recording.
 
 Long Realtime sessions start continued transcription items only after detected
 pauses. If a defensive hard boundary occurs without a pause and audio
-continues, FreeFlow rejects that candidate and uses the complete recording
+continues, Unramble rejects that candidate and uses the complete recording
 instead of trusting a word cut across independent transcription items.
 
 See [BENCHMARK.md](BENCHMARK.md) for detailed timing, long-dictation evidence,
@@ -57,7 +57,7 @@ and the cloud verification environment.
 Local mode uses Nemotron speech recognition and a fine-tuned Qwen polisher on
 Apple Silicon. Audio and transcripts stay on this Mac, and local mode needs no
 API key or network connection. In cloud mode, audio and transcripts flow
-directly to OpenAI with your own API key; there is no FreeFlow server in the
+directly to OpenAI with your own API key; there is no Unramble server in the
 middle.
 
 ## Open
@@ -71,10 +71,10 @@ whole thing. See [DEVELOP.md](DEVELOP.md#customize).
 Jump in, we'd love your help.
 
 The single most useful contribution right now is
-[mic compatibility data](https://github.com/mrinalwadhwa/freeflow/issues/2).
-FreeFlow works well with built-in mics and AirPods, but every USB mic,
+[mic compatibility data](https://github.com/mrinalwadhwa/unramble/issues/2).
+Unramble works well with built-in mics and AirPods, but every USB mic,
 headset, and audio interface is different. The app's "Contribute Mic
 Data" menu item generates a one-click diagnostic report that
 can help us improve accuracy of dictation for everyone.
 
-Want to add or improve support for a language? [Here's how.](https://github.com/mrinalwadhwa/freeflow/issues/1) Found an app where injection breaks? Open an issue. Code contributions and pull requests are welcome too. [DEVELOP.md](DEVELOP.md) has the build and test guide.
+Want to add or improve support for a language? [Here's how.](https://github.com/mrinalwadhwa/unramble/issues/1) Found an app where injection breaks? Open an issue. Code contributions and pull requests are welcome too. [DEVELOP.md](DEVELOP.md) has the build and test guide.

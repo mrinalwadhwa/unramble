@@ -1,6 +1,6 @@
 # Benchmark
 
-FreeFlow offers two dictation modes with different latency and privacy
+Unramble offers two dictation modes with different latency and privacy
 profiles.
 
 ## OpenAI mode (default)
@@ -157,7 +157,7 @@ leaves the Mac.
 ## Running the benchmarks
 
 Gated benchmark suites live in
-`FreeFlowKit/Tests/FreeFlowKitTests/OpenAIStreamingBenchmarkTests.swift`:
+`UnrambleKit/Tests/UnrambleKitTests/OpenAIStreamingBenchmarkTests.swift`:
 
 - `bench: single session breakdown` — one full session, prints
   startStreaming / sendAudio / finishStreaming / total.
@@ -168,8 +168,8 @@ Gated benchmark suites live in
 
 ```bash
 OPENAI_API_KEY=sk-... \
-FREEFLOW_TEST_OPENAI=1 \
-FREEFLOW_TEST_OPENAI_BENCH=1 \
+UNRAMBLE_TEST_OPENAI=1 \
+UNRAMBLE_TEST_OPENAI_BENCH=1 \
 swift test --filter OpenAIStreamingBenchmark 2>&1 | tail -20
 ```
 
@@ -180,5 +180,5 @@ during recording.
 
 The long-dictation evidence above comes from the separately gated
 `CloudDictationLiveHarnessTests`, not the latency benchmark suite. The live
-tests require `FREEFLOW_TEST_OPENAI=1`, `FREEFLOW_TEST_OPENAI_LONG=1`, and an
-`OPENAI_API_KEY`; `FREEFLOW_TEST_EVIDENCE_DIR` enables JSON evidence output.
+tests require `UNRAMBLE_TEST_OPENAI=1`, `UNRAMBLE_TEST_OPENAI_LONG=1`, and an
+`OPENAI_API_KEY`; `UNRAMBLE_TEST_EVIDENCE_DIR` enables JSON evidence output.

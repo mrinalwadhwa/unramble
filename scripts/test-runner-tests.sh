@@ -8,7 +8,7 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PARSER="$ROOT_DIR/scripts/parse-test-results.sh"
 RUNNER="$ROOT_DIR/scripts/run-tests.sh"
-TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/freeflow-test-runner-tests.XXXXXX")"
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/unramble-test-runner-tests.XXXXXX")"
 PASSED=0
 
 cleanup() {
@@ -185,7 +185,7 @@ if [[ "${FAKE_REQUIRE_SKIP:-0}" == "1" && -z "$skip_pattern" ]]; then
     exit 67
 fi
 if [[ "${FAKE_ASSERT_CI_CLEAN:-0}" == "1" ]]; then
-    if env | grep -Eq '^(FREEFLOW_TEST_|FREEFLOW_MLX_TESTS=|OPENAI_API_KEY=|SWIFT_ACTIVE_COMPILATION_CONDITIONS=)'; then
+    if env | grep -Eq '^(UNRAMBLE_TEST_|UNRAMBLE_MLX_TESTS=|OPENAI_API_KEY=|SWIFT_ACTIVE_COMPILATION_CONDITIONS=)'; then
         printf 'fake-swift: CI test gates were not cleared\n' >&2
         exit 65
     fi
@@ -315,11 +315,11 @@ test_ci_clears_environment() {
         FAKE_ASSERT_CI_CLEAN=1 \
         FAKE_REQUIRE_LOCKED=1 \
         FAKE_REQUIRE_SKIP=1 \
-        FREEFLOW_TEST_OPENAI=1 \
-        FREEFLOW_TEST_UNLISTED_FUTURE_GATE=1 \
-        FREEFLOW_MLX_TESTS=1 \
+        UNRAMBLE_TEST_OPENAI=1 \
+        UNRAMBLE_TEST_UNLISTED_FUTURE_GATE=1 \
+        UNRAMBLE_MLX_TESTS=1 \
         OPENAI_API_KEY=fixture-secret \
-        SWIFT_ACTIVE_COMPILATION_CONDITIONS=FREEFLOW_MLX_TESTS \
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS=UNRAMBLE_MLX_TESTS \
         "$RUNNER" ci >"$TEMP_DIR/runner-ci.out" 2>&1 || {
             cat "$TEMP_DIR/runner-ci.out" >&2
             fail "CI runner should clear test gates"

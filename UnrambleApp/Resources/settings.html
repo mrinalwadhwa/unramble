@@ -1,0 +1,1624 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Unramble Preferences</title>
+        <style>
+            /* --- Base styles (from styles.css) --- */
+
+            :root {
+                --color-bg: #eeeceb;
+                --color-surface: #f9f9f9;
+                --color-text: #292929;
+                --color-muted: #7a7775;
+                --color-light: #a8a4a1;
+                --color-border: #ddd9d6;
+                --color-border-light: #e8e5e3;
+                --color-accent: #292929;
+                --color-accent-hover: #3d3d3d;
+                --color-white: #ffffff;
+                --color-green: #3a8a5c;
+                --color-green-bg: #e9f3ed;
+                --color-yellow: #9e7c1a;
+                --color-yellow-bg: #f8f2e0;
+                --color-red: #b8383d;
+                --color-red-bg: #f8e8e9;
+                --color-blue: #3a6fa8;
+                --color-blue-bg: #e5eef6;
+
+                --baseline: 1.5rem;
+            }
+
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            html {
+                font-size: 16px;
+                -webkit-text-size-adjust: 100%;
+            }
+
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif,
+                    "Apple Color Emoji", "Segoe UI Emoji";
+                font-size: 1rem;
+                line-height: 1.5;
+                color: var(--color-text);
+                background: var(--color-bg);
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0.5rem;
+                padding: 0.5rem 1.25rem;
+                font-size: 0.875rem;
+                font-weight: 500;
+                line-height: 1.714286;
+                border: 1px solid transparent;
+                border-radius: 9999px;
+                cursor: pointer;
+                transition:
+                    background 0.15s,
+                    border-color 0.15s,
+                    color 0.15s,
+                    box-shadow 0.15s;
+                text-decoration: none;
+                white-space: nowrap;
+                letter-spacing: -0.005em;
+            }
+
+            .btn:hover {
+                text-decoration: none;
+            }
+
+            .btn-primary {
+                background: var(--color-accent);
+                color: var(--color-white);
+                border-color: var(--color-accent);
+            }
+
+            .btn-primary:hover {
+                background: var(--color-accent-hover);
+                border-color: var(--color-accent-hover);
+                color: var(--color-white);
+            }
+
+            .btn-secondary {
+                background: var(--color-white);
+                color: var(--color-text);
+                border-color: var(--color-border);
+            }
+
+            .btn-secondary:hover {
+                background: var(--color-surface);
+                border-color: var(--color-light);
+            }
+
+            .btn-danger {
+                background: var(--color-white);
+                color: var(--color-red);
+                border-color: var(--color-border);
+            }
+
+            .btn-danger:hover {
+                background: var(--color-red-bg);
+                border-color: var(--color-red);
+            }
+
+            .btn-small {
+                padding: 0.25rem 0.75rem;
+                font-size: 0.8125rem;
+            }
+
+            .btn:disabled {
+                opacity: 0.4;
+                cursor: not-allowed;
+            }
+
+            .spinner {
+                display: inline-block;
+                width: 1.25rem;
+                height: 1.25rem;
+                border: 2px solid var(--color-border);
+                border-top-color: var(--color-text);
+                border-radius: 50%;
+                animation: spin 0.6s linear infinite;
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .hidden {
+                display: none !important;
+            }
+
+            /* --- Page-specific styles (settings) --- */
+
+            html,
+            body {
+                overflow-x: hidden;
+            }
+
+            body {
+                background: var(--color-bg);
+                overflow-y: hidden;
+            }
+
+            .settings {
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+                max-width: 560px;
+                margin: 0 auto;
+                padding: 2.5rem 1.5rem 1rem;
+                -webkit-user-select: none;
+                user-select: none;
+                box-sizing: border-box;
+            }
+
+            .settings-header {
+                text-align: center;
+                margin-bottom: 1.5rem;
+                flex-shrink: 0;
+            }
+
+            .settings-header h1 {
+                font-size: 1.625rem;
+                font-weight: 700;
+                line-height: 1.384615;
+                margin: 0;
+                letter-spacing: -0.025em;
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Settings sections                                           */
+            /* ---------------------------------------------------------- */
+
+            .settings-body {
+                flex: 1;
+                overflow-y: auto;
+                overflow-x: hidden;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .settings-section {
+                background: var(--color-surface);
+                border: 1px solid var(--color-border-light);
+                border-radius: 16px;
+                padding: 0.75rem 1.25rem;
+                margin-bottom: 0.375rem;
+            }
+
+            .settings-section-label {
+                font-size: 0.6875rem;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: var(--color-light);
+                margin-bottom: 0.375rem;
+                line-height: 1.5rem;
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Setting rows                                                */
+            /* ---------------------------------------------------------- */
+
+            .setting-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                min-height: 2.25rem;
+            }
+
+            .setting-row + .setting-row {
+                margin-top: 0.75rem;
+                padding-top: 0.75rem;
+                border-top: 1px solid var(--color-border-light);
+            }
+
+            .setting-label {
+                font-size: 0.9375rem;
+                font-weight: 500;
+                line-height: 1.6;
+                color: var(--color-text);
+                flex-shrink: 0;
+            }
+
+            .setting-hint {
+                font-size: 0.8125rem;
+                color: var(--color-light);
+                line-height: 1.384615;
+                margin-top: 0.1875rem;
+            }
+
+            .setting-label-group {
+                display: flex;
+                flex-direction: column;
+                flex: 1;
+                min-width: 0;
+                margin-right: 1rem;
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Toggle switch                                               */
+            /* ---------------------------------------------------------- */
+
+            .toggle {
+                position: relative;
+                width: 42px;
+                height: 24px;
+                flex-shrink: 0;
+                cursor: pointer;
+            }
+
+            .toggle input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+                position: absolute;
+            }
+
+            .toggle-track {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: var(--color-border);
+                border-radius: 12px;
+                transition: background 0.2s;
+            }
+
+            .toggle-thumb {
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                width: 20px;
+                height: 20px;
+                background: var(--color-white);
+                border-radius: 50%;
+                transition: transform 0.2s;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            }
+
+            .toggle input:checked + .toggle-track {
+                background: var(--color-green);
+            }
+
+            .toggle input:checked + .toggle-track .toggle-thumb {
+                transform: translateX(18px);
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Select dropdown                                             */
+            /* ---------------------------------------------------------- */
+
+            .setting-select {
+                appearance: none;
+                -webkit-appearance: none;
+                padding: 0.3125rem 2rem 0.3125rem 0.625rem;
+                font-size: 0.875rem;
+                font-weight: 500;
+                line-height: 1.5;
+                color: var(--color-text);
+                background: var(--color-white);
+                border: 1px solid var(--color-border);
+                border-radius: 10px;
+                cursor: pointer;
+                transition:
+                    border-color 0.15s,
+                    box-shadow 0.15s;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237A7775' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 0.625rem center;
+                max-width: 200px;
+                flex-shrink: 0;
+            }
+
+            .setting-select:focus {
+                outline: none;
+                border-color: var(--color-text);
+                box-shadow: 0 0 0 3px rgba(41, 41, 41, 0.08);
+            }
+
+            /* Wider select for dropdowns with longer names */
+            .setting-select-wide {
+                max-width: 220px;
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Key recorder button                                         */
+            /* ---------------------------------------------------------- */
+
+            .key-recorder {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 0;
+                width: 100%;
+                padding: 0.375rem 0.5rem;
+                font-size: 0.8125rem;
+                font-weight: 500;
+                line-height: 1.5;
+                color: var(--color-text);
+                background: var(--color-white);
+                border: 1px solid var(--color-border);
+                border-radius: 8px;
+                cursor: pointer;
+                transition:
+                    border-color 0.15s,
+                    box-shadow 0.15s,
+                    background 0.15s;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                box-sizing: border-box;
+            }
+
+            .key-recorder:hover {
+                border-color: var(--color-muted);
+            }
+
+            .key-recorder:focus {
+                outline: none;
+                border-color: var(--color-text);
+                box-shadow: 0 0 0 3px rgba(41, 41, 41, 0.08);
+            }
+
+            .key-recorder.recording {
+                border-color: var(--color-green);
+                box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.15);
+                background: rgba(52, 199, 89, 0.04);
+                color: var(--color-text);
+                animation: recorder-pulse 1.5s ease-in-out infinite;
+            }
+
+            .key-recorder.readonly {
+                cursor: default;
+                opacity: 0.7;
+            }
+
+            .key-recorder.readonly:hover {
+                border-color: var(--color-border);
+            }
+
+            @keyframes recorder-pulse {
+                0%,
+                100% {
+                    box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.15);
+                }
+                50% {
+                    box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.3);
+                }
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Keyboard shortcuts grid                                     */
+            /* ---------------------------------------------------------- */
+
+            .shortcut-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                column-gap: 0.75rem;
+                row-gap: 1.25rem;
+            }
+
+            .shortcut-cell {
+                display: flex;
+                flex-direction: column;
+                gap: 0.25rem;
+            }
+
+            .shortcut-cell-label {
+                font-size: 0.8125rem;
+                font-weight: 500;
+                line-height: 1.384615;
+                color: var(--color-text);
+            }
+
+            .shortcut-cell-hint {
+                font-size: 0.6875rem;
+                color: var(--color-light);
+                line-height: 1.363636;
+                margin-bottom: 0.25rem;
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Mic selector with level preview                             */
+            /* ---------------------------------------------------------- */
+
+            .mic-preview {
+                margin-top: 0.75rem;
+                padding-top: 0.75rem;
+                border-top: 1px solid var(--color-border-light);
+            }
+
+            .mic-preview.is-unavailable .mic-level-track {
+                opacity: 0.45;
+            }
+
+            .mic-preview-row {
+                display: flex;
+                align-items: center;
+                gap: 0.625rem;
+            }
+
+            .mic-preview-icon {
+                font-size: 0.875rem;
+                flex-shrink: 0;
+                width: 1.25rem;
+                text-align: center;
+            }
+
+            .mic-preview-label {
+                font-size: 0.8125rem;
+                color: var(--color-light);
+                flex-shrink: 0;
+                width: 2.5rem;
+            }
+
+            .mic-level-track {
+                flex: 1;
+                height: 6px;
+                background: var(--color-border-light);
+                border-radius: 3px;
+                overflow: hidden;
+            }
+
+            .mic-level-bar {
+                height: 100%;
+                width: 0%;
+                background: var(--color-green);
+                border-radius: 3px;
+                transition: width 0.08s ease-out;
+            }
+
+            .mic-level-bar.active {
+                background: var(--color-green);
+            }
+
+            /* ---------------------------------------------------------- */
+            /* Footer                                                      */
+            /* ---------------------------------------------------------- */
+
+            .settings-footer {
+                flex-shrink: 0;
+                text-align: center;
+                padding-top: 0.375rem;
+            }
+
+            .settings-footer .btn-row {
+                display: flex;
+                justify-content: center;
+                margin-top: 0.375rem;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="settings">
+            <!-- Header -->
+            <div class="settings-header">
+                <h1>Preferences</h1>
+            </div>
+
+            <!-- Scrollable body -->
+            <div class="settings-body">
+                <!-- Keyboard shortcuts -->
+                <div class="settings-section">
+                    <div class="settings-section-label">Keyboard Shortcuts</div>
+                    <div class="shortcut-grid">
+                        <div class="shortcut-cell">
+                            <div class="shortcut-cell-label">Push to dictate</div>
+                            <div class="shortcut-cell-hint">Hold to record</div>
+                            <button
+                                type="button"
+                                class="key-recorder"
+                                data-shortcut="dictate"
+                                data-default="Right Option &#x2325;"
+                                tabindex="0"
+                            >
+                                Right Option &#x2325;
+                            </button>
+                        </div>
+                        <div class="shortcut-cell">
+                            <div class="shortcut-cell-label">Hands-free mode</div>
+                            <div class="shortcut-cell-hint">Toggle on/off</div>
+                            <button
+                                type="button"
+                                class="key-recorder"
+                                data-shortcut="handsfree"
+                                data-default="&#x2303;&#x2325;H"
+                                tabindex="0"
+                            >
+                                &#x2303;&#x2325;H
+                            </button>
+                        </div>
+                        <div class="shortcut-cell">
+                            <div class="shortcut-cell-label">Paste dictation</div>
+                            <div class="shortcut-cell-hint">Paste last result</div>
+                            <button
+                                type="button"
+                                class="key-recorder"
+                                data-shortcut="paste"
+                                data-default="&#x2303;&#x2325;V"
+                                tabindex="0"
+                            >
+                                &#x2303;&#x2325;V
+                            </button>
+                        </div>
+                        <div class="shortcut-cell">
+                            <div class="shortcut-cell-label">Cancel</div>
+                            <div class="shortcut-cell-hint">Stop dictation</div>
+                            <button
+                                type="button"
+                                class="key-recorder readonly"
+                                data-shortcut="cancel"
+                                data-readonly="true"
+                                tabindex="-1"
+                            >
+                                Escape
+                            </button>
+                        </div>
+                        <div class="shortcut-cell" id="private-mode-shortcut" style="display: none">
+                            <div class="shortcut-cell-label">Private mode</div>
+                            <div class="shortcut-cell-hint">Transcribe on this Mac</div>
+                            <button
+                                type="button"
+                                class="key-recorder"
+                                data-shortcut="privateMode"
+                                data-default="&#x2303;&#x21E7;M"
+                                tabindex="0"
+                            >
+                                &#x2303;&#x21E7;M
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Microphone -->
+                <div class="settings-section">
+                    <div class="settings-section-label">Microphone</div>
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <div class="setting-label">Input device</div>
+                            <div class="setting-hint">Kept ready while Unramble runs; macOS shows its microphone indicator</div>
+                        </div>
+                        <select id="mic-select" class="setting-select setting-select-wide">
+                            <!-- Populated by JS from native bridge -->
+                        </select>
+                    </div>
+                    <div id="mic-preview" class="mic-preview is-unavailable">
+                        <div class="mic-preview-row">
+                            <div class="mic-preview-icon"><img id="mic-icon-img" data-symbol="mic.fill" style="width: 0.875rem; height: 0.875rem; opacity: 0.5" /></div>
+                            <div class="mic-preview-label">Level</div>
+                            <div id="mic-level-track" class="mic-level-track" aria-disabled="true">
+                                <div class="mic-level-bar" id="mic-level-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preferences -->
+                <div class="settings-section">
+                    <div class="settings-section-label">Preferences</div>
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <div class="setting-label">Dictation language</div>
+                        </div>
+                        <select id="language-select" class="setting-select setting-select-wide">
+                            <!-- Populated by JS from native bridge -->
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <div class="setting-label">Feedback sounds</div>
+                            <div class="setting-hint">Audio cues when recording starts and stops</div>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="sound-toggle" />
+                            <div class="toggle-track">
+                                <div class="toggle-thumb"></div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <!-- Reset -->
+                <div class="settings-section">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <div class="setting-label">Reset Unramble</div>
+                            <div class="setting-hint">Clear all settings and return to setup</div>
+                        </div>
+                        <button id="reset-btn" class="btn btn-danger btn-small" type="button">Reset&#8230;</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="settings-footer">
+                <div class="btn-row">
+                    <button id="done-btn" class="btn btn-primary" style="min-width: 120px">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            /**
+             * Bridge between web pages and the native macOS app (WKWebView).
+             *
+             * When running inside the app's WKWebView, messages are sent via
+             * window.webkit.messageHandlers.unramble.postMessage(). The native side
+             * pushes events back by calling window.unramblebridge.onEvent(data).
+             *
+             * When running in a normal browser (for development/testing), send()
+             * is a no-op that logs to the console, and onEvent can be called
+             * manually from the browser console to simulate native responses.
+             */
+            (function () {
+                "use strict";
+
+                var inWebView = !!(
+                    window.webkit &&
+                    window.webkit.messageHandlers &&
+                    window.webkit.messageHandlers.unramble
+                );
+
+                /**
+                 * Send an action to the native side.
+                 *
+                 * @param {string} action - The action name (e.g. "setLanguage").
+                 * @param {Object} [data] - Optional payload data.
+                 */
+                function send(action, data) {
+                    var message = { action: action };
+                    if (data !== undefined && data !== null) {
+                        message.data = data;
+                    }
+
+                    if (inWebView) {
+                        window.webkit.messageHandlers.unramble.postMessage(message);
+                    } else {
+                        console.log("[bridge] send:", JSON.stringify(message));
+                    }
+                }
+
+                /**
+                 * Whether we are running inside a WKWebView with the native bridge.
+                 *
+                 * @returns {boolean}
+                 */
+                function isNative() {
+                    return inWebView;
+                }
+
+                // Event listeners registered via bridge.on().
+                var listeners = {};
+
+                /**
+                 * Register a listener for a specific event type.
+                 *
+                 * @param {string} eventName - The event name (e.g. "microphoneList").
+                 * @param {Function} callback - Called with the event data object.
+                 */
+                function on(eventName, callback) {
+                    if (!listeners[eventName]) {
+                        listeners[eventName] = [];
+                    }
+                    listeners[eventName].push(callback);
+                }
+
+                /**
+                 * Remove a previously registered listener.
+                 *
+                 * @param {string} eventName - The event name.
+                 * @param {Function} callback - The exact function reference to remove.
+                 */
+                function off(eventName, callback) {
+                    if (!listeners[eventName]) return;
+                    listeners[eventName] = listeners[eventName].filter(function (fn) {
+                        return fn !== callback;
+                    });
+                }
+
+                /**
+                 * Remove all listeners for an event, or all listeners entirely.
+                 *
+                 * @param {string} [eventName] - If omitted, clears all listeners.
+                 */
+                function clear(eventName) {
+                    if (eventName) {
+                        delete listeners[eventName];
+                    } else {
+                        listeners = {};
+                    }
+                }
+
+                /**
+                 * Called by the native side to deliver an event.
+                 * Also callable from the browser console for testing:
+                 *   window.unramblebridge.onEvent({ event: "microphoneList", devices: [...] })
+                 *
+                 * @param {Object} data - Event payload. Must include an "event" field.
+                 */
+                function onEvent(data) {
+                    if (!data || !data.event) {
+                        console.warn("[bridge] onEvent called without event field:", data);
+                        return;
+                    }
+
+                    if (!inWebView) {
+                        console.log("[bridge] onEvent:", JSON.stringify(data));
+                    }
+
+                    var eventName = data.event;
+                    var cbs = listeners[eventName];
+                    if (cbs && cbs.length > 0) {
+                        for (var i = 0; i < cbs.length; i++) {
+                            try {
+                                cbs[i](data);
+                            } catch (err) {
+                                console.error("[bridge] Error in listener for " + eventName + ":", err);
+                            }
+                        }
+                    }
+                }
+
+                // Public API exposed as window.unramblebridge.
+                window.unramblebridge = {
+                    send: send,
+                    on: on,
+                    off: off,
+                    clear: clear,
+                    onEvent: onEvent,
+                    isNative: isNative,
+                };
+            })();
+        </script>
+
+        <script>
+            /**
+             * Settings page manager.
+             *
+             * Manage the settings UI displayed in the macOS app's WKWebView.
+             * Communicates with native code via the bridge to read/write settings
+             * and stream live microphone levels.
+             *
+             * Bridge actions (settings -> native):
+             *   - getSettings        — request current settings state
+             *   - setSoundFeedback   — { enabled: bool }
+             *   - setHotkey          — { modifierKey: string }
+             *   - setLanguage        — { code: string }
+             *   - listMicrophones    — request available input devices
+             *   - selectMicrophone   — { id: number }
+             *   - startMicPreview    — start streaming audio levels
+             *   - stopMicPreview     — stop streaming audio levels
+             *   - closeSettings      — dismiss the settings window
+             *
+             * Bridge events (native -> settings):
+             *   - settingsState      — { soundFeedback, hotkey, language, languages }
+             *   - microphoneList     — { devices: [...], currentId }
+             *   - microphoneSelected — { id }
+             *   - micPreviewAvailability — { available }
+             *   - audioLevel         — { level }
+             *
+             * Depends on bridge.js (window.unramblebridge).
+             */
+            (function () {
+                "use strict";
+
+                var bridge = window.unramblebridge;
+
+                // Track whether mic preview is active so we can clean up.
+                var micPreviewActive = false;
+                var micPreviewAvailable = false;
+
+                // ----------------------------------------------------------------
+                // Initialization
+                // ----------------------------------------------------------------
+
+                function init() {
+                    // Register bridge event listeners.
+                    bridge.on("settingsState", handleSettingsState);
+                    bridge.on("settingsIcons", handleSettingsIcons);
+                    bridge.on("microphoneList", handleMicrophoneList);
+                    bridge.on("microphoneSelected", handleMicrophoneSelected);
+                    bridge.on("micPreviewAvailability", handleMicPreviewAvailability);
+                    bridge.on("audioLevel", handleAudioLevel);
+
+                    // Wire up UI event handlers.
+                    bindControls();
+
+                    // Request current settings from native side.
+                    bridge.send("getSettings");
+
+                    // Request mic list and start preview.
+                    setMicPreviewAvailable(false);
+                    bridge.send("listMicrophones");
+                    bridge.send("startMicPreview");
+                    micPreviewActive = true;
+                }
+
+                // ----------------------------------------------------------------
+                // Settings state
+                // ----------------------------------------------------------------
+
+                function handleSettingsState(data) {
+                    // Sound toggle
+                    if (data.soundFeedback !== undefined) {
+                        var toggle = document.getElementById("sound-toggle");
+                        if (toggle) {
+                            toggle.checked = !!data.soundFeedback;
+                        }
+                    }
+
+                    // Shortcut labels
+                    if (data.shortcuts && window._setShortcutLabel) {
+                        var s = data.shortcuts;
+                        if (s.dictate) window._setShortcutLabel("dictate", s.dictate);
+                        if (s.handsfree) window._setShortcutLabel("handsfree", s.handsfree);
+                        if (s.paste) window._setShortcutLabel("paste", s.paste);
+                        if (s.cancel) window._setShortcutLabel("cancel", s.cancel);
+                        if (s.privateMode) window._setShortcutLabel("privateMode", s.privateMode);
+                    }
+
+                    // Private mode shortcut (visible when local mode available)
+                    var privateModeShortcut = document.getElementById("private-mode-shortcut");
+                    if (privateModeShortcut) {
+                        if (data.localModeAvailable) {
+                            privateModeShortcut.style.display = "";
+                        } else {
+                            privateModeShortcut.style.display = "none";
+                        }
+                    }
+
+                    // Language select — populate options if provided
+                    if (data.languages && data.languages.length > 0) {
+                        populateLanguages(data.languages, data.language);
+                    } else if (data.language) {
+                        // Just select the current language if options already exist
+                        var langSelect = document.getElementById("language-select");
+                        if (langSelect) {
+                            langSelect.value = data.language;
+                        }
+                    }
+                }
+
+                function handleSettingsIcons(data) {
+                    var imgs = document.querySelectorAll("img[data-symbol]");
+                    for (var i = 0; i < imgs.length; i++) {
+                        var name = imgs[i].getAttribute("data-symbol");
+                        if (data[name]) {
+                            imgs[i].src = "data:image/png;base64," + data[name];
+                        }
+                    }
+                }
+
+                function populateLanguages(languages, currentCode) {
+                    var select = document.getElementById("language-select");
+                    if (!select) return;
+
+                    select.innerHTML = "";
+
+                    for (var i = 0; i < languages.length; i++) {
+                        var lang = languages[i];
+                        var opt = document.createElement("option");
+                        opt.value = lang.code;
+                        opt.textContent = lang.name;
+                        if (lang.code === currentCode) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    }
+                }
+
+                // ----------------------------------------------------------------
+                // Microphone list
+                // ----------------------------------------------------------------
+
+                function handleMicrophoneList(data) {
+                    var select = document.getElementById("mic-select");
+                    if (!select) return;
+
+                    var devices = (data && data.devices) || [];
+                    var currentId = data && data.currentId;
+
+                    // When currentId is null/undefined, fall back to the
+                    // device marked as default so the dropdown doesn't
+                    // misleadingly highlight the first entry.
+                    if (currentId == null && devices.length > 0) {
+                        for (var j = 0; j < devices.length; j++) {
+                            if (devices[j].isDefault) {
+                                currentId = devices[j].id;
+                                break;
+                            }
+                        }
+                    }
+
+                    select.innerHTML = "";
+
+                    for (var i = 0; i < devices.length; i++) {
+                        var d = devices[i];
+                        var opt = document.createElement("option");
+                        opt.value = d.id;
+                        opt.textContent = d.name + (d.isDefault ? " (default)" : "");
+                        if (d.id === currentId) {
+                            opt.selected = true;
+                        }
+                        select.appendChild(opt);
+                    }
+
+                    if (devices.length === 0) {
+                        var empty = document.createElement("option");
+                        empty.textContent = "No microphones found";
+                        empty.disabled = true;
+                        select.appendChild(empty);
+                    }
+                }
+
+                function handleMicrophoneSelected() {
+                    // Selection confirmed by native side. The dropdown already
+                    // reflects the choice from the user's interaction.
+                }
+
+                // ----------------------------------------------------------------
+                // Audio level
+                // ----------------------------------------------------------------
+
+                function handleAudioLevel(data) {
+                    if (!micPreviewAvailable) {
+                        resetMicLevel();
+                        return;
+                    }
+                    var level = (data && data.level) || 0;
+                    var bar = document.getElementById("mic-level-bar");
+                    if (!bar) return;
+
+                    // The level is already scaled by AudioCaptureProvider using
+                    // sqrt(rms * 25), so it is 0-1 and display-ready.
+                    var percent = Math.round(level * 100);
+                    bar.style.width = percent + "%";
+
+                    if (level > 0.05) {
+                        bar.classList.add("active");
+                    } else {
+                        bar.classList.remove("active");
+                    }
+                }
+
+                function resetMicLevel() {
+                    var bar = document.getElementById("mic-level-bar");
+                    if (bar) {
+                        bar.style.width = "0%";
+                        bar.classList.remove("active");
+                    }
+                }
+
+                function handleMicPreviewAvailability(data) {
+                    setMicPreviewAvailable(!!(data && data.available));
+                }
+
+                function setMicPreviewAvailable(available) {
+                    micPreviewAvailable = available;
+                    var preview = document.getElementById("mic-preview");
+                    var track = document.getElementById("mic-level-track");
+                    if (preview) {
+                        preview.classList.toggle("is-unavailable", !available);
+                    }
+                    if (track) {
+                        track.setAttribute("aria-disabled", available ? "false" : "true");
+                    }
+                    if (!available) resetMicLevel();
+                }
+
+                // ----------------------------------------------------------------
+                // Control bindings
+                // ----------------------------------------------------------------
+
+                function bindControls() {
+                    // Reset button — confirmation handled on the native side.
+                    var resetBtn = document.getElementById("reset-btn");
+                    if (resetBtn) {
+                        resetBtn.addEventListener("click", function () {
+                            bridge.send("resetApp");
+                        });
+                    }
+
+                    // Sound toggle
+                    var soundToggle = document.getElementById("sound-toggle");
+                    if (soundToggle) {
+                        soundToggle.addEventListener("change", function () {
+                            bridge.send("setSoundFeedback", { enabled: soundToggle.checked });
+                        });
+                    }
+
+                    // Hotkey recorder is wired in the inline script block via
+                    // window._setHotkeyLabel and direct bridge.send calls.
+
+                    // Language select
+                    var langSelect = document.getElementById("language-select");
+                    if (langSelect) {
+                        langSelect.addEventListener("change", function () {
+                            bridge.send("setLanguage", { code: langSelect.value });
+                        });
+                    }
+
+                    // Mic select
+                    var micSelect = document.getElementById("mic-select");
+                    if (micSelect) {
+                        micSelect.addEventListener("change", function () {
+                            var id = parseInt(micSelect.value, 10);
+                            if (!isNaN(id)) {
+                                setMicPreviewAvailable(false);
+                                bridge.send("selectMicrophone", { id: id });
+                            }
+                        });
+                    }
+
+                    // Done button
+                    var doneBtn = document.getElementById("done-btn");
+                    if (doneBtn) {
+                        doneBtn.addEventListener("click", function (e) {
+                            e.preventDefault();
+                            cleanup();
+                            bridge.send("closeSettings");
+                        });
+                    }
+                }
+
+                // ----------------------------------------------------------------
+                // Cleanup
+                // ----------------------------------------------------------------
+
+                function cleanup() {
+                    if (micPreviewActive) {
+                        bridge.send("stopMicPreview");
+                        micPreviewActive = false;
+                        setMicPreviewAvailable(false);
+                    }
+                }
+
+                // Stop mic preview if the page is unloaded (window closed, etc.).
+                window.addEventListener("beforeunload", function () {
+                    cleanup();
+                });
+
+                // ----------------------------------------------------------------
+                // Start
+                // ----------------------------------------------------------------
+
+                if (document.readyState === "loading") {
+                    document.addEventListener("DOMContentLoaded", init);
+                } else {
+                    init();
+                }
+            })();
+        </script>
+
+        <script>
+            /**
+             * Unified shortcut key recorder.
+             *
+             * Every editable .key-recorder button works the same way:
+             *
+             * 1. Click the button to enter recording mode.
+             *    The button shows "Press keys..." with a green pulse.
+             *
+             * 2. Press modifier key(s). Held modifiers are shown live
+             *    in the button (e.g. "⌘⇧...") as a preview.
+             *
+             * 3. Commit the shortcut in one of two ways:
+             *    a) Press a non-modifier key while holding modifiers.
+             *       This commits a combo like ⌘⇧H or ⌃⌥V.
+             *    b) Release all modifier keys without pressing anything
+             *       else. This commits a modifier-only shortcut like
+             *       Right Option ⌥.
+             *
+             * The private-mode shortcut is stricter: it requires a
+             * non-modifier key plus at least two modifier families.
+             *
+             * Escape always cancels recording and restores the button's
+             * persisted value (kept in the data-default attribute).
+             *
+             * Clicking outside the active recorder also cancels and
+             * resets to default.
+             *
+             * Read-only recorders (data-readonly="true") ignore clicks
+             * and cannot be edited. The Cancel shortcut uses this.
+             *
+             * Key name derivation uses event.code (the physical key)
+             * rather than event.key (the composed character), so that
+             * Option+V correctly shows "V" instead of the macOS dead
+             * key character "√".
+             *
+             * The fn/Globe key does not fire standard KeyboardEvent in
+             * web views and cannot be captured here.
+             */
+            (function () {
+                "use strict";
+
+                // -- Constants ------------------------------------------
+
+                var MOD_ORDER = ["Control", "Alt", "Shift", "Meta"];
+                var MOD_SYMBOLS = {
+                    Control: "\u2303",
+                    Alt: "\u2325",
+                    Shift: "\u21E7",
+                    Meta: "\u2318",
+                };
+
+                var CODE_TO_MOD = {
+                    ControlLeft: "Control",
+                    ControlRight: "Control",
+                    AltLeft: "Alt",
+                    AltRight: "Alt",
+                    ShiftLeft: "Shift",
+                    ShiftRight: "Shift",
+                    MetaLeft: "Meta",
+                    MetaRight: "Meta",
+                };
+
+                var MODIFIER_DETAIL = {
+                    AltRight: { sym: "\u2325", side: "Right", name: "Option", id: "rightOption" },
+                    AltLeft: { sym: "\u2325", side: "Left", name: "Option", id: "leftOption" },
+                    MetaRight: { sym: "\u2318", side: "Right", name: "Command", id: "rightCommand" },
+                    MetaLeft: { sym: "\u2318", side: "Left", name: "Command", id: "leftCommand" },
+                    ControlRight: { sym: "\u2303", side: "Right", name: "Control", id: "rightControl" },
+                    ControlLeft: { sym: "\u2303", side: "Left", name: "Control", id: "leftControl" },
+                    ShiftRight: { sym: "\u21E7", side: "Right", name: "Shift", id: "rightShift" },
+                    ShiftLeft: { sym: "\u21E7", side: "Left", name: "Shift", id: "leftShift" },
+                };
+
+                // Map event.code to a display name for the physical key.
+                // This avoids the macOS dead-key problem where event.key
+                // for Option+V is "√" instead of "v".
+                var CODE_TO_KEY_NAME = {
+                    KeyA: "A",
+                    KeyB: "B",
+                    KeyC: "C",
+                    KeyD: "D",
+                    KeyE: "E",
+                    KeyF: "F",
+                    KeyG: "G",
+                    KeyH: "H",
+                    KeyI: "I",
+                    KeyJ: "J",
+                    KeyK: "K",
+                    KeyL: "L",
+                    KeyM: "M",
+                    KeyN: "N",
+                    KeyO: "O",
+                    KeyP: "P",
+                    KeyQ: "Q",
+                    KeyR: "R",
+                    KeyS: "S",
+                    KeyT: "T",
+                    KeyU: "U",
+                    KeyV: "V",
+                    KeyW: "W",
+                    KeyX: "X",
+                    KeyY: "Y",
+                    KeyZ: "Z",
+                    Digit0: "0",
+                    Digit1: "1",
+                    Digit2: "2",
+                    Digit3: "3",
+                    Digit4: "4",
+                    Digit5: "5",
+                    Digit6: "6",
+                    Digit7: "7",
+                    Digit8: "8",
+                    Digit9: "9",
+                    Minus: "-",
+                    Equal: "=",
+                    BracketLeft: "[",
+                    BracketRight: "]",
+                    Backslash: "\\",
+                    Semicolon: ";",
+                    Quote: "'",
+                    Comma: ",",
+                    Period: ".",
+                    Slash: "/",
+                    Backquote: "`",
+                    Space: "Space",
+                    Tab: "Tab",
+                    Enter: "Return",
+                    Backspace: "Delete",
+                    Delete: "Forward Delete",
+                    Escape: "Escape",
+                    ArrowUp: "\u2191",
+                    ArrowDown: "\u2193",
+                    ArrowLeft: "\u2190",
+                    ArrowRight: "\u2192",
+                    F1: "F1",
+                    F2: "F2",
+                    F3: "F3",
+                    F4: "F4",
+                    F5: "F5",
+                    F6: "F6",
+                    F7: "F7",
+                    F8: "F8",
+                    F9: "F9",
+                    F10: "F10",
+                    F11: "F11",
+                    F12: "F12",
+                    F13: "F13",
+                    F14: "F14",
+                    F15: "F15",
+                    F16: "F16",
+                    F17: "F17",
+                    F18: "F18",
+                    F19: "F19",
+                    F20: "F20",
+                    Home: "Home",
+                    End: "End",
+                    PageUp: "Page Up",
+                    PageDown: "Page Down",
+                    NumpadEnter: "Enter",
+                    NumpadAdd: "Num+",
+                    NumpadSubtract: "Num-",
+                    NumpadMultiply: "Num*",
+                    NumpadDivide: "Num/",
+                    NumpadDecimal: "Num.",
+                    Numpad0: "Num0",
+                    Numpad1: "Num1",
+                    Numpad2: "Num2",
+                    Numpad3: "Num3",
+                    Numpad4: "Num4",
+                    Numpad5: "Num5",
+                    Numpad6: "Num6",
+                    Numpad7: "Num7",
+                    Numpad8: "Num8",
+                    Numpad9: "Num9",
+                };
+
+                // -- State ----------------------------------------------
+
+                var activeBtn = null;
+                var heldModCodes = {};
+
+                // -- Helpers --------------------------------------------
+
+                function isModifierCode(code) {
+                    return !!CODE_TO_MOD[code];
+                }
+
+                function heldModPreview() {
+                    var groups = {};
+                    for (var code in heldModCodes) {
+                        groups[CODE_TO_MOD[code]] = true;
+                    }
+                    var parts = [];
+                    for (var i = 0; i < MOD_ORDER.length; i++) {
+                        if (groups[MOD_ORDER[i]]) {
+                            parts.push(MOD_SYMBOLS[MOD_ORDER[i]]);
+                        }
+                    }
+                    return parts.join("");
+                }
+
+                /**
+                 * Derive the non-modifier key name from event.code.
+                 *
+                 * Uses the CODE_TO_KEY_NAME map so that physical keys
+                 * are always labelled correctly regardless of what macOS
+                 * dead-key character event.key might contain.
+                 */
+                function keyNameFromCode(code) {
+                    return CODE_TO_KEY_NAME[code] || null;
+                }
+
+                /**
+                 * Build a combo label from modifier flags + event.code.
+                 *
+                 * Reads modifier state from the held codes map (not from
+                 * event.ctrlKey etc.) so that Option is always counted
+                 * even when macOS swallows it for dead-key input.
+                 */
+                function comboLabel(event) {
+                    // Merge held modifiers with event modifier flags.
+                    // We use both sources because:
+                    // - heldModCodes is reliable for which modifiers
+                    //   the user pressed during this recording session.
+                    // - event flags catch modifiers the OS may report
+                    //   differently (e.g. Shift changes event.key casing).
+                    var groups = {};
+                    for (var code in heldModCodes) {
+                        groups[CODE_TO_MOD[code]] = true;
+                    }
+                    if (event.ctrlKey) groups["Control"] = true;
+                    if (event.altKey) groups["Alt"] = true;
+                    if (event.shiftKey) groups["Shift"] = true;
+                    if (event.metaKey) groups["Meta"] = true;
+
+                    var parts = [];
+                    for (var i = 0; i < MOD_ORDER.length; i++) {
+                        if (groups[MOD_ORDER[i]]) {
+                            parts.push(MOD_SYMBOLS[MOD_ORDER[i]]);
+                        }
+                    }
+
+                    var keyName = keyNameFromCode(event.code);
+                    if (!keyName) {
+                        // Fallback: use event.key for unknown codes.
+                        if (event.key.length === 1) {
+                            keyName = event.key.toUpperCase();
+                        } else {
+                            keyName = event.key;
+                        }
+                    }
+                    parts.push(keyName);
+                    return parts.join("");
+                }
+
+                function modifierOnlyLabel() {
+                    var codes = Object.keys(heldModCodes);
+                    if (codes.length === 1) {
+                        var d = MODIFIER_DETAIL[codes[0]];
+                        if (d) return d.side + " " + d.name + " " + d.sym;
+                    }
+                    return heldModPreview();
+                }
+
+                function modifierCount(event) {
+                    var groups = {};
+                    for (var code in heldModCodes) {
+                        groups[CODE_TO_MOD[code]] = true;
+                    }
+                    if (event) {
+                        if (event.ctrlKey) groups["Control"] = true;
+                        if (event.altKey) groups["Alt"] = true;
+                        if (event.shiftKey) groups["Shift"] = true;
+                        if (event.metaKey) groups["Meta"] = true;
+                    }
+                    return Object.keys(groups).length;
+                }
+
+                function rejectRecording(btn, message) {
+                    btn.textContent = message;
+                    var btnRef = btn;
+                    activeBtn = null;
+                    heldModCodes = {};
+                    setTimeout(function () {
+                        resetToDefault(btnRef);
+                    }, 1200);
+                }
+
+                function buildData(btn, label, event) {
+                    var data = {
+                        shortcut: btn.getAttribute("data-shortcut"),
+                        label: label,
+                    };
+                    if (event) {
+                        data.type = "combo";
+                        data.code = event.code;
+                        data.key = event.key;
+                        // Build modifier flags from heldModCodes for accuracy.
+                        var groups = {};
+                        for (var code in heldModCodes) {
+                            groups[CODE_TO_MOD[code]] = true;
+                        }
+                        if (event.ctrlKey) groups["Control"] = true;
+                        if (event.altKey) groups["Alt"] = true;
+                        if (event.shiftKey) groups["Shift"] = true;
+                        if (event.metaKey) groups["Meta"] = true;
+                        data.ctrlKey = !!groups["Control"];
+                        data.altKey = !!groups["Alt"];
+                        data.shiftKey = !!groups["Shift"];
+                        data.metaKey = !!groups["Meta"];
+                    } else {
+                        var codes = Object.keys(heldModCodes);
+                        if (codes.length === 1) {
+                            var d = MODIFIER_DETAIL[codes[0]];
+                            data.type = "modifier";
+                            data.modifierCode = codes[0];
+                            data.modifierId = d ? d.id : codes[0];
+                        } else {
+                            data.type = "modifiers";
+                            data.ctrlKey = !!heldModCodes["ControlLeft"] || !!heldModCodes["ControlRight"];
+                            data.altKey = !!heldModCodes["AltLeft"] || !!heldModCodes["AltRight"];
+                            data.shiftKey = !!heldModCodes["ShiftLeft"] || !!heldModCodes["ShiftRight"];
+                            data.metaKey = !!heldModCodes["MetaLeft"] || !!heldModCodes["MetaRight"];
+                        }
+                    }
+                    return data;
+                }
+
+                // -- Recording lifecycle --------------------------------
+
+                function startRecording(btn) {
+                    // Defense-in-depth: never allow readonly recorders
+                    // into recording mode, even if called from an
+                    // unexpected code path.
+                    if (btn.getAttribute("data-readonly") === "true") {
+                        return;
+                    }
+                    if (activeBtn && activeBtn !== btn) {
+                        resetToDefault(activeBtn);
+                    }
+                    activeBtn = btn;
+                    heldModCodes = {};
+                    btn.classList.add("recording");
+                    btn.textContent = "Press keys\u2026";
+                }
+
+                function resetToDefault(btn) {
+                    if (!btn) btn = activeBtn;
+                    if (!btn) return;
+                    btn.classList.remove("recording");
+                    btn.textContent = btn.getAttribute("data-default") || "";
+                    if (btn === activeBtn) {
+                        activeBtn = null;
+                    }
+                    heldModCodes = {};
+                }
+
+                function commit(btn, label, event) {
+                    var data = buildData(btn, label, event);
+                    btn.textContent = label;
+                    btn.classList.remove("recording");
+                    activeBtn = null;
+
+                    if (window.unramblebridge) {
+                        window.unramblebridge.send("setShortcut", data);
+                    }
+                    heldModCodes = {};
+                }
+
+                // -- Event handlers -------------------------------------
+
+                document.addEventListener("click", function (e) {
+                    var btn = e.target.closest(".key-recorder");
+                    if (btn) {
+                        // Ignore clicks on read-only recorders.
+                        if (btn.getAttribute("data-readonly") === "true") {
+                            return;
+                        }
+                        e.preventDefault();
+                        if (activeBtn === btn) {
+                            resetToDefault(btn);
+                        } else {
+                            startRecording(btn);
+                        }
+                        return;
+                    }
+                    if (activeBtn) {
+                        resetToDefault(activeBtn);
+                    }
+                });
+
+                document.addEventListener(
+                    "keydown",
+                    function (e) {
+                        if (!activeBtn) return;
+
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        // Escape always cancels and restores the persisted value.
+                        if (e.code === "Escape") {
+                            resetToDefault(activeBtn);
+                            return;
+                        }
+
+                        if (isModifierCode(e.code)) {
+                            heldModCodes[e.code] = true;
+                            activeBtn.textContent = heldModPreview() + "\u2026";
+                            return;
+                        }
+
+                        // Non-modifier key pressed.
+                        var shortcutName = activeBtn.getAttribute("data-shortcut");
+                        if (shortcutName === "privateMode") {
+                            if (!keyNameFromCode(e.code)) {
+                                rejectRecording(activeBtn, "Use a supported key");
+                                return;
+                            }
+                            if (modifierCount(e) < 2) {
+                                rejectRecording(activeBtn, "Use two modifier keys");
+                                return;
+                            }
+                        }
+
+                        // Check if we have any modifiers (from our tracking
+                        // or the event flags).
+                        var hasModifier = false;
+                        for (var c in heldModCodes) {
+                            hasModifier = true;
+                            break;
+                        }
+                        if (!hasModifier) {
+                            hasModifier = e.ctrlKey || e.altKey || e.shiftKey || e.metaKey;
+                        }
+
+                        if (hasModifier) {
+                            var label = comboLabel(e);
+                            commit(activeBtn, label, e);
+                        } else {
+                            // Bare key without modifiers.
+                            var keyName = keyNameFromCode(e.code);
+                            if (keyName && keyName.length > 1) {
+                                // Special key like F5, Tab, etc.
+                                commit(activeBtn, keyName, e);
+                            } else {
+                                // Single letter/digit without modifiers
+                                // would conflict with normal typing.
+                                // Stay in recording mode.
+                            }
+                        }
+                    },
+                    true,
+                );
+
+                document.addEventListener(
+                    "keyup",
+                    function (e) {
+                        if (!activeBtn) return;
+                        if (!isModifierCode(e.code)) return;
+
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        var wasHeld = !!heldModCodes[e.code];
+                        if (!wasHeld) return;
+
+                        // Count how many will remain after removing this.
+                        var remaining = 0;
+                        for (var c in heldModCodes) {
+                            if (c !== e.code) remaining++;
+                        }
+
+                        if (remaining === 0) {
+                            if (activeBtn.getAttribute("data-shortcut") === "privateMode") {
+                                rejectRecording(activeBtn, "Add a key and two modifiers");
+                                return;
+                            }
+
+                            // For the dictate shortcut, only single-modifier
+                            // bindings are valid (hold-to-talk needs one key).
+                            // Reject multi-modifier-only combos with a brief
+                            // flash and reset to default.
+                            var codes = Object.keys(heldModCodes);
+                            if (activeBtn.getAttribute("data-shortcut") === "dictate" && codes.length > 1) {
+                                rejectRecording(activeBtn, "Use one modifier key");
+                                return;
+                            }
+                            var label = modifierOnlyLabel();
+                            commit(activeBtn, label, null);
+                        } else {
+                            delete heldModCodes[e.code];
+                            activeBtn.textContent = heldModPreview() + "\u2026";
+                        }
+                    },
+                    true,
+                );
+
+                // -- External API for settings.js -----------------------
+
+                window._setShortcutLabel = function (shortcutName, label) {
+                    if (activeBtn && activeBtn.getAttribute("data-shortcut") === shortcutName) {
+                        return;
+                    }
+                    var btn = document.querySelector('.key-recorder[data-shortcut="' + shortcutName + '"]');
+                    if (btn) {
+                        btn.textContent = label;
+                        btn.setAttribute("data-default", label);
+                    }
+                };
+            })();
+        </script>
+    </body>
+</html>

@@ -2,7 +2,7 @@
 
 ## App Name
 
-The app is called "FreeFlow".
+The app is called "Unramble".
 
 ## File Formatting
 
@@ -27,7 +27,7 @@ make test-all           # Default selection plus Keychain and slow timeout suite
 make test-runner-tests  # Runner/parser fixture checks; does not build the Swift package.
 ```
 
-`make test-all` is not a literal all-tests lane. It enables only `FREEFLOW_TEST_KEYCHAIN=1` and `FREEFLOW_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
+`make test-all` is not a literal all-tests lane. It enables only `UNRAMBLE_TEST_KEYCHAIN=1` and `UNRAMBLE_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
 
 The default selection includes corpus-backed polish scenario tests and expects the ignored `training/polish-tests.json` file. Generate it from the committed YAML before the default or Keychain/slow lane when starting from a clean checkout. The isolated environment below installs only the generator's PyYAML dependency, not the MLX training stack:
 
@@ -39,13 +39,13 @@ python3 -m venv ../.scratch/polish-data-venv
 ```
 
 **Environment variable gates:**
-- `FREEFLOW_TEST_KEYCHAIN=1` — enables Keychain tests (KeychainServiceTests and
+- `UNRAMBLE_TEST_KEYCHAIN=1` — enables Keychain tests (KeychainServiceTests and
   ServiceConfigTests). These trigger macOS login Keychain password prompts.
-- `FREEFLOW_TEST_SLOW=1` — enables timeout tests (PipelineTimeoutTests ~75s) that
+- `UNRAMBLE_TEST_SLOW=1` — enables timeout tests (PipelineTimeoutTests ~75s) that
   use real timeouts and waits.
-- `FREEFLOW_TEST_OPENAI=1` — enables live tests that hit the real OpenAI API.
+- `UNRAMBLE_TEST_OPENAI=1` — enables live tests that hit the real OpenAI API.
   Requires `OPENAI_API_KEY` to be set in the environment.
-- `FREEFLOW_TEST_OPENAI_BENCH=1` — enables the OpenAI Realtime latency benchmark
+- `UNRAMBLE_TEST_OPENAI_BENCH=1` — enables the OpenAI Realtime latency benchmark
   suite (hits the real API, takes several seconds per run).
 
 The first two are set automatically by `make test-all`.
@@ -53,13 +53,13 @@ The first two are set automatically by `make test-all`.
 By default, each invocation creates a unique directory under `.scratch/test-runs/` containing `swift-test.log`, `results-swift-testing.xml`, and `summary.txt`. The command prints those paths. Set `TEST_LOG` only when a caller needs an exact text-log path:
 
 ```bash
-TEST_LOG=/tmp/freeflow-focused.log make test
+TEST_LOG=/tmp/unramble-focused.log make test
 ```
 
 Run affected tests before the full suite, and keep their complete output:
 
 ```bash
-cd FreeFlowKit
+cd UnrambleKit
 mkdir -p ../.scratch/test-runs
 set -o pipefail
 swift test --filter "testNameA|testNameB" 2>&1 | tee ../.scratch/test-runs/focused.log
@@ -179,20 +179,20 @@ prompts on every build.
 Launch in the background and append output to a log file:
 
 ```bash
-pkill -9 -f "FreeFlow.app/Contents/MacOS/FreeFlow" 2>/dev/null
+pkill -9 -f "Unramble.app/Contents/MacOS/Unramble" 2>/dev/null
 sleep 1
-APP=$(find ~/Library/Developer/Xcode/DerivedData/FreeFlow-*/Build/Products/Debug -name FreeFlow.app -maxdepth 1)
-echo "=== $(date) ===" >> /tmp/freeflow.log
+APP=$(find ~/Library/Developer/Xcode/DerivedData/Unramble-*/Build/Products/Debug -name Unramble.app -maxdepth 1)
+echo "=== $(date) ===" >> /tmp/unramble.log
 OPENAI_API_KEY="sk-..." \
-"$APP/Contents/MacOS/FreeFlow" >> /tmp/freeflow.log 2>&1 &
+"$APP/Contents/MacOS/Unramble" >> /tmp/unramble.log 2>&1 &
 echo "Launched PID $!"
 ```
 
 Then tail or grep the log to follow activity:
 
 ```bash
-tail -f /tmp/freeflow.log
-grep -E "Pipeline|AudioCapture|Streaming|polish" /tmp/freeflow.log
+tail -f /tmp/unramble.log
+grep -E "Pipeline|AudioCapture|Streaming|polish" /tmp/unramble.log
 ```
 
 ### Logging

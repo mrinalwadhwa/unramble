@@ -3,8 +3,8 @@
 
 # XcodeGen must be installed: brew install xcodegen
 XCODEGEN := $(shell command -v xcodegen 2>/dev/null)
-PROJECT  := FreeFlow.xcodeproj
-SCHEME   := FreeFlowApp
+PROJECT  := Unramble.xcodeproj
+SCHEME   := UnrambleApp
 CONFIG   := Debug
 XCODE_FLAGS := -skipPackagePluginValidation
 PYTHON ?= python3
@@ -13,15 +13,15 @@ MODEL_TOOL := scripts/models.sh
 # Release settings
 TEAM_ID          := U5Y82TZF5K
 SIGN_IDENTITY    := Developer ID Application: Mrinal Wadhwa ($(TEAM_ID))
-NOTARIZE_PROFILE := freeflow-notarize
-ARCHIVE_PATH     := build/FreeFlow.xcarchive
-APP_PATH         := build/FreeFlow.app
+NOTARIZE_PROFILE := unramble-notarize
+ARCHIVE_PATH     := build/Unramble.xcarchive
+APP_PATH         := build/Unramble.app
 RELEASE_DIR      := releases
-DMG_NAME         := FreeFlow.dmg
+DMG_NAME         := Unramble.dmg
 DMG_PATH         := $(RELEASE_DIR)/$(DMG_NAME)
 DMG_STAGING      := build/dmg_contents
-DOWNLOAD_URL     := https://github.com/mrinalwadhwa/freeflow/releases/latest/download/
-SPARKLE_BIN      := $(shell find ~/Library/Developer/Xcode/DerivedData/FreeFlow-*/SourcePackages/artifacts/sparkle/Sparkle/bin -maxdepth 0 2>/dev/null | head -1)
+DOWNLOAD_URL     := https://github.com/mrinalwadhwa/unramble/releases/latest/download/
+SPARKLE_BIN      := $(shell find ~/Library/Developer/Xcode/DerivedData/Unramble-*/SourcePackages/artifacts/sparkle/Sparkle/bin -maxdepth 0 2>/dev/null | head -1)
 
 # Optional: set KEYCHAIN to a keychain path for CI builds.
 # When set, codesign uses the specified keychain. Leave unset for local
@@ -64,7 +64,7 @@ build: verify-models $(PROJECT)
 
 # Build and launch
 run: build
-	@open "$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) -showBuildSettings 2>/dev/null | grep -m1 ' BUILT_PRODUCTS_DIR' | awk '{print $$3}')/FreeFlow.app"
+	@open "$$(xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIG) -showBuildSettings 2>/dev/null | grep -m1 ' BUILT_PRODUCTS_DIR' | awk '{print $$3}')/Unramble.app"
 
 # Run the default package selection with collision-free durable artifacts.
 test:
@@ -85,7 +85,7 @@ test-runner-tests:
 # Clean build artifacts
 clean:
 	xcodebuild -project $(PROJECT) -scheme $(SCHEME) clean 2>/dev/null || true
-	cd FreeFlowKit && swift package clean
+	cd UnrambleKit && swift package clean
 	rm -rf DerivedData build
 
 # Open in Xcode (generates project first if missing)
@@ -122,7 +122,7 @@ archive: verify-models $(PROJECT)
 		CODE_SIGNING_ALLOWED=NO archive
 	@echo "── Extracting app from archive ──"
 	@rm -rf $(APP_PATH)
-	@cp -R "$(ARCHIVE_PATH)/Products/Applications/FreeFlow.app" $(APP_PATH)
+	@cp -R "$(ARCHIVE_PATH)/Products/Applications/Unramble.app" $(APP_PATH)
 	@$(MAKE) verify-app-models APP_PATH="$(APP_PATH)"
 
 # Sign the app bundle with hardened runtime and entitlements.
@@ -160,7 +160,7 @@ sign:
 	codesign --force --options runtime \
 		--sign "$(SIGN_IDENTITY)" \
 		$(KEYCHAIN_FLAGS) \
-		--entitlements FreeFlowApp/FreeFlow.entitlements \
+		--entitlements UnrambleApp/Unramble.entitlements \
 		--timestamp \
 		$(APP_PATH)
 	@echo "── Verifying signature ──"
@@ -175,7 +175,7 @@ dmg:
 	@ln -s /Applications $(DMG_STAGING)/Applications
 	@mkdir -p $(RELEASE_DIR)
 	@rm -f $(DMG_PATH)
-	hdiutil create -volname "FreeFlow" -srcfolder $(DMG_STAGING) -ov -format UDZO $(DMG_PATH)
+	hdiutil create -volname "Unramble" -srcfolder $(DMG_STAGING) -ov -format UDZO $(DMG_PATH)
 	@rm -rf $(DMG_STAGING)
 	@echo "  $(DMG_PATH) ($$(du -h $(DMG_PATH) | cut -f1))"
 
@@ -191,8 +191,8 @@ notarize:
 	@echo "── Verifying Gatekeeper approval ──"
 	@# DMGs are notarized but not code-signed. Verify the app inside.
 	hdiutil attach $(DMG_PATH) -nobrowse -quiet
-	spctl --assess --type execute --verbose=2 /Volumes/FreeFlow/FreeFlow.app
-	hdiutil detach /Volumes/FreeFlow -quiet
+	spctl --assess --type execute --verbose=2 /Volumes/Unramble/Unramble.app
+	hdiutil detach /Volumes/Unramble -quiet
 
 # Generate or update appcast.xml from the release DMG.
 # Locally, generate_appcast reads the EdDSA key from the Keychain.
@@ -218,4 +218,4 @@ endif
 
 # Print the version from Info.plist (used by CI)
 version:
-	@/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" FreeFlowApp/Info.plist
+	@/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" UnrambleApp/Info.plist

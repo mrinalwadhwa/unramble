@@ -1,6 +1,6 @@
 # Develop
 
-Build, test, customize, and understand the FreeFlow codebase.
+Build, test, customize, and understand the Unramble codebase.
 
 ## Prerequisites
 
@@ -25,24 +25,24 @@ and verifies the resulting pack. Build and archive commands only perform
 offline verification. The built app never downloads or installs model assets
 at runtime.
 
-`FREEFLOW_TEST_KEYCHAIN=1` enables Keychain tests (require macOS login
-Keychain access, trigger password prompts). `FREEFLOW_TEST_OPENAI=1`
+`UNRAMBLE_TEST_KEYCHAIN=1` enables Keychain tests (require macOS login
+Keychain access, trigger password prompts). `UNRAMBLE_TEST_OPENAI=1`
 enables live tests that hit the real OpenAI API and require
-`OPENAI_API_KEY` to be set. `FREEFLOW_TEST_OPENAI_BENCH=1` additionally
-enables the latency benchmark suite. `FREEFLOW_TEST_OPENAI_LONG=1` enables the
+`OPENAI_API_KEY` to be set. `UNRAMBLE_TEST_OPENAI_BENCH=1` additionally
+enables the latency benchmark suite. `UNRAMBLE_TEST_OPENAI_LONG=1` enables the
 separately gated real-speech, five-minute-source, and exact-WAV batch checks.
-Set `FREEFLOW_TEST_OPENAI_REALTIME_PACED=1` to feed the five-minute source in
-real time, and set `FREEFLOW_TEST_EVIDENCE_DIR` to write case-specific JSON.
+Set `UNRAMBLE_TEST_OPENAI_REALTIME_PACED=1` to feed the five-minute source in
+real time, and set `UNRAMBLE_TEST_EVIDENCE_DIR` to write case-specific JSON.
 
 ## Project structure
 
 The repo has two main directories:
 
-**`FreeFlowApp/`** — macOS app. Menu bar UI, onboarding, settings, HUD
+**`UnrambleApp/`** — macOS app. Menu bar UI, onboarding, settings, HUD
 overlay. Sources are in `Sources/`, bundled HTML and assets in
 `Resources/`.
 
-**`FreeFlowKit/`** — Swift package with the testable core. The
+**`UnrambleKit/`** — Swift package with the testable core. The
 dictation pipeline, Realtime and HTTP file-transcription OpenAI providers,
 the polish pipeline, audio capture, device switching, text injection,
 Keychain storage, and the recording state machine. Protocols for every
@@ -68,12 +68,12 @@ five-minute source scheduling, connection pacing, and exact-WAV recovery.
 
 ## Customize
 
-FreeFlow is designed to be taken apart and reassembled. Edit code,
+Unramble is designed to be taken apart and reassembled. Edit code,
 rebuild, and use the rebuilt binary.
 
 ### Change a prompt
 
-The polish prompts live in `FreeFlowKit/Sources/FreeFlowKit/Prompts/`.
+The polish prompts live in `UnrambleKit/Sources/UnrambleKit/Prompts/`.
 `PolishPipeline.swift` selects and augments them for each backend:
 
 | Constant | File | What it controls |
@@ -112,7 +112,7 @@ defaults:
 
 The local Nemotron and Qwen repository revisions, selected files, and hashes
 are pinned in `scripts/models.sh`. The fine-tuned adapter source is tracked at
-`FreeFlowApp/ModelSources/qwen3-0.6b-4bit-polish-adapter`; rerun `make models`
+`UnrambleApp/ModelSources/qwen3-0.6b-4bit-polish-adapter`; rerun `make models`
 after changing it so the generated pack receives the current adapter bytes.
 
 ### Rebuild
@@ -121,10 +121,10 @@ after changing it so the generated pack receives the current adapter bytes.
     make build      # Build the app
 
 The debug build is at
-`~/Library/Developer/Xcode/DerivedData/FreeFlow-*/Build/Products/Debug/FreeFlow.app`.
+`~/Library/Developer/Xcode/DerivedData/Unramble-*/Build/Products/Debug/Unramble.app`.
 Launch it directly or replace your installed app with the rebuilt one.
 
-Everything else in `FreeFlowKit/Sources/FreeFlowKit/Services/` is open
+Everything else in `UnrambleKit/Sources/UnrambleKit/Services/` is open
 to modification: audio capture, device switching, text injection, the
 dictation pipeline state machine, even the Realtime protocol message
 construction. The test suite covers every provider and pipeline stage so
@@ -133,13 +133,13 @@ regressions are caught quickly.
 ## App icon
 
 The app icon is a 6-bar waveform squircle. The source SVG is
-`FreeFlowApp/AppIcon.svg`.
+`UnrambleApp/AppIcon.svg`.
 
 ### Regenerating
 
 Requires `rsvg-convert` (install via `brew install librsvg` or Nix):
 
-    rsvg-convert -w 1024 -h 1024 FreeFlowApp/AppIcon.svg -o /tmp/AppIcon-1024.png
+    rsvg-convert -w 1024 -h 1024 UnrambleApp/AppIcon.svg -o /tmp/AppIcon-1024.png
 
     mkdir -p /tmp/AppIcon.iconset
     sips -z 16 16     /tmp/AppIcon-1024.png --out /tmp/AppIcon.iconset/icon_16x16.png
@@ -153,8 +153,8 @@ Requires `rsvg-convert` (install via `brew install librsvg` or Nix):
     sips -z 512 512   /tmp/AppIcon-1024.png --out /tmp/AppIcon.iconset/icon_512x512.png
     cp /tmp/AppIcon-1024.png /tmp/AppIcon.iconset/icon_512x512@2x.png
 
-    iconutil -c icns /tmp/AppIcon.iconset -o FreeFlowApp/Resources/AppIcon.icns
+    iconutil -c icns /tmp/AppIcon.iconset -o UnrambleApp/Resources/AppIcon.icns
 
 The `.icns` file is referenced by `CFBundleIconFile` in
-`FreeFlowApp/Info.plist`. After regenerating, run `xcodegen generate`
+`UnrambleApp/Info.plist`. After regenerating, run `xcodegen generate`
 and rebuild.

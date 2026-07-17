@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODEL_DIR="$ROOT_DIR/FreeFlowApp/Resources/models"
-MODEL_WORK="$ROOT_DIR/FreeFlowApp/.model-work"
+MODEL_DIR="$ROOT_DIR/UnrambleApp/Resources/models"
+MODEL_WORK="$ROOT_DIR/UnrambleApp/.model-work"
 MODEL_VENV="$MODEL_WORK/venv"
 MODEL_PYTHON="$MODEL_VENV/bin/python3"
 MODEL_HF="$MODEL_VENV/bin/hf"
-ADAPTER_SOURCE="$ROOT_DIR/FreeFlowApp/ModelSources/qwen3-0.6b-4bit-polish-adapter"
+ADAPTER_SOURCE="$ROOT_DIR/UnrambleApp/ModelSources/qwen3-0.6b-4bit-polish-adapter"
 ADAPTER_NAME="qwen3-0.6b-4bit-polish-adapter"
 NEMOTRON_NAME="nemotron-speech-streaming-en-0.6b-coreml"
 QWEN_NAME="qwen3-0.6b-4bit"

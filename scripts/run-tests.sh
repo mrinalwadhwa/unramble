@@ -6,23 +6,23 @@ if [[ "${TRACE:-0}" == "1" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PACKAGE_DIR="$ROOT_DIR/FreeFlowKit"
+PACKAGE_DIR="$ROOT_DIR/UnrambleKit"
 REPORTER="$ROOT_DIR/scripts/parse-test-results.sh"
 INVOCATION_DIR="$PWD"
 SWIFT_BIN="${SWIFT_BIN:-swift}"
 
 CI_SKIP_REGEX='(AudioPipelineTests|CGEventTapHotkeyProviderTests|CoreAudioDeviceProviderTests|KeychainServiceTests|LocalModelIntegrationTests|MainThreadDelayTests|NemotronStreamingTests|OpenAIFileTranscriberLiveTests|OpenAIRealtimeLiveTests|OpenAIStreamingBenchmarkTests|PermissionProviderTests|PipelineTimeoutTests|PolishScenarioRegexTests|PolishScenarioDeterministicTests|ServiceConfigTests|SoundFeedbackPathTests)'
 CI_FLAG_PATHS=(
-    /tmp/freeflow-test-categories
-    /tmp/freeflow-test-p1
-    /tmp/freeflow-test-training
-    /tmp/freeflow-test-nemotron-streaming
-    /tmp/freeflow-test-replay
-    /tmp/freeflow-test-streaming-replay
-    /tmp/freeflow-test-nemotron-baseline
-    /tmp/freeflow-test-mlx
-    /tmp/freeflow-test-mlx-17
-    /tmp/freeflow-test-mlx-gemma
+    /tmp/unramble-test-categories
+    /tmp/unramble-test-p1
+    /tmp/unramble-test-training
+    /tmp/unramble-test-nemotron-streaming
+    /tmp/unramble-test-replay
+    /tmp/unramble-test-streaming-replay
+    /tmp/unramble-test-nemotron-baseline
+    /tmp/unramble-test-mlx
+    /tmp/unramble-test-mlx-17
+    /tmp/unramble-test-mlx-gemma
 )
 
 usage() {
@@ -76,7 +76,7 @@ configure_paths() {
         results_root="$(absolute_path "${TEST_LOG_DIR:-$ROOT_DIR/.scratch/test-runs}")"
         mkdir -p "$results_root"
         timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
-        RUN_DIR="$(mktemp -d "$results_root/freeflow-tests-$MODE-$timestamp.XXXXXX")"
+        RUN_DIR="$(mktemp -d "$results_root/unramble-tests-$MODE-$timestamp.XXXXXX")"
         LOG_PATH="$RUN_DIR/swift-test.log"
         SUMMARY_PATH="$RUN_DIR/summary.txt"
         REPORT_ERROR_PATH="$RUN_DIR/report-errors.log"
@@ -114,10 +114,10 @@ clear_ci_environment() {
 
     while IFS='=' read -r variable _; do
         case "$variable" in
-            FREEFLOW_TEST_*) unset "$variable" ;;
+            UNRAMBLE_TEST_*) unset "$variable" ;;
         esac
     done < <(env)
-    unset FREEFLOW_MLX_TESTS
+    unset UNRAMBLE_MLX_TESTS
     unset OPENAI_API_KEY
     unset SWIFT_ACTIVE_COMPILATION_CONDITIONS
 }
@@ -134,8 +134,8 @@ run_swift_tests() {
             swift_args+=(--disable-automatic-resolution --skip "$CI_SKIP_REGEX")
             ;;
         keychain-slow)
-            export FREEFLOW_TEST_KEYCHAIN=1
-            export FREEFLOW_TEST_SLOW=1
+            export UNRAMBLE_TEST_KEYCHAIN=1
+            export UNRAMBLE_TEST_SLOW=1
             ;;
     esac
 
@@ -158,7 +158,7 @@ append_run_context() {
             printf 'Selection: default plus Keychain and slow suites; live/model/evaluation gates unchanged.\n'
             ;;
     esac
-    printf 'Compile-gated: the SwiftPM selection did not define FREEFLOW_MLX_TESTS; guarded tests were not compiled.\n'
+    printf 'Compile-gated: the SwiftPM selection did not define UNRAMBLE_MLX_TESTS; guarded tests were not compiled.\n'
 }
 
 print_failure_excerpt() {

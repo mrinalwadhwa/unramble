@@ -24,14 +24,14 @@
 
   <!-- Box 1: Your Mac -->
   <rect x="25" y="36" width="180" height="100" rx="4" class="box-border"/>
-  <text x="115" y="56" class="box-title">FreeFlow</text>
+  <text x="115" y="56" class="box-title">Unramble</text>
   <text x="115" y="74" class="box-text">capture audio</text>
   <text x="115" y="88" class="box-text">read app context</text>
   <text x="115" y="112" class="box-text">inject text at cursor</text>
 
   <!-- Box 2: Your Private Server -->
   <rect x="240" y="36" width="180" height="100" rx="4" class="box-border"/>
-  <text x="330" y="56" class="box-title">FreeFlow Service</text>
+  <text x="330" y="56" class="box-title">Unramble Service</text>
   <text x="330" y="74" class="box-text">stream to realtime model</text>
   <text x="330" y="102" class="box-text">polish transcript</text>
   <text x="330" y="116" class="box-text">or skip if already clean</text>
