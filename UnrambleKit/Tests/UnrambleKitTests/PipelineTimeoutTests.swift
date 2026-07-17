@@ -636,7 +636,8 @@ final class PipelineTimeoutTests: XCTestCase {
     // MARK: - Complete before audio setup finishes
 
     /// If the user releases the hotkey before audio setup completes
-    /// (very fast press-release), complete() should still return promptly.
+    /// (very fast press-release), complete() returns promptly and surfaces an
+    /// explicit failure for the missed capture rather than silently going idle.
     func testQuickReleaseBeforeAudioSetupCompletes() async {
         let streaming = HangingStreamingDictationProvider()
         streaming.startDelay = 2.0  // Slow but not hanging
@@ -654,7 +655,9 @@ final class PipelineTimeoutTests: XCTestCase {
         }
 
         let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
+        XCTAssertEqual(
+            state, .dictationFailed,
+            "A release before live capture surfaces an explicit failure")
     }
 
     // MARK: - Audio forwarding operation timeout
