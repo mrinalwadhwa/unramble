@@ -490,8 +490,10 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
         // A lone "i" is always the pronoun "I"; guarantee it on the final text
         // regardless of which internal path produced each piece.
-        let full = Self.capitalizePronounI(
-            Self.joinPolished(snapshot.committed, finalPolished))
+        let full = Self.reconcileSplitWords(
+            Self.capitalizePronounI(
+                Self.joinPolished(snapshot.committed, finalPolished)),
+            raw: trimmed)
 
         Log.debug("[LocalStreaming] Finish (stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
@@ -854,7 +856,18 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
     private static let seamStopwords: Set<String> = [
         "and", "but", "or", "so", "then", "now", "the", "a", "an", "on", "in",
         "to", "of", "for", "with", "at", "by", "is", "are", "was", "were",
-        "be", "been", "it", "its",
+        "be", "been", "it", "its", "up",
+    ]
+
+    /// Spoken number/time words the polish converts to digits, so a fragment word
+    /// like "thirty" is present in the output as part of "9:30" rather than a
+    /// literal match.
+    private static let seamNumberWords: Set<String> = [
+        "zero", "oh", "one", "two", "three", "four", "five", "six", "seven",
+        "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+        "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+        "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+        "hundred", "thousand", "million", "billion",
     ]
 
     private static func seamNorm(_ s: Substring) -> String {
@@ -876,6 +889,25 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         let tailWords = inputTail.split(separator: " ").map(String.init)
         guard !tailWords.isEmpty else { return nil }
         let polishedSet = Set(polished.split(separator: " ").map { seamNorm($0) })
+        // Presence is robust to the surface-form changes the polish makes, so a
+        // word the polish KEPT (in a different form) is not mistaken for a drop:
+        //  - a partial word it completed ("grabb" -> "grabbed") — prefix of an
+        //    output word;
+        //  - a word re-tokenized or hyphenated ("stand up" -> "stand-up") — its
+        //    alnum key is a substring of the output's alnum key;
+        //  - a spoken number/time it converted to digits ("nine thirty" -> "9:30")
+        //    — a number word when the output holds a digit.
+        let polishedAlnum = String(seamAlnum(polished))
+        let polishedHasDigit = polished.contains { $0.isNumber }
+        func present(_ n: String) -> Bool {
+            if polishedSet.contains(n) { return true }
+            if n.count >= 3, polishedSet.contains(where: {
+                $0.count > n.count && $0.hasPrefix(n)
+            }) { return true }
+            if n.count >= 3, polishedAlnum.contains(n) { return true }
+            if polishedHasDigit, seamNumberWords.contains(n) { return true }
+            return false
+        }
         // Walk the fragment; stop at the first CONTENT word missing from the
         // output — that is where the drop begins. Stopwords are ignored (a
         // trimmed trailing connector is not a drop). `lastKept` is -1 when polish
@@ -884,14 +916,7 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         for (i, w) in tailWords.enumerated() {
             let n = seamNorm(Substring(w))
             if seamStopwords.contains(n) { continue }
-            // A partial word the polish completed ("grabb" -> "grabbed") is kept,
-            // not dropped: count the fragment word as present when it is a prefix
-            // of some output word. Require a length so a short coincidental prefix
-            // does not mask a real drop.
-            let completed = n.count >= 3 && polishedSet.contains {
-                $0.count > n.count && $0.hasPrefix(n)
-            }
-            if polishedSet.contains(n) || completed { lastKept = i } else { break }
+            if present(n) { lastKept = i } else { break }
         }
         let suffixWords = Array(tailWords[(lastKept + 1)...])
         guard !suffixWords.isEmpty, suffixWords.count <= 6 else { return nil }
@@ -902,13 +927,10 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         }
         guard !contentSuffix.isEmpty else { return nil }
         // A suffix whose content words are already present in the output was not
-        // dropped — it is a merge or reorder artifact. When polish rejoins two
-        // recognized words ("half way" -> "halfway"), the second looks missing
-        // though the rest is kept; re-appending it would duplicate content. Only
-        // recover a genuine loss: a majority of the content absent from output.
-        let absent = contentSuffix.filter {
-            !polishedSet.contains(seamNorm(Substring($0)))
-        }
+        // dropped — it is a merge, reorder, or form-change artifact (e.g. polish
+        // rendering "nine thirty" as "9:30"); re-appending it would duplicate
+        // content. Only recover a genuine loss: a majority of the content absent.
+        let absent = contentSuffix.filter { !present(seamNorm(Substring($0))) }
         guard absent.count * 2 > contentSuffix.count else { return nil }
         return (suffixWords.joined(separator: " "), lastKept >= 0)
     }
@@ -994,6 +1016,44 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         }
         guard !tailContent.isEmpty, tailContent.count <= 3 else { return carry }
         return tokens[...anchor].joined(separator: " ")
+    }
+
+    /// Rejoin a word a size-cap boundary split across a space ("relev ance" ->
+    /// "relevance"): when two adjacent output tokens concatenate to a single token
+    /// in the raw transcript AND the first is not itself a whole raw word, the
+    /// space is a seam artifact from a mid-word unit boundary. Keyed on the raw
+    /// recognizer output, so no dictionary is needed and a genuine two-word
+    /// sequence ("saw dust", heard as two words) is never merged.
+    static func reconcileSplitWords(_ text: String, raw: String) -> String {
+        let rawTokens = Set(
+            raw.split(whereSeparator: { $0 == " " || $0 == "\n" })
+                .map { String(seamAlnum(String($0))) }
+                .filter { !$0.isEmpty })
+        guard !rawTokens.isEmpty else { return text }
+        // Per line, so a merge never crosses a newline (paragraph) break.
+        let rejoined = text.components(separatedBy: "\n").map { line -> String in
+            var toks = line.split(separator: " ", omittingEmptySubsequences: false)
+                .map(String.init)
+            var i = 0
+            while i + 1 < toks.count {
+                let a = toks[i], b = toks[i + 1]
+                let ak = String(seamAlnum(a)), bk = String(seamAlnum(b))
+                // `a` must be a bare fragment (no terminal punctuation), `b` a
+                // lowercase continuation, and `a` + `b` a raw word that `a` alone
+                // is not — otherwise the space is a real word boundary.
+                let aClean = !a.isEmpty && !".!?".contains(a.last!)
+                let bLower = b.first.map { $0.isLowercase } ?? false
+                if !ak.isEmpty, !bk.isEmpty, aClean, bLower,
+                    rawTokens.contains(ak + bk), !rawTokens.contains(ak) {
+                    toks[i] = a + b
+                    toks.remove(at: i + 1)
+                    continue
+                }
+                i += 1
+            }
+            return toks.joined(separator: " ")
+        }
+        return rejoined.joined(separator: "\n")
     }
 
     private static let trailingNewPattern = try! NSRegularExpression(

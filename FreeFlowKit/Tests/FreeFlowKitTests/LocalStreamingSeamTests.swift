@@ -133,4 +133,53 @@ struct LocalStreamingSeamTests {
         #expect(drop?.suffix.contains("comp") == true)
         #expect(drop?.suffix.contains("bands") == true)
     }
+
+    @Test("A number/hyphen form-changed tail is not re-appended")
+    func formChangedTailNotDropped() {
+        // Polish renders "nine thirty" as "9:30" and "stand up" as "stand-up";
+        // those words are present in the output in a changed form, so the tail was
+        // not dropped and must not be re-appended (which duplicated "…thanks Alex").
+        let drop = LocalStreamingProvider.droppedTailSuffix(
+            inputTail: "see you at the stand up at nine thirty thanks Alex",
+            polished: "I'll see you at the stand-up at 9:30. Thanks, Alex.")
+        #expect(drop == nil)
+    }
+
+    // MARK: reconcileSplitWords — rejoin a mid-word space-split from the raw STT
+
+    @Test("A mid-word space-split is rejoined via the raw transcript")
+    func splitWordRejoined() {
+        let out = LocalStreamingProvider.reconcileSplitWords(
+            "On search, the relev ance is much better.",
+            raw: "on search the relevance is much better")
+        #expect(out == "On search, the relevance is much better.")
+    }
+
+    @Test("Split 'mod els' rejoins to 'models'")
+    func splitModelsRejoined() {
+        let out = LocalStreamingProvider.reconcileSplitWords(
+            "the machine learning mod els accuracy is up",
+            raw: "on the machine learning models accuracy is up")
+        #expect(out == "the machine learning models accuracy is up")
+    }
+
+    @Test("A genuine two-word sequence is not merged")
+    func genuineWordsNotMerged() {
+        // The raw has "saw" and "dust" as separate words, so "sawdust" is not a raw
+        // token and the pair is left as two words.
+        let out = LocalStreamingProvider.reconcileSplitWords(
+            "We swept the saw dust off the bench.",
+            raw: "we swept the saw dust off the bench")
+        #expect(out == "We swept the saw dust off the bench.")
+    }
+
+    @Test("A capitalized continuation is not merged")
+    func capitalizedNotMerged() {
+        // "Ency" is capitalized (a sentence start) and "residues." is terminated,
+        // so the polish garble "residues. Ency" is left alone (out of scope).
+        let out = LocalStreamingProvider.reconcileSplitWords(
+            "questions about data residues. Ency and more",
+            raw: "questions about data residency and more")
+        #expect(out == "questions about data residues. Ency and more")
+    }
 }
