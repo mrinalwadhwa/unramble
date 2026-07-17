@@ -37,32 +37,6 @@ public final class KeychainService: @unchecked Sendable {
         delete(account: Account.openAIAPIKey)
     }
 
-    // MARK: - Legacy cleanup
-
-    /// Delete any Keychain items left behind by the v0.1.0 server-backed
-    /// build. The old build stored session tokens, zone URLs, and email
-    /// addresses under the service name `computer.autonomy.freeflow`.
-    /// None of those items are read by the current build, so they serve
-    /// no purpose beyond cluttering the user's Keychain.
-    public func purgeLegacyV01Items() {
-        let legacyService = "computer.autonomy.freeflow"
-        let legacyAccounts = [
-            "session-token",
-            "service-url",
-            "autonomy-token",
-            "user-email",
-            "autonomy-email",
-        ]
-        for account in legacyAccounts {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: legacyService,
-                kSecAttrAccount as String: account,
-            ]
-            _ = SecItemDelete(query as CFDictionary)
-        }
-    }
-
     // MARK: - Private helpers
 
     private func save(value: String, account: String) -> Bool {

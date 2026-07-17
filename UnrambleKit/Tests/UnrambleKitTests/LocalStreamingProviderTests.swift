@@ -956,7 +956,7 @@ struct LocalStreamingPreprocessingTests {
     @Test("Multiple fillers stripped with echo model")
     func multipleFillerWithEchoModel() async throws {
         let engine = ScriptedRecognizer()
-        engine.stubbedTranscription = "Read the first page of um autonomy docs. Um I think that gives us better vocabulary. Um The term is harness."
+        engine.stubbedTranscription = "Read the first page of um product docs. Um I think that gives us better vocabulary. Um The term is harness."
         let echoClient = EchoPolishClient()
         let provider = LocalStreamingProvider(
             sttEngine: engine,

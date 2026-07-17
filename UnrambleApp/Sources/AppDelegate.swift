@@ -72,7 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        purgeLegacyV01State()
         if modeTransition.effectiveMode == .local,
             !DictationMode.isLocalAvailable
         {
@@ -86,39 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupSettings()
         setupMenuBarState()
         determineLaunchFlow()
-    }
-
-    /// Clean up Keychain items and UserDefaults keys left behind by the
-    /// v0.1.0 server-backed build. Runs once per install; the marker is
-    /// stored in UserDefaults under `didPurgeV01State`.
-    ///
-    /// v0.1.0 and the current build share the same bundle identifier
-    /// (`computer.autonomy.unramble`) so Sparkle can upgrade in place.
-    /// That means the current build inherits the old build's
-    /// UserDefaults plist and has read access to the old Keychain
-    /// items. None of those are used by the current build and some of
-    /// them (session tokens, zone URLs) are security-sensitive, so we
-    /// delete them on first launch after upgrading.
-    private func purgeLegacyV01State() {
-        let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: "didPurgeV01State") else { return }
-
-        Log.debug("[AppDelegate] Purging v0.1.0 legacy state")
-
-        keychain.purgeLegacyV01Items()
-
-        // UserDefaults keys that were meaningful in v0.1.0 but are no
-        // longer read. Settings (language, shortcut bindings, sound
-        // feedback) are preserved so the user keeps their preferences.
-        let legacyDefaults = [
-            "hasCompletedOnboarding",
-            "hasEmailOnFile",
-        ]
-        for key in legacyDefaults {
-            defaults.removeObject(forKey: key)
-        }
-
-        defaults.set(true, forKey: "didPurgeV01State")
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
