@@ -390,6 +390,9 @@ public actor DictationPipeline: PipelineProviding {
     private let contextObservationTimeout: TimeInterval
     private let audioStartObservationTimeout: TimeInterval
     private let audioSetupCompletionWatchdog: Duration
+    /// Test seam: overrides the computed overall-pipeline deadline when set.
+    /// `nil` in production, so the scaled `pipelineDeadline` budget is used.
+    private let pipelineDeadlineOverride: TimeInterval?
     private let audioSetupCompletionSleep: @Sendable (Duration) async -> Void
     private var cloudRecordingLimitID: UUID?
     private var cloudRecordingLimitClaimedID: UUID?
@@ -494,7 +497,8 @@ public actor DictationPipeline: PipelineProviding {
         audioSetupCompletionWatchdog: Duration = .seconds(6),
         audioSetupCompletionSleep: @escaping @Sendable (Duration) async -> Void = {
             try? await Task.sleep(for: $0)
-        }
+        },
+        pipelineDeadlineOverride: TimeInterval? = nil
     ) {
         self.audioProvider = audioProvider
         self.contextProvider = contextProvider
@@ -526,6 +530,7 @@ public actor DictationPipeline: PipelineProviding {
         self.contextObservationTimeout = contextObservationTimeout
         self.audioStartObservationTimeout = audioStartObservationTimeout
         self.audioSetupCompletionWatchdog = audioSetupCompletionWatchdog
+        self.pipelineDeadlineOverride = pipelineDeadlineOverride
         self.audioSetupCompletionSleep = audioSetupCompletionSleep
     }
 
@@ -2146,7 +2151,7 @@ public actor DictationPipeline: PipelineProviding {
             requiresCloudBatchWindow && useStreaming
             ? streamingProvider
             : nil
-        let deadline = Self.pipelineDeadline(
+        let deadline = pipelineDeadlineOverride ?? Self.pipelineDeadline(
             forRecordingDuration: recordingDuration,
             cloudStreamingProvider: cloudStreamingProvider,
             requiresCloudBatchWindow: requiresCloudBatchWindow)

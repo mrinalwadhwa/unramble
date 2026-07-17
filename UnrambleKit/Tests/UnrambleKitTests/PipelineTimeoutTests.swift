@@ -277,7 +277,8 @@ final class PipelineTimeoutTests: XCTestCase {
         audioProvider: MockAudioProvider? = nil,
         batchProvider: MockBatchProvider = MockBatchProvider(),
         streamingProvider: HangingStreamingDictationProvider = HangingStreamingDictationProvider(),
-        coordinator: RecordingCoordinator = RecordingCoordinator()
+        coordinator: RecordingCoordinator = RecordingCoordinator(),
+        pipelineDeadlineOverride: TimeInterval? = nil
     ) -> (
         DictationPipeline, MockAudioProvider, MockBatchProvider,
         HangingStreamingDictationProvider, MockTextInjector, RecordingCoordinator
@@ -291,7 +292,12 @@ final class PipelineTimeoutTests: XCTestCase {
                 realtime: streamingProvider,
                 fallback: batchProvider),
             textInjector: injector,
-            coordinator: coordinator
+            coordinator: coordinator,
+            cloudRecordingLimit: .seconds(300),
+            cloudRecordingLimitSleep: { duration in
+                try? await Task.sleep(for: duration)
+            },
+            pipelineDeadlineOverride: pipelineDeadlineOverride
         )
         return (pipeline, audio, batchProvider, streamingProvider, injector, coordinator)
     }
@@ -715,7 +721,8 @@ final class PipelineTimeoutTests: XCTestCase {
             audioProvider: audio,
             batchProvider: hangingDictation,
             streamingProvider: streaming,
-            coordinator: coordinator)
+            coordinator: coordinator,
+            pipelineDeadlineOverride: 5)
         let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
@@ -723,8 +730,9 @@ final class PipelineTimeoutTests: XCTestCase {
         audio.emitPCMChunk(makeNonSilentPCMChunk())
         try? await Task.sleep(nanoseconds: 200_000_000)
 
-        // Allow scheduling margin beyond the 45-second baseline deadline.
-        await assertCompletesWithin(55.0) {
+        // The injected 5 s deadline fires while the batch is still stuck
+        // (stubbedDelay 60 s); wait comfortably past it.
+        await assertCompletesWithin(20.0) {
             await pipeline.complete()
         }
 
@@ -759,14 +767,17 @@ final class PipelineTimeoutTests: XCTestCase {
             audioProvider: audio,
             batchProvider: dictation,
             streamingProvider: streaming,
-            coordinator: coordinator)
+            coordinator: coordinator,
+            pipelineDeadlineOverride: 5)
         let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
         try? await Task.sleep(nanoseconds: 100_000_000)
         let emitTask = emitChunksInBackground(audio)
 
-        await assertCompletesWithin(55.0) {
+        // The injected 5 s deadline fires while finishStreaming is still
+        // hanging (watchdog 60 s), so the outer owner cancels finalization.
+        await assertCompletesWithin(20.0) {
             await pipeline.complete()
         }
         emitTask.cancel()
