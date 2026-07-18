@@ -250,12 +250,11 @@ final class HangingStreamingDictationProvider: StreamingDictationProviding, @unc
 
 final class PipelineTimeoutTests: XCTestCase {
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["UNRAMBLE_TEST_SLOW"] == "1",
-            "Slow timeout tests skipped (set UNRAMBLE_TEST_SLOW=1 to run)")
-    }
+    /// A small injected timeout. The production streaming-setup (5 s) and
+    /// forwarding (2 s) budgets only fire in wall-clock, so these tests inject
+    /// a short deadline to prove the same recovery behavior deterministically
+    /// and fast, without gating the suite behind a slow lane.
+    private static let fastTimeout: TimeInterval = 0.3
 
     // MARK: - Helpers
 
@@ -279,7 +278,9 @@ final class PipelineTimeoutTests: XCTestCase {
         batchProvider: MockBatchProvider = MockBatchProvider(),
         streamingProvider: HangingStreamingDictationProvider = HangingStreamingDictationProvider(),
         coordinator: RecordingCoordinator = RecordingCoordinator(),
-        pipelineDeadlineOverride: TimeInterval? = nil
+        pipelineDeadlineOverride: TimeInterval? = nil,
+        streamingSetupTimeoutOverride: TimeInterval? = PipelineTimeoutTests.fastTimeout,
+        forwardingTimeoutOverride: TimeInterval? = PipelineTimeoutTests.fastTimeout
     ) -> (
         DictationPipeline, MockAudioProvider, MockBatchProvider,
         HangingStreamingDictationProvider, MockTextInjector, RecordingCoordinator
@@ -298,7 +299,9 @@ final class PipelineTimeoutTests: XCTestCase {
             cloudRecordingLimitSleep: { duration in
                 try? await Task.sleep(for: duration)
             },
-            pipelineDeadlineOverride: pipelineDeadlineOverride
+            pipelineDeadlineOverride: pipelineDeadlineOverride,
+            streamingSetupTimeoutOverride: streamingSetupTimeoutOverride,
+            forwardingTimeoutOverride: forwardingTimeoutOverride
         )
         return (pipeline, audio, batchProvider, streamingProvider, injector, coordinator)
     }
@@ -349,7 +352,7 @@ final class PipelineTimeoutTests: XCTestCase {
     // MARK: - Streaming setup timeout
 
     /// When `startStreaming()` hangs, `complete()` must still return within
-    /// a bounded time. The 5s streaming setup timeout should fire, and the
+    /// a bounded time. The streaming setup timeout should fire, and the
     /// pipeline should fall back to batch mode.
     func testCompleteReturnsWhenStartStreamingHangs() async {
         let streaming = HangingStreamingDictationProvider()
@@ -365,9 +368,9 @@ final class PipelineTimeoutTests: XCTestCase {
 
         let emitTask = emitChunksInBackground(audio, count: 10, delayNanos: 50_000_000)
 
-        // The pipeline's streaming setup timeout is 5s. complete() should
-        // return well within 8s (5s timeout + batch call + margin).
-        await assertCompletesWithin(8.0) {
+        // The injected streaming setup timeout fires, then batch fallback
+        // runs; complete() returns well within the generous ceiling.
+        await assertCompletesWithin(3.0) {
             await pipeline.complete()
         }
         emitTask.cancel()
@@ -462,7 +465,7 @@ final class PipelineTimeoutTests: XCTestCase {
 
         let emitTask = emitChunksInBackground(audio)
 
-        // Complete the pipeline — this triggers the 5s timeout.
+        // Complete the pipeline — this triggers the streaming setup timeout.
         await assertCompletesWithin(8.0) {
             await pipeline.complete()
         }
@@ -495,7 +498,7 @@ final class PipelineTimeoutTests: XCTestCase {
 
             let emitTask = emitChunksInBackground(audio, count: 3, delayNanos: 10_000_000)
 
-            // Each cycle must complete within 8s (5s timeout + margin).
+            // Each cycle must complete promptly after the injected timeout.
             let completed = await assertCompletesWithin(8.0) {
                 await pipeline.complete()
             }
@@ -542,13 +545,14 @@ final class PipelineTimeoutTests: XCTestCase {
     // MARK: - Slow start still works
 
     /// A streaming provider that is slow (but not hanging) should still
-    /// work — the setup completes before the 5s timeout.
+    /// work — the setup completes before the timeout fires.
     func testSlowStartStreamingStillWorks() async {
         let streaming = HangingStreamingDictationProvider()
-        streaming.startDelay = 1.0  // 1s — well under the 5s timeout
+        streaming.startDelay = 0.3  // well under the injected setup timeout
         streaming.stubbedText = "Slow but OK"
         let (pipeline, audio, _, _, injector, coordinator) = makePipeline(
-            streamingProvider: streaming)
+            streamingProvider: streaming,
+            streamingSetupTimeoutOverride: 2.0)
 
         await pipeline.activate()
         try? await Task.sleep(nanoseconds: 200_000_000)  // 200ms
@@ -625,9 +629,9 @@ final class PipelineTimeoutTests: XCTestCase {
 
         let countAfterComplete = streaming.startCallCount
 
-        // Wait an additional 2s and verify no new calls arrived from
+        // Wait a little longer and verify no new calls arrived from
         // a zombie task retrying startStreaming.
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        try? await Task.sleep(nanoseconds: 500_000_000)
 
         XCTAssertEqual(
             streaming.startCallCount, countAfterComplete,
@@ -641,10 +645,11 @@ final class PipelineTimeoutTests: XCTestCase {
     /// explicit failure for the missed capture rather than silently going idle.
     func testQuickReleaseBeforeAudioSetupCompletes() async {
         let streaming = HangingStreamingDictationProvider()
-        streaming.startDelay = 2.0  // Slow but not hanging
+        streaming.startDelay = 0.3  // Slow but not hanging
         let dictation = MockBatchProvider(stubbedText: "Quick release")
         let (pipeline, _, _, _, _, coordinator) = makePipeline(
-            batchProvider: dictation, streamingProvider: streaming)
+            batchProvider: dictation, streamingProvider: streaming,
+            streamingSetupTimeoutOverride: 2.0)
 
         await pipeline.activate()
         // Don't wait — release immediately.
@@ -694,9 +699,8 @@ final class PipelineTimeoutTests: XCTestCase {
             "sendAudio should have entered hanging state")
 
         // complete() must return within a bounded time. The forwarding
-        // task timeout is 2s, plus margin for batch fallback.
-        // Total budget: 2s forwarding timeout + batch dictation + margin.
-        await assertCompletesWithin(8.0) {
+        // The injected forwarding timeout fires, then batch fallback runs.
+        await assertCompletesWithin(3.0) {
             await pipeline.complete()
         }
 
@@ -726,7 +730,7 @@ final class PipelineTimeoutTests: XCTestCase {
             batchProvider: hangingDictation,
             streamingProvider: streaming,
             coordinator: coordinator,
-            pipelineDeadlineOverride: 5)
+            pipelineDeadlineOverride: 1)
         let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
@@ -734,9 +738,9 @@ final class PipelineTimeoutTests: XCTestCase {
         audio.emitPCMChunk(makeNonSilentPCMChunk())
         try? await Task.sleep(nanoseconds: 200_000_000)
 
-        // The injected 5 s deadline fires while the batch is still stuck
+        // The injected 1 s deadline fires while the batch is still stuck
         // (stubbedDelay 60 s); wait comfortably past it.
-        await assertCompletesWithin(20.0) {
+        await assertCompletesWithin(8.0) {
             await pipeline.complete()
         }
 
@@ -772,16 +776,16 @@ final class PipelineTimeoutTests: XCTestCase {
             batchProvider: dictation,
             streamingProvider: streaming,
             coordinator: coordinator,
-            pipelineDeadlineOverride: 5)
+            pipelineDeadlineOverride: 1)
         let completeWAV = audio.stubbedBuffer.data
 
         await pipeline.activate()
         try? await Task.sleep(nanoseconds: 100_000_000)
         let emitTask = emitChunksInBackground(audio)
 
-        // The injected 5 s deadline fires while finishStreaming is still
+        // The injected 1 s deadline fires while finishStreaming is still
         // hanging (watchdog 60 s), so the outer owner cancels finalization.
-        await assertCompletesWithin(20.0) {
+        await assertCompletesWithin(8.0) {
             await pipeline.complete()
         }
         emitTask.cancel()

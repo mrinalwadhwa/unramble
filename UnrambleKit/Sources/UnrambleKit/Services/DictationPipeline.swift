@@ -393,6 +393,12 @@ public actor DictationPipeline: PipelineProviding {
     /// Test seam: overrides the computed overall-pipeline deadline when set.
     /// `nil` in production, so the scaled `pipelineDeadline` budget is used.
     private let pipelineDeadlineOverride: TimeInterval?
+    /// Test seam: overrides the streaming-setup observation timeout when set.
+    /// `nil` in production, so the fixed 5 s setup budget is used.
+    private let streamingSetupTimeoutOverride: TimeInterval?
+    /// Test seam: overrides the audio-forwarding drain timeout when set.
+    /// `nil` in production, so the fixed 2 s forwarding budget is used.
+    private let forwardingTimeoutOverride: TimeInterval?
     private let audioSetupCompletionSleep: @Sendable (Duration) async -> Void
     private var cloudRecordingLimitID: UUID?
     private var cloudRecordingLimitClaimedID: UUID?
@@ -498,7 +504,9 @@ public actor DictationPipeline: PipelineProviding {
         audioSetupCompletionSleep: @escaping @Sendable (Duration) async -> Void = {
             try? await Task.sleep(for: $0)
         },
-        pipelineDeadlineOverride: TimeInterval? = nil
+        pipelineDeadlineOverride: TimeInterval? = nil,
+        streamingSetupTimeoutOverride: TimeInterval? = nil,
+        forwardingTimeoutOverride: TimeInterval? = nil
     ) {
         self.audioProvider = audioProvider
         self.contextProvider = contextProvider
@@ -531,6 +539,8 @@ public actor DictationPipeline: PipelineProviding {
         self.audioStartObservationTimeout = audioStartObservationTimeout
         self.audioSetupCompletionWatchdog = audioSetupCompletionWatchdog
         self.pipelineDeadlineOverride = pipelineDeadlineOverride
+        self.streamingSetupTimeoutOverride = streamingSetupTimeoutOverride
+        self.forwardingTimeoutOverride = forwardingTimeoutOverride
         self.audioSetupCompletionSleep = audioSetupCompletionSleep
     }
 
@@ -1401,12 +1411,15 @@ public actor DictationPipeline: PipelineProviding {
                 task: detachedSetup.task)
 
             let streamingStarted: Bool
+            let streamingSetupTimeout = streamingSetupTimeoutOverride ?? 5.0
             if backend.isLocal {
                 streamingStarted = await detachedSetup.task.value
-            } else if let result = await detachedSetup.value(timeout: 5.0) {
+            } else if let result = await detachedSetup.value(
+                timeout: streamingSetupTimeout) {
                 streamingStarted = result
             } else {
-                Log.debug("[Pipeline] Streaming setup timeout fired after 5s")
+                Log.debug(
+                    "[Pipeline] Streaming setup timeout fired after \(streamingSetupTimeout)s")
                 detachedSetup.task.cancel()
                 await streaming.cancelStreaming(sessionID: session.id)
                 _ = await detachedSetup.task.value
@@ -2005,7 +2018,7 @@ public actor DictationPipeline: PipelineProviding {
             if useStreaming {
                 if let forwardingOperation {
                     let forwardingOutcome = await forwardingOperation.drain(
-                        timeout: .seconds(2),
+                        timeout: forwardingTimeoutOverride.map { .seconds($0) } ?? .seconds(2),
                         cancelStreaming: {
                             await streamingProvider.cancelStreaming(sessionID: session.id)
                         })
