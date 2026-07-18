@@ -33,6 +33,9 @@ jobs:
       - name: Check the test runner
         run: make test-runner-tests
 
+      - name: Check the test suite inventory
+        run: make test-inventory
+
       - name: Run bounded clean package selection
         run: make test-ci
 

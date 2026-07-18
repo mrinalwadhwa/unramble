@@ -1,4 +1,4 @@
-.PHONY: build run test test-ci test-slow test-all test-runner-tests clean xcode generate models \
+.PHONY: build run test test-ci test-slow test-inventory test-all test-runner-tests clean xcode generate models \
 	verify-models verify-app-models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
@@ -78,6 +78,11 @@ test-ci:
 # Network-free and model-free, so it is a clean CI baseline gate.
 test-slow:
 	@"scripts/run-tests.sh" slow
+
+# Fail closed when the discovered test-suite set drifts from the committed
+# inventory, so a new suite must be assigned to a lane before it can land.
+test-inventory:
+	@"scripts/check-test-inventory.sh" check
 
 # Enable Keychain and slow timeout suites. Live, model, and evaluation gates are unchanged.
 test-all:

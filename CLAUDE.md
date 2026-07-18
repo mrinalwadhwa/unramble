@@ -26,7 +26,12 @@ make test-ci            # Bounded clean-CI selection; excludes host/live/model/c
 make test-slow          # Deterministic slow timeout/deadline suites under UNRAMBLE_TEST_SLOW.
 make test-all           # Default selection plus Keychain and slow timeout suites.
 make test-runner-tests  # Runner/parser fixture checks; does not build the Swift package.
+make test-inventory     # Fail closed if the discovered test-suite set drifts from the committed inventory.
 ```
+
+`make test-inventory` compares the suites SwiftPM discovers against
+`scripts/ci-test-suites.txt`. When you add or remove a test suite, assign it to
+a lane and refresh the inventory with `scripts/check-test-inventory.sh update`.
 
 `make test-all` is not a literal all-tests lane. It enables only `UNRAMBLE_TEST_KEYCHAIN=1` and `UNRAMBLE_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
 
