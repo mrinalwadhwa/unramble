@@ -36,6 +36,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
     private var decoder: MLModel?
     private var joint: MLModel?
     private var vocabulary: [String]?
+    private var biasModel: BiasModel?
 
     private let modelManager: LocalModelManager
     private let modelID: String
@@ -139,12 +140,14 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             }
         }
 
+        let bias = BiasModel.load(vocabulary: vocab)
         lock.withLock {
             preprocessor = prep
             encoder = enc
             decoder = dec
             joint = jnt
             vocabulary = vocab
+            biasModel = bias
         }
         Log.debug(
             "[NemotronEngine] All models loaded (\(vocab.count) tokens)")
@@ -207,6 +210,10 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
     ) throws -> [Int] {
         var tokens: [Int] = []
         var t = 0
+        // Contextual biasing state: resets per decode call. In the streaming
+        // path that is per-chunk, so a bias phrase must fall within one chunk
+        // (fine for utterance-initial names like a greeting).
+        var bias = biasModel.map { BiasState(model: $0) }
 
         while t < numFrames {
             let encStep = try extractEncoderFrame(encoded, at: t)
@@ -216,13 +223,15 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
                 let tokenID = try runJoint(
                     joint: joint,
                     encoderStep: encStep,
-                    decoderStep: decoderOut)
+                    decoderStep: decoderOut,
+                    boosts: bias?.boosts())
 
                 if tokenID == Self.blankID {
                     t += 1
                     break
                 } else {
                     tokens.append(tokenID)
+                    bias?.advance(tokenID)
                     lastToken = tokenID
                     symbolsThisStep += 1
 
@@ -282,7 +291,8 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
     private func runJoint(
         joint: MLModel,
         encoderStep: MLMultiArray,
-        decoderStep: MLMultiArray
+        decoderStep: MLMultiArray,
+        boosts: [Int: Float]? = nil
     ) throws -> Int {
         let normalizedDecoder = try normalizeToShape(
             decoderStep,
@@ -298,7 +308,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         let logits = output.featureValue(
             for: "logits")!.multiArrayValue!
 
-        return argmax(logits, count: Self.vocabSize + 1)
+        return argmax(logits, count: Self.vocabSize + 1, boosts: boosts)
     }
 
     // MARK: - Helpers
@@ -407,7 +417,9 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
         return result
     }
 
-    private func argmax(_ logits: MLMultiArray, count: Int) -> Int {
+    private func argmax(
+        _ logits: MLMultiArray, count: Int, boosts: [Int: Float]? = nil
+    ) -> Int {
         var bestIdx = 0
         var bestVal: Float = -.infinity
 
@@ -415,7 +427,7 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             let ptr = logits.dataPointer.assumingMemoryBound(
                 to: UInt16.self)
             for i in 0..<count {
-                let val = Self.float16ToFloat32(ptr[i])
+                let val = Self.float16ToFloat32(ptr[i]) + (boosts?[i] ?? 0)
                 if val > bestVal {
                     bestVal = val
                     bestIdx = i
@@ -425,8 +437,9 @@ public final class NemotronEngine: LocalSTTEngine, @unchecked Sendable {
             let ptr = logits.dataPointer.assumingMemoryBound(
                 to: Float.self)
             for i in 0..<count {
-                if ptr[i] > bestVal {
-                    bestVal = ptr[i]
+                let val = ptr[i] + (boosts?[i] ?? 0)
+                if val > bestVal {
+                    bestVal = val
                     bestIdx = i
                 }
             }
@@ -753,5 +766,143 @@ private final class NemotronRecognitionSession: LocalRecognitionSession {
 
     func finish() throws -> String {
         try engine.finishStreaming(state)
+    }
+}
+
+// MARK: - Contextual Biasing (shallow fusion)
+
+/// A trie over the subword-token sequences of a set of bias phrases (names,
+/// jargon). During decoding, any token that would extend an active partial
+/// match gets its logit boosted before argmax, so the recognizer prefers a
+/// known phrase at points the acoustic model is otherwise ambiguous.
+///
+/// Flag-gated and off by default: built only when `/tmp/unramble-stt-bias`
+/// exists (one bias phrase per line). Absent the flag, `biasModel` is nil and
+/// decoding is byte-for-byte unchanged.
+final class BiasModel {
+    final class Node {
+        var children: [Int: Node] = [:]
+    }
+
+    let root = Node()
+    let weight: Float
+
+    private init(weight: Float) {
+        self.weight = weight
+    }
+
+    static func load(vocabulary: [String]) -> BiasModel? {
+        let flagPath = "/tmp/unramble-stt-bias"
+        guard let raw = try? String(contentsOfFile: flagPath, encoding: .utf8)
+        else { return nil }
+        let phrases = raw.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !phrases.isEmpty else { return nil }
+
+        let weight = (try? String(
+            contentsOfFile: "/tmp/unramble-stt-bias-weight", encoding: .utf8))
+            .flatMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            ?? 8.0
+
+        guard let model = build(
+            phrases: phrases, vocabulary: vocabulary, weight: weight)
+        else { return nil }
+        Log.debug(
+            "[NemotronEngine] Bias on: \(phrases) weight=\(weight)")
+        return model
+    }
+
+    /// Build a trie from bias phrases and a vocabulary. Returns nil if none of
+    /// the phrases tokenize. Separated from `load` so it is testable without
+    /// the `/tmp` flag.
+    static func build(
+        phrases: [String], vocabulary: [String], weight: Float
+    ) -> BiasModel? {
+        let model = BiasModel(weight: weight)
+        var added = false
+        for phrase in phrases {
+            let ids = tokenize(phrase, vocabulary: vocabulary)
+            guard !ids.isEmpty else { continue }
+            added = true
+            var node = model.root
+            for id in ids {
+                if let next = node.children[id] {
+                    node = next
+                } else {
+                    let next = Node()
+                    node.children[id] = next
+                    node = next
+                }
+            }
+        }
+        return added ? model : nil
+    }
+
+    /// Greedy SentencePiece longest-match over the id→token vocabulary. No
+    /// merges file is available, so greedy longest-prefix is the standard
+    /// fallback; case is preserved (the vocab is mixed-case, e.g. "▁P").
+    static func tokenize(_ phrase: String, vocabulary: [String]) -> [Int] {
+        var remaining = Substring("\u{2581}" + phrase)
+        var ids: [Int] = []
+        while !remaining.isEmpty {
+            var bestLen = 0
+            var bestID = -1
+            for (id, token) in vocabulary.enumerated() where !token.isEmpty {
+                let len = token.count
+                if len > bestLen, remaining.hasPrefix(token) {
+                    bestLen = len
+                    bestID = id
+                }
+            }
+            guard bestID >= 0 else { return [] }
+            ids.append(bestID)
+            remaining = remaining.dropFirst(bestLen)
+        }
+        return ids
+    }
+}
+
+/// Per-utterance match state over a `BiasModel`. Tracks only *in-progress*
+/// partial matches — a phrase's first token is never boosted from root (that
+/// would force the phrase to start everywhere and run away). A match begins
+/// only once the recognizer *organically* emits a phrase-initial token; from
+/// there the continuation is boosted, which is where biasing helps: it
+/// disambiguates the tail ("Prio" → "Priya") without inventing the name.
+struct BiasState {
+    private let model: BiasModel
+    private var active: [BiasModel.Node]
+
+    init(model: BiasModel) {
+        self.model = model
+        self.active = []
+    }
+
+    /// Token → additive logit boost for the next emission (the expected next
+    /// tokens of every in-progress partial match).
+    func boosts() -> [Int: Float] {
+        var result: [Int: Float] = [:]
+        for node in active {
+            for id in node.children.keys {
+                result[id] = model.weight
+            }
+        }
+        return result
+    }
+
+    mutating func advance(_ token: Int) {
+        var next: [BiasModel.Node] = []
+        // Continue any in-progress match.
+        for node in active {
+            if let child = node.children[token] {
+                next.append(child)
+            }
+        }
+        // Start a new match only when the recognizer itself emits a
+        // phrase-initial token — never boosted into existence.
+        if let child = model.root.children[token] {
+            next.append(child)
+        }
+        active = next
     }
 }

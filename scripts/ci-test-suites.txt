@@ -24,6 +24,7 @@ ci CloudDictationLiveHarnessTests
 ci ConcurrentCancelSafetyTests
 ci ContextAssemblyTests
 ci ContextSanitizationTests
+ci ConvertDecimalScaleBareTests
 ci ConvertNumberWordsTests
 ci ConvertSpokenTimeTests
 ci DiagnosticsPrivacyTests
@@ -59,6 +60,7 @@ ci MockBatchProviderTests
 ci MockStreamingProviderContractTests
 ci MockTests
 ci ModeShortcutPolicyTests
+ci NemotronBiasTests
 ci NemotronFloat16Tests
 ci NetworkGuardTests
 ci NoiseSoundsStillStrippedTests
