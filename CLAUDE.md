@@ -23,9 +23,8 @@ The package contains XCTest and Swift Testing tests. Their native terminal summa
 ```bash
 make test               # Default package selection; inherits explicit test gates.
 make test-ci            # Bounded clean-CI selection; excludes host/live/model/corpus suites.
-make test-slow          # Deterministic slow timeout/deadline suites under UNRAMBLE_TEST_SLOW.
 make test-os            # Host and OS-adapter suites (the UnrambleKitOSTests target).
-make test-all           # Default selection plus Keychain and slow timeout suites.
+make test-all           # Default selection plus Keychain suites.
 make test-runner-tests  # Runner/parser fixture checks; does not build the Swift package.
 make test-inventory     # Fail closed if the discovered test-suite set drifts from the committed inventory.
 ```
@@ -38,11 +37,11 @@ runner's own denylist, so the check also fails when a suite changes lane. When
 you add, remove, or re-lane a suite, refresh the inventory with
 `scripts/check-test-inventory.sh update`.
 
-`make test-all` is not a literal all-tests lane. It enables only `UNRAMBLE_TEST_KEYCHAIN=1` and `UNRAMBLE_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
+`make test-all` is not a literal all-tests lane. It enables only `UNRAMBLE_TEST_KEYCHAIN=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
 
 `make test-os` runs the `UnrambleKitOSTests` target, which holds the suites that touch real host resources — CoreAudio devices, CGEvent taps, the main run loop, and system sound files. They degrade gracefully when a resource is absent, so the lane is safe on a headless runner. Keeping them in a separate target leaves the default `UnrambleKitTests` target deterministic by construction.
 
-The default selection includes corpus-backed polish scenario tests and expects the ignored `training/polish-tests.json` file. Generate it from the committed YAML before the default or Keychain/slow lane when starting from a clean checkout. The isolated environment below installs only the generator's PyYAML dependency, not the MLX training stack:
+The default selection includes corpus-backed polish scenario tests and expects the ignored `training/polish-tests.json` file. Generate it from the committed YAML before the default or Keychain lane when starting from a clean checkout. The isolated environment below installs only the generator's PyYAML dependency, not the MLX training stack:
 
 ```bash
 cd training
@@ -54,14 +53,12 @@ python3 -m venv ../.scratch/polish-data-venv
 **Environment variable gates:**
 - `UNRAMBLE_TEST_KEYCHAIN=1` — enables Keychain tests (KeychainServiceTests and
   ServiceConfigTests). These trigger macOS login Keychain password prompts.
-- `UNRAMBLE_TEST_SLOW=1` — set by `make test-slow` for the deterministic
-  timeout/deadline baseline lane (TimeoutOwnership and pipelineDeadline suites).
 - `UNRAMBLE_TEST_OPENAI=1` — enables live tests that hit the real OpenAI API.
   Requires `OPENAI_API_KEY` to be set in the environment.
 - `UNRAMBLE_TEST_OPENAI_BENCH=1` — enables the OpenAI Realtime latency benchmark
   suite (hits the real API, takes several seconds per run).
 
-The first two are set automatically by `make test-all`.
+The first is set automatically by `make test-all`.
 
 The test bundle blocks live network access by default. Any code path that builds a real OpenAI HTTP or WebSocket connection fails fast with a `NetworkGuard` error instead of hanging on a request or silently reaching the network, so a deterministic suite that forgets to inject a stub fails loudly. Set `UNRAMBLE_TEST_OPENAI=1` to opt a whole run into live traffic.
 

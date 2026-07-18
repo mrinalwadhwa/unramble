@@ -32,7 +32,7 @@ read_ci_skip_regex() {
 }
 
 # Assign a lane to one suite. The OS target owns the host lane; the runner's
-# denylist owns the gated lanes (live, model, keychain, corpus, slow timeout);
+# denylist owns the gated lanes (live, model, keychain, corpus);
 # everything else is the deterministic CI core. The denylist match uses the same
 # regex `make test-ci` applies, so a suite is labelled `gated` exactly when the
 # clean CI selection skips it.

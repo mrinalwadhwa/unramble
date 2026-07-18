@@ -325,7 +325,7 @@ test_ci_clears_environment() {
             fail "CI runner should clear test gates"
         }
 
-    assert_contains "$ci_log.summary.txt" "Selection: bounded clean CI selection; host, live, model, corpus, and slow suites excluded."
+    assert_contains "$ci_log.summary.txt" "Selection: bounded clean CI selection; host, live, model, and corpus suites excluded."
     pass "clears test gates and locks dependencies in the clean CI selection"
 }
 

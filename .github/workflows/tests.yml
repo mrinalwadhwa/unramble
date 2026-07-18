@@ -39,9 +39,6 @@ jobs:
       - name: Run bounded clean package selection
         run: make test-ci
 
-      - name: Run slow timeout baseline
-        run: make test-slow
-
       - name: Run host and OS adapter suites
         run: make test-os
 

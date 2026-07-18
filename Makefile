@@ -1,4 +1,4 @@
-.PHONY: build run test test-ci test-slow test-os test-inventory test-all test-runner-tests clean xcode generate models \
+.PHONY: build run test test-ci test-os test-inventory test-all test-runner-tests clean xcode generate models \
 	verify-models verify-app-models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
@@ -74,11 +74,6 @@ test:
 test-ci:
 	@"scripts/run-tests.sh" ci
 
-# Run the deterministic slow timeout and deadline suites under UNRAMBLE_TEST_SLOW.
-# Network-free and model-free, so it is a clean CI baseline gate.
-test-slow:
-	@"scripts/run-tests.sh" slow
-
 # Run the host and OS-adapter suites (CoreAudio devices, CGEvent taps, the main
 # run loop, system sounds) in their own target. They degrade gracefully when a
 # resource is absent, so this lane is safe on a headless runner.
@@ -90,9 +85,9 @@ test-os:
 test-inventory:
 	@"scripts/check-test-inventory.sh" check
 
-# Enable Keychain and slow timeout suites. Live, model, and evaluation gates are unchanged.
+# Enable Keychain suites. Live, model, and evaluation gates are unchanged.
 test-all:
-	@"scripts/run-tests.sh" keychain-slow
+	@"scripts/run-tests.sh" keychain
 
 # Exercise the result parser and runner without building the Swift package.
 test-runner-tests:
