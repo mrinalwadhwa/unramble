@@ -135,6 +135,24 @@ struct PipelineSessionLifecycleTests {
         #expect(harness.injector.injectionCount == 1)
         #expect(harness.injector.lastInjectedText == "after cancel")
     }
+
+    // MARK: - Multiple cycles
+
+    @Test("consecutive cycles each complete and inject", arguments: LifecycleMode.allCases)
+    func consecutiveCyclesEachComplete(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "cycle 1", buffer: nil)
+        let texts = ["cycle 1", "cycle 2", "cycle 3"]
+        for (index, text) in texts.enumerated() {
+            harness.resolve(to: text)
+            await harness.runCycle()
+            #expect(await harness.coordinator.state == .idle)
+            #expect(harness.injector.injectionCount == index + 1)
+            #expect(harness.injector.lastInjectedText == text)
+        }
+        #expect(harness.audio.startCallCount == texts.count)
+        #expect(harness.audio.stopCallCount == texts.count)
+        #expect(harness.contextProvider.readContextCallCount == texts.count)
+    }
 }
 
 /// The backend configuration a lifecycle behavior runs against.

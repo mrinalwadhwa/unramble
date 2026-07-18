@@ -1075,27 +1075,6 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertEqual(dictation.lastReceivedContext, stubbedContext)
     }
 
-    // MARK: - Multiple cycles
-
-    func testMultipleConsecutiveCycles() async {
-        let (pipeline, audio, context, _, injector, coordinator) = makePipeline()
-
-        for cycle in 1...3 {
-            await activateAndWaitForCapture(pipeline, audioProvider: audio)
-            var currentState = await coordinator.state
-            XCTAssertEqual(currentState, .recording, "Cycle \(cycle) should be recording")
-
-            await pipeline.complete()
-            currentState = await coordinator.state
-            XCTAssertEqual(currentState, .idle, "Cycle \(cycle) should return to idle")
-        }
-
-        XCTAssertEqual(audio.startCallCount, 3)
-        XCTAssertEqual(audio.stopCallCount, 3)
-        XCTAssertEqual(context.readContextCallCount, 3)
-        XCTAssertEqual(injector.injectionCount, 3)
-    }
-
     // MARK: - Edge cases: activate/complete out of order
 
     func testActivateWhileRecordingIsIgnored() async {
