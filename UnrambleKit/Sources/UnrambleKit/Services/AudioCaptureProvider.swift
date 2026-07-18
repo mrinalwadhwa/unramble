@@ -1505,11 +1505,6 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
             switch promotion {
             case .dictationAlreadyActive:
                 return .alreadyRecording
-            case .preRollCoverageLost:
-                return .captureIntegrity(
-                    AudioCaptureIntegrityFailure(
-                        stage: .timestampCoverage,
-                        affectedFrameCount: nil))
             case .preRollCoverageUnavailable:
                 return .captureIntegrity(
                     AudioCaptureIntegrityFailure(

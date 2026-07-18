@@ -46,11 +46,9 @@ import Foundation
         public enum PromotionError: Error, Sendable, Equatable {
             case dictationAlreadyActive
 
-            /// At least one frame in `[pressHostTime, evictedThroughHostTime)`
-            /// was discarded before promotion could claim it.
-            case preRollCoverageLost(
-                pressHostTime: UInt64,
-                evictedThroughHostTime: UInt64)
+            /// No capture has started, so there is nothing to route. Capture
+            /// that opens on the key-press marks its tap start before it
+            /// promotes; a promotion with no capture at all cannot proceed.
             case preRollCoverageUnavailable(pressHostTime: UInt64)
             case sinkCreationFailed
         }
@@ -65,6 +63,14 @@ import Foundation
         public struct Route: @unchecked Sendable, Hashable {
             fileprivate let id: UUID
             public let pressHostTime: UInt64
+
+            /// The earliest host time whose audio belongs to this route. When
+            /// capture begins on the key-press, the tap starts a few
+            /// milliseconds after key-down, so the route can never carry audio
+            /// from before the tap. This clamps the lower boundary up to the
+            /// capture start (never below `pressHostTime`) so the unavoidable
+            /// press-to-tap gap is not mistaken for lost coverage.
+            public let lowerBoundHostTime: UInt64
             public let releaseBoundary: AudioCaptureReleaseBoundary
 
             public static func == (lhs: Route, rhs: Route) -> Bool {
@@ -418,20 +424,25 @@ import Foundation
                 guard activeRoute == nil, !isPromoting else {
                     throw PromotionError.dictationAlreadyActive
                 }
-                guard continuousCaptureStartedAtHostTime.map({
-                    $0 <= releaseBoundary.pressHostTime
-                }) == true
+                // Capture that opens on the key-press begins after key-down,
+                // so the route records from wherever the tap actually started
+                // rather than proving it predates the press. A route still
+                // requires a capture to feed it, but not one that covers the
+                // press. Clamp the lower boundary up to the capture start and
+                // past any evicted history; the release boundary still seals
+                // the upper end.
+                guard let captureStart = continuousCaptureStartedAtHostTime
                 else {
                     throw PromotionError.preRollCoverageUnavailable(
                         pressHostTime: releaseBoundary.pressHostTime)
                 }
+                var lowerBoundHostTime = max(
+                    releaseBoundary.pressHostTime, captureStart)
                 if let evictedThroughHostTime =
-                    preRollEvictedThroughHostTime,
-                    releaseBoundary.pressHostTime < evictedThroughHostTime
+                    preRollEvictedThroughHostTime
                 {
-                    throw PromotionError.preRollCoverageLost(
-                        pressHostTime: releaseBoundary.pressHostTime,
-                        evictedThroughHostTime: evictedThroughHostTime)
+                    lowerBoundHostTime = max(
+                        lowerBoundHostTime, evictedThroughHostTime)
                 }
                 isPromoting = true
                 defer { isPromoting = false }
@@ -446,6 +457,7 @@ import Foundation
                 let route = Route(
                     id: UUID(),
                     pressHostTime: releaseBoundary.pressHostTime,
+                    lowerBoundHostTime: lowerBoundHostTime,
                     releaseBoundary: releaseBoundary)
                 let active = ActiveRoute(route: route, sink: sink)
                 active.pendingFrames = preRoll
@@ -955,9 +967,9 @@ import Foundation
         ) -> RoutedFramePreparation {
             if frame.timestampOrigin == .estimatedFromObservation {
                 // Observation time is not a sample boundary. Retain the whole
-                // uncertain callback once it can contain post-press audio;
+                // uncertain callback once it can contain in-route audio;
                 // trimming it against an estimated release can lose speech.
-                guard frame.endHostTime > route.pressHostTime else {
+                guard frame.endHostTime > route.lowerBoundHostTime else {
                     return .outsideRoute
                 }
                 guard
@@ -979,7 +991,7 @@ import Foundation
 
             let lowerFrame = AudioCaptureReleaseFence.preReleaseFrameCount(
                 bufferStartHostTime: frame.startHostTime,
-                releaseHostTime: route.pressHostTime,
+                releaseHostTime: route.lowerBoundHostTime,
                 sampleRate: frame.buffer.format.sampleRate,
                 frameLength: frame.frameCount)
             let upperFrame: Int
@@ -1046,7 +1058,7 @@ import Foundation
             to route: Route
         ) -> Bool {
             guard let startHostTime, let endHostTime else { return true }
-            guard endHostTime > route.pressHostTime else { return false }
+            guard endHostTime > route.lowerBoundHostTime else { return false }
             guard let releaseHostTime = route.releaseBoundary.releaseHostTime else {
                 return true
             }

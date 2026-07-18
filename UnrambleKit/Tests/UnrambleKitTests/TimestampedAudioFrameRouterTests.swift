@@ -122,26 +122,17 @@ struct TimestampedAudioFrameRouterTests {
         #expect(snapshot.bufferedByteCount == 16)
         #expect(snapshot.retainedDuration <= 0.004_001)
 
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: addingFrames(3, to: start),
-                    evictedThroughHostTime: addingFrames(6, to: start))
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: addingFrames(3, to: start)))
-        }
-        #expect(probe.factoryInvocationCount == 0)
-
-        _ = try router.promote(
+        // A press whose leading audio was trimmed clamps up to the retained
+        // frontier rather than failing; the route replays what survives.
+        let route = try router.promote(
             releaseBoundary: AudioCaptureReleaseBoundary(
-                pressHostTime: addingFrames(6, to: start)))
+                pressHostTime: addingFrames(3, to: start)))
+        #expect(route.lowerBoundHostTime == addingFrames(6, to: start))
         #expect(probe.sampleGroups == [retention.expectedValues])
     }
 
-    @Test("Promotion rejects a press whose audio was evicted from pre-roll")
-    func promotionRejectsEvictedPostPressAudio() throws {
+    @Test("Promotion clamps a press whose audio was evicted to the retained frontier")
+    func promotionClampsEvictedPostPressAudio() throws {
         let probe = SinkProbe()
         let router = makeRouter(
             probe: probe,
@@ -157,18 +148,12 @@ struct TimestampedAudioFrameRouterTests {
             observedHostTime: addingFrames(10, to: start))
         let pressHostTime = addingFrames(3, to: start)
 
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: pressHostTime,
-                    evictedThroughHostTime: addingFrames(6, to: start))
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: pressHostTime))
-        }
-        #expect(probe.factoryInvocationCount == 0)
-        #expect(!router.snapshot.hasActiveDictation)
+        let route = try router.promote(
+            releaseBoundary: AudioCaptureReleaseBoundary(
+                pressHostTime: pressHostTime))
+        #expect(route.lowerBoundHostTime == addingFrames(6, to: start))
+        #expect(probe.sampleGroups == [[6, 7, 8, 9]])
+        #expect(router.snapshot.hasActiveDictation)
     }
 
     @Test("A cold router cannot claim a key-down boundary")
@@ -239,28 +224,23 @@ struct TimestampedAudioFrameRouterTests {
         #expect(probe.sampleGroups == [[0, 1, 2, 3]])
     }
 
-    @Test("A recovery tap started after key-down cannot claim the prefix")
-    func lateRecoveryTapCannotPromote() throws {
+    @Test("A tap started after key-down records only from the tap start")
+    func lateTapRecordsFromTapStart() throws {
         let probe = SinkProbe()
         let pressHostTime = hostTime(seconds: 100)
         let router = makeRouter(
             probe: probe,
             continuousCaptureStartedAt: hostTime(seconds: 100.001))
 
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageUnavailable(
-                    pressHostTime: pressHostTime)
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: pressHostTime))
-        }
-        #expect(probe.factoryInvocationCount == 0)
+        let route = try router.promote(
+            releaseBoundary: AudioCaptureReleaseBoundary(
+                pressHostTime: pressHostTime))
+        #expect(route.lowerBoundHostTime == hostTime(seconds: 100.001))
+        #expect(probe.factoryInvocationCount == 1)
     }
 
-    @Test("Clearing pre-roll records the discarded coverage frontier")
-    func clearPreRollRecordsCoverageLoss() throws {
+    @Test("Clearing pre-roll clamps a later press past the discarded frontier")
+    func clearPreRollClampsCoverage() throws {
         let probe = SinkProbe()
         let router = makeRouter(probe: probe)
         let start = hostTime(seconds: 100)
@@ -271,17 +251,11 @@ struct TimestampedAudioFrameRouterTests {
             observedHostTime: addingFrames(4, to: start))
         router.clearPreRoll()
 
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: addingFrames(2, to: start),
-                    evictedThroughHostTime: addingFrames(4, to: start))
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: addingFrames(2, to: start)))
-        }
-        #expect(probe.factoryInvocationCount == 0)
+        let route = try router.promote(
+            releaseBoundary: AudioCaptureReleaseBoundary(
+                pressHostTime: addingFrames(2, to: start)))
+        #expect(route.lowerBoundHostTime == addingFrames(4, to: start))
+        #expect(probe.sampleGroups.isEmpty)
     }
 
     @Test("A press at the eviction frontier retains complete post-press audio")
@@ -307,8 +281,8 @@ struct TimestampedAudioFrameRouterTests {
         #expect(probe.sampleGroups == [[6, 7, 8, 9]])
     }
 
-    @Test("Promotion rejects a press whose preview coverage contains a timestamp gap")
-    func promotionRejectsTimestampGap() throws {
+    @Test("Promotion clamps a press inside a preview timestamp gap")
+    func promotionClampsTimestampGap() throws {
         let probe = SinkProbe()
         let router = makeRouter(
             probe: probe,
@@ -328,17 +302,11 @@ struct TimestampedAudioFrameRouterTests {
             observedHostTime: addingFrames(14, to: start))
 
         let pressHostTime = addingFrames(6, to: start)
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: pressHostTime,
-                    evictedThroughHostTime: addingFrames(10, to: start))
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: pressHostTime))
-        }
-        #expect(probe.sampleGroups.isEmpty)
+        let route = try router.promote(
+            releaseBoundary: AudioCaptureReleaseBoundary(
+                pressHostTime: pressHostTime))
+        #expect(route.lowerBoundHostTime == addingFrames(10, to: start))
+        #expect(probe.sampleGroups == [[10, 11, 12, 13]])
     }
 
     @Test("Preview recovery requires retained audio to reach the exact press")
@@ -411,7 +379,7 @@ struct TimestampedAudioFrameRouterTests {
         #expect(router.snapshot.invalidTimestampDroppedFrameCount == 6)
     }
 
-    @Test("Discarded invalid timestamps poison overlapping promotion coverage")
+    @Test("Discarded invalid timestamps clamp overlapping promotion coverage")
     func invalidTimestampDiscardPolicy() throws {
         let probe = SinkProbe()
         let router = makeRouter(
@@ -425,22 +393,16 @@ struct TimestampedAudioFrameRouterTests {
             timestamp: AVAudioTime(),
             observedHostTime: observedHostTime)
 
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: pressHostTime,
-                    evictedThroughHostTime: observedHostTime)
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: pressHostTime))
-        }
+        let route = try router.promote(
+            releaseBoundary: AudioCaptureReleaseBoundary(
+                pressHostTime: pressHostTime))
+        #expect(route.lowerBoundHostTime == observedHostTime)
         #expect(probe.sampleGroups.isEmpty)
         #expect(router.snapshot.invalidTimestampDroppedFrameCount == 10)
     }
 
-    @Test("A failed callback keeps continuity unproved until the next device frame")
-    func failedCallbackPoisonsFollowingUnknownGap() throws {
+    @Test("A failed callback clamps coverage to the next device frame")
+    func failedCallbackClampsToNextDeviceFrame() throws {
         let probe = SinkProbe()
         let router = makeRouter(
             probe: probe,
@@ -461,17 +423,11 @@ struct TimestampedAudioFrameRouterTests {
             observedHostTime: addingFrames(40, to: start))
 
         let pressHostTime = addingFrames(25, to: start)
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: pressHostTime,
-                    evictedThroughHostTime: addingFrames(30, to: start))
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: pressHostTime))
-        }
-        #expect(probe.factoryInvocationCount == 0)
+        let route = try router.promote(
+            releaseBoundary: AudioCaptureReleaseBoundary(
+                pressHostTime: pressHostTime))
+        #expect(route.lowerBoundHostTime == addingFrames(30, to: start))
+        #expect(probe.sampleGroups == [Array(30..<40)])
     }
 
     @Test("An active route owns an immutable press until it is finished")
@@ -782,8 +738,8 @@ struct TimestampedAudioFrameRouterTests {
                     affectedFrameCount: 5))
     }
 
-    @Test("A pre-promotion copy failure poisons only overlapping presses")
-    func prePromotionCopyFailurePoisonsCoverage() throws {
+    @Test("A pre-promotion copy failure clamps an overlapping press")
+    func prePromotionCopyFailureClampsCoverage() throws {
         let probe = SinkProbe()
         let router = makeRouter(
             probe: probe,
@@ -800,21 +756,11 @@ struct TimestampedAudioFrameRouterTests {
                 observedHostTime: failedEnd) == .copyFailed)
 
         let overlappingPress = addingFrames(2, to: start)
-        #expect(
-            throws: TimestampedAudioFrameRouter.PromotionError
-                .preRollCoverageLost(
-                    pressHostTime: overlappingPress,
-                    evictedThroughHostTime: failedEnd)
-        ) {
-            try router.promote(
-                releaseBoundary: AudioCaptureReleaseBoundary(
-                    pressHostTime: overlappingPress))
-        }
-
-        let later = try router.promote(
+        let route = try router.promote(
             releaseBoundary: AudioCaptureReleaseBoundary(
-                pressHostTime: failedEnd))
-        #expect(later.pressHostTime == failedEnd)
+                pressHostTime: overlappingPress))
+        #expect(route.lowerBoundHostTime == failedEnd)
+        #expect(probe.sampleGroups.isEmpty)
     }
 
     @Test("A failed route slice cannot report a successful release crossing")

@@ -32,9 +32,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         effectiveMode: Settings.shared.dictationMode)
     private var modeSwitchTask: Task<Void, Never>?
     private var modeSwitchRequest: DictationModeTransition.Request?
-    private var alwaysReadyPreviewLease: MicrophoneCaptureLease?
-    private var alwaysReadyPreviewTask: Task<Void, Never>?
-    private var isAlwaysReadyPreviewAvailable = false
     private var dictationHotkeyMaintenanceIDs: Set<UUID> = []
     private var terminationCaptureDrainTask: Task<Void, Never>?
     private var didFenceApplicationTermination = false
@@ -139,7 +136,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modeSwitchTask?.cancel()
         hotkeyReRegistrationGeneration &+= 1
         hotkeyReRegistrationTask?.cancel()
-        alwaysReadyPreviewTask?.cancel()
         localModelPreloadTask?.cancel()
         unregisterHotkey()
         unregisterModeHotkey()
@@ -1040,7 +1036,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !didFenceApplicationTermination else { return }
         dictationHotkeyPublicationRequested = true
         registerModeHotkey()
-        ensureAlwaysReadyMicrophoneCapture()
         publishDictationHotkeyIfReady()
     }
 
@@ -1051,12 +1046,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             suspendDictationHotkeyAdmission()
             Log.debug(
                 "[AppDelegate] Dictation hotkey waiting for microphone maintenance")
-            return
-        }
-        guard isAlwaysReadyPreviewAvailable else {
-            suspendDictationHotkeyAdmission()
-            Log.debug(
-                "[AppDelegate] Dictation hotkey waiting for continuous microphone capture")
             return
         }
         guard let pipeline else {
@@ -1086,9 +1075,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menuRef = menuBarController
         let driver = HotkeyPipelineDriver(
             pipeline: pipelineRef,
-            canAdmitPress: { [audioProvider] pressHostTime in
-                audioProvider.canAdmitDictationPress(at: pressHostTime)
-            },
             heldSessionAccepted: { [weak hudRef] heldSession in
                 await MainActor.run {
                     hudRef?.hotkeySessionAccepted(heldSession)
@@ -1118,76 +1104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 self.showHotkeyRegistrationFailedAlert(error: error)
             }
-        }
-    }
-
-    /// Keep one quiet preview demand alive after microphone authorization. Its
-    /// availability stream withdraws the dictation hotkey while the exact tap
-    /// is rotating, then republishes it only after replacement capture exists.
-    private func ensureAlwaysReadyMicrophoneCapture() {
-        guard permissionProvider.checkMicrophone() == .granted else {
-            Log.debug(
-                "[AppDelegate] Continuous microphone capture awaits permission")
-            return
-        }
-        guard alwaysReadyPreviewLease == nil,
-            alwaysReadyPreviewTask == nil
-        else { return }
-
-        let captureCoordinator = microphoneCaptureCoordinator
-        alwaysReadyPreviewTask = Task { @MainActor [weak self] in
-            var retryDelayNanoseconds: UInt64 = 100_000_000
-
-            while !Task.isCancelled {
-                do {
-                    let lease = try await captureCoordinator.acquirePreview()
-                    try Task.checkCancellation()
-                    guard let self else {
-                        _ = try? await lease.release()
-                        return
-                    }
-
-                    self.alwaysReadyPreviewLease = lease
-                    retryDelayNanoseconds = 100_000_000
-                    for await isAvailable in lease.captureAvailability {
-                        guard !Task.isCancelled else { break }
-                        self.isAlwaysReadyPreviewAvailable = isAvailable
-                        if isAvailable {
-                            self.publishDictationHotkeyIfReady()
-                        } else {
-                            self.suspendDictationHotkeyAdmission()
-                        }
-                    }
-
-                    self.isAlwaysReadyPreviewAvailable = false
-                    self.suspendDictationHotkeyAdmission()
-                    self.alwaysReadyPreviewLease = nil
-                    _ = try? await lease.release()
-                } catch is CancellationError {
-                    break
-                } catch {
-                    Log.debug(
-                        "[AppDelegate] Continuous microphone capture failed: \(error)")
-                }
-
-                guard !Task.isCancelled else { break }
-                do {
-                    try await Task.sleep(nanoseconds: retryDelayNanoseconds)
-                } catch {
-                    break
-                }
-                retryDelayNanoseconds = min(
-                    retryDelayNanoseconds * 2,
-                    5_000_000_000)
-            }
-
-            if let self, let lease = self.alwaysReadyPreviewLease {
-                self.alwaysReadyPreviewLease = nil
-                self.isAlwaysReadyPreviewAvailable = false
-                _ = try? await lease.release()
-                self.suspendDictationHotkeyAdmission()
-            }
-            self?.alwaysReadyPreviewTask = nil
         }
     }
 
