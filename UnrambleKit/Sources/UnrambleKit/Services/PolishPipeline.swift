@@ -538,7 +538,7 @@ public enum PolishPipeline {
     /// ("at three thirty"), and the minute grammar excludes scale words, so
     /// "around twelve thousand" and "about nine hundred" are left untouched.
     static func convertSpokenTime(_ text: String) -> String {
-        let prep = "at|around|by|before|after|until|from"
+        let prep = "at|around|by|before|after|until|from|to|for"
         let hour = "one|two|three|four|five|six|seven|eight|nine|ten|eleven"
             + "|twelve|\\d{1,2}"
         let minute = "o'?clock|oh\\s+(?:one|two|three|four|five|six|seven|eight"

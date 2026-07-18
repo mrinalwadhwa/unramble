@@ -1291,6 +1291,10 @@ struct ConvertSpokenTimeTests {
             == "at 9:05")
         #expect(PolishPipeline.convertSpokenTime("starts at three o'clock")
             == "starts at 3:00")
+        #expect(PolishPipeline.convertSpokenTime("push the standup to nine forty five")
+            == "push the standup to 9:45")
+        #expect(PolishPipeline.convertSpokenTime("scheduled for three thirty")
+            == "scheduled for 3:30")
     }
 
     @Test("Scale words and non-times are left untouched")
@@ -1310,6 +1314,11 @@ struct ConvertSpokenTimeTests {
             == "one area at a time")
         #expect(PolishPipeline.convertSpokenTime("let's talk at three")
             == "let's talk at three")
+        // "to"/"for" before an hour with no minute is not a time.
+        #expect(PolishPipeline.convertSpokenTime("listen to nine songs")
+            == "listen to nine songs")
+        #expect(PolishPipeline.convertSpokenTime("give it to five people")
+            == "give it to five people")
     }
 }
 
