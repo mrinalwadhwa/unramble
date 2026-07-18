@@ -2,6 +2,7 @@ import CryptoKit
 import XCTest
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 /// End-to-end pipeline tests using pre-generated TTS audio.
 ///

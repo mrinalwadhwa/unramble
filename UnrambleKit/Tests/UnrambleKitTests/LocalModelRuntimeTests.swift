@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 @Suite("Local model runtime")
 struct LocalModelRuntimeTests {

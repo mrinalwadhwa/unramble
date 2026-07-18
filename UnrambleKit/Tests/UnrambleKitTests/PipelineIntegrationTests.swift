@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 @Suite("Pipeline integration with mocks")
 struct PipelineIntegrationTests {

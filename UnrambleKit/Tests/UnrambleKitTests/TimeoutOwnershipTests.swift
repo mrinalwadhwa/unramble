@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 private actor CancellationInsensitiveGate {
     private var entered = false

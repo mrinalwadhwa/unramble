@@ -37,9 +37,14 @@ let package = Package(
             ],
             path: "Sources/UnrambleKit"
         ),
+        .target(
+            name: "UnrambleKitTestSupport",
+            dependencies: ["UnrambleKit"],
+            path: "Tests/UnrambleKitTestSupport"
+        ),
         .testTarget(
             name: "UnrambleKitTests",
-            dependencies: ["UnrambleKit"],
+            dependencies: ["UnrambleKit", "UnrambleKitTestSupport"],
             path: "Tests/UnrambleKitTests"
         ),
     ]

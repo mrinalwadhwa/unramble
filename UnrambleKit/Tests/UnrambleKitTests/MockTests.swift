@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 @Suite("Mock implementations")
 struct MockTests {

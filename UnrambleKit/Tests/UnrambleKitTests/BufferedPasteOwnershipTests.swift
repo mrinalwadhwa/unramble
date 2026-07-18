@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 final class BufferedPasteOwnershipTests: XCTestCase {
 

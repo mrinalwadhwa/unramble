@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 // MARK: - Hanging Mock
 

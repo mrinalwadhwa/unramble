@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 private final class RecordingLimitSleepGate: @unchecked Sendable {
     private let lock = NSLock()

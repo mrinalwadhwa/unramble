@@ -1,6 +1,7 @@
 import XCTest
 
 @testable import UnrambleKit
+import UnrambleKitTestSupport
 
 private actor DictationPipelineSuspensionGate {
     private var entered = false
