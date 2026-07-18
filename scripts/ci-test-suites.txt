@@ -122,5 +122,6 @@ TimeoutHelperTests
 TimeoutOwnershipTests
 TimestampedAudioFrameRouterTests
 TranscriptBufferTests
+VerbPrepRejoinTests
 WAVEncoderTests
 WAVFixtureTests
