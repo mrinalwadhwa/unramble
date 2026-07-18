@@ -497,7 +497,42 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
 
         Log.debug("[LocalStreaming] Finish (stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
 
-        return full
+        return await Self.repairFaithfulness(transcript: trimmed, output: full)
+    }
+
+    /// Detect faithfulness breaks the deterministic guards miss, adjudicate the
+    /// candidates on-device, and restore each flagged span to what was spoken —
+    /// keeping the rest of the polish. Gated on a dev flag so it is inert in
+    /// normal use; when Apple Intelligence is unavailable it returns the polish
+    /// unchanged (no regression). Most finalizes produce no candidates and skip
+    /// the model entirely.
+    private static func repairFaithfulness(transcript: String, output: String) async -> String {
+        guard FileManager.default.fileExists(atPath: "/tmp/unramble-verify-faithfulness")
+        else { return output }
+        let candidates = FaithfulnessVerifier.candidates(
+            transcript: transcript, output: output)
+        guard !candidates.isEmpty else {
+            Log.debug("[Faithfulness] 0 candidates")
+            return output
+        }
+        guard #available(macOS 26.0, *) else {
+            Log.debug("[Faithfulness] \(candidates.count) candidate(s), model unavailable")
+            return output
+        }
+        let start = CFAbsoluteTimeGetCurrent()
+        let flagged = await FaithfulnessAdjudicator.flagged(candidates)
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        guard !flagged.isEmpty else {
+            Log.debug("[Faithfulness] \(candidates.count) candidate(s), 0 flagged in \(String(format: "%.2f", elapsed))s")
+            return output
+        }
+        let repaired = FaithfulnessVerifier.repair(output: output, flagged: flagged)
+        Log.debug("[Faithfulness] \(candidates.count) candidate(s), \(flagged.count) restored in \(String(format: "%.2f", elapsed))s")
+        for candidate in flagged {
+            let from = candidate.replacement.isEmpty ? candidate.span : candidate.replacement
+            Log.debug("[Faithfulness] RESTORE \(candidate.kind.rawValue): \"\(from)\" -> \"\(candidate.restoration)\"")
+        }
+        return repaired
     }
 
     private func requireCurrentSession(_ generation: UInt64) throws {
