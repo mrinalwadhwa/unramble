@@ -31,8 +31,12 @@ make test-inventory     # Fail closed if the discovered test-suite set drifts fr
 ```
 
 `make test-inventory` compares the suites SwiftPM discovers against
-`scripts/ci-test-suites.txt`. When you add or remove a test suite, assign it to
-a lane and refresh the inventory with `scripts/check-test-inventory.sh update`.
+`scripts/ci-test-suites.txt`. Each line records a suite and its lane — `os` for
+the `UnrambleKitOSTests` target, `gated` for a suite the bounded CI selection
+skips, or `ci` for the deterministic core — derived from the target and the
+runner's own denylist, so the check also fails when a suite changes lane. When
+you add, remove, or re-lane a suite, refresh the inventory with
+`scripts/check-test-inventory.sh update`.
 
 `make test-all` is not a literal all-tests lane. It enables only `UNRAMBLE_TEST_KEYCHAIN=1` and `UNRAMBLE_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
 
