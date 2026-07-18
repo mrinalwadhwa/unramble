@@ -153,6 +153,59 @@ struct PipelineSessionLifecycleTests {
         #expect(harness.audio.stopCallCount == texts.count)
         #expect(harness.contextProvider.readContextCallCount == texts.count)
     }
+
+    // MARK: - Injection failure
+
+    @Test(
+        "an injection failure transitions to injectionFailed",
+        arguments: LifecycleMode.allCases)
+    func injectionFailureTransitions(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "unreachable", buffer: nil)
+        harness.injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
+        await harness.runCycle()
+        #expect(await harness.coordinator.state == .injectionFailed)
+    }
+
+    @Test(
+        "an injection failure preserves the transcript in the buffer",
+        arguments: LifecycleMode.allCases)
+    func injectionFailurePreservesTranscript(_ mode: LifecycleMode) async {
+        let buffer = TranscriptBuffer()
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "preserved", buffer: buffer)
+        harness.injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
+        await harness.runCycle()
+        #expect(await buffer.lastTranscript == "preserved")
+    }
+
+    @Test(
+        "an injection failure ends the state sequence in injectionFailed",
+        arguments: LifecycleMode.allCases)
+    func injectionFailureStateSequence(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "unreachable", buffer: nil)
+        harness.injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
+        let states = await harness.runCycleObservingStates()
+        #expect(states == [.idle, .recording, .processing, .injecting, .injectionFailed])
+    }
+
+    @Test(
+        "a cycle works after dismissing an injection failure",
+        arguments: LifecycleMode.allCases)
+    func cycleWorksAfterInjectionFailureReset(_ mode: LifecycleMode) async throws {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "first attempt", buffer: nil)
+        harness.injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
+        let sessionID = try #require(await harness.runCycle())
+        #expect(await harness.coordinator.state == .injectionFailed)
+
+        await harness.pipeline.dismissInjectionFailure(sessionID: sessionID)
+        #expect(await harness.coordinator.state == .idle)
+
+        harness.injector.stubbedError = nil
+        harness.resolve(to: "second attempt")
+        await harness.runCycle()
+        #expect(await harness.coordinator.state == .idle)
+        #expect(harness.injector.injectionCount == 1)
+        #expect(harness.injector.lastInjectedText == "second attempt")
+    }
 }
 
 /// The backend configuration a lifecycle behavior runs against.
@@ -241,19 +294,25 @@ private final class LifecycleHarness {
         }
     }
 
-    /// Activate and wait until live capture is ready (state is recording).
-    func activateToRecording() async {
+    /// Activate and wait until live capture is ready (state is recording),
+    /// returning the admitted session id.
+    @discardableResult
+    func activateToRecording() async -> DictationSessionID? {
         let previousReadyCount = audio.captureReadyCount
-        await pipeline.activate()
+        let sessionID = await pipeline.activate()
         await waitForCaptureReady(after: previousReadyCount)
+        return sessionID
     }
 
-    /// Run one activate → forward-PCM → complete cycle and let it settle.
-    func runCycle() async {
-        await activateToRecording()
+    /// Run one activate → forward-PCM → complete cycle and let it settle,
+    /// returning the admitted session id.
+    @discardableResult
+    func runCycle() async -> DictationSessionID? {
+        let sessionID = await activateToRecording()
         let emitTask = mode.streamsPCM ? emitChunks() : nil
         await pipeline.complete()
         emitTask?.cancel()
+        return sessionID
     }
 
     /// Run one cycle while collecting the coordinator's state transitions,

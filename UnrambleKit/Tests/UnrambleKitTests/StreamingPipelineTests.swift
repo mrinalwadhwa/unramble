@@ -4297,46 +4297,6 @@ final class StreamingPipelineTests: XCTestCase {
 
     // MARK: - Injection failure in streaming mode
 
-    func testStreamingInjectionFailureTransitionsToInjectionFailed() async {
-        let buffer = TranscriptBuffer()
-        let injector = MockTextInjector()
-        injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let streaming = MockStreamingProvider(stubbedText: "streamed text")
-
-        let (pipeline, audio, _, _, _, _, coordinator) = makeStreamingPipeline(
-            streamingProvider: streaming, textInjector: injector, transcriptBuffer: buffer)
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        let state = await coordinator.state
-        XCTAssertEqual(
-            state, .injectionFailed,
-            "Pipeline should transition to injectionFailed on injection error in streaming mode")
-    }
-
-    func testStreamingInjectionFailurePreservesTranscriptInBuffer() async {
-        let buffer = TranscriptBuffer()
-        let injector = MockTextInjector()
-        injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let streaming = MockStreamingProvider(stubbedText: "preserved streaming text")
-
-        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
-            streamingProvider: streaming, textInjector: injector, transcriptBuffer: buffer)
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        let stored = await buffer.lastTranscript
-        XCTAssertEqual(
-            stored, "preserved streaming text",
-            "Transcript should remain in buffer after injection failure in streaming mode")
-    }
-
     func testFailedInjectionRetryIsOwnedByOriginalSession() async {
         let buffer = TranscriptBuffer()
         let injector = MockTextInjector()
@@ -4501,50 +4461,6 @@ final class StreamingPipelineTests: XCTestCase {
         await pipeline.dismissInjectionFailure(sessionID: sessionID)
         let dismissedState = await coordinator.state
         XCTAssertEqual(dismissedState, .idle)
-    }
-
-    func testStreamingCycleWorksAfterInjectionFailureAndReset() async {
-        let injector = MockTextInjector()
-        injector.stubbedError = AppTextInjector.InjectionError.noFocusedElement
-        let coordinator = RecordingCoordinator()
-        let audio = makeStreamingAudioProvider()
-        let streaming = MockStreamingProvider(stubbedText: "first attempt")
-
-        let (pipeline, _, _, _, _, _, _) = makeStreamingPipeline(
-            audioProvider: audio, streamingProvider: streaming,
-            textInjector: injector, coordinator: coordinator)
-
-        // First cycle: injection fails.
-        guard let firstSessionID = await pipeline.activate() else {
-            return XCTFail("Expected first session admission")
-        }
-        let emitTask1 = emitChunksInBackground(audio)
-        await pipeline.complete(sessionID: firstSessionID)
-        emitTask1.cancel()
-
-        var state = await coordinator.state
-        XCTAssertEqual(state, .injectionFailed)
-
-        // Reset (simulates user dismissing no-target HUD).
-        await pipeline.dismissInjectionFailure(sessionID: firstSessionID)
-        state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-
-        // Second cycle: injection succeeds.
-        injector.stubbedError = nil
-        streaming.stubbedText = "second attempt"
-
-        guard let secondSessionID = await pipeline.activate() else {
-            return XCTFail("Expected replacement session admission")
-        }
-        let emitTask2 = emitChunksInBackground(audio)
-        await pipeline.complete(sessionID: secondSessionID)
-        emitTask2.cancel()
-
-        state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertEqual(injector.lastInjectedText, "second attempt")
     }
 
     // MARK: - Fallback to batch when no PCM stream
