@@ -1040,50 +1040,6 @@ final class DictationPipelineTests: XCTestCase {
         }
     }
 
-    func testFullCycleStartsAndStopsAudioCapture() async {
-        let (pipeline, audio, _, _, _, _) = makePipeline()
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        XCTAssertEqual(audio.startCallCount, 1)
-        var recording = audio.isRecording
-        XCTAssertTrue(recording)
-
-        await pipeline.complete()
-        XCTAssertEqual(audio.stopCallCount, 1)
-        recording = audio.isRecording
-        XCTAssertFalse(recording)
-    }
-
-    func testFullCycleReadsContext() async {
-        let (pipeline, audio, context, _, _, _) = makePipeline()
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        XCTAssertEqual(context.readContextCallCount, 1)
-    }
-
-    func testFullCycleInjectsText() async {
-        let (pipeline, audio, _, _, injector, _) = makePipeline()
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertNotNil(injector.lastInjectedText)
-    }
-
-    func testInjectedTextMatchesDictationOutput() async {
-        let dictation = MockBatchProvider(stubbedText: "Hello from dictation")
-        let (pipeline, audio, _, _, injector, _) = makePipeline(batchProvider: dictation)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        XCTAssertEqual(injector.lastInjectedText, "Hello from dictation")
-        XCTAssertEqual(dictation.dictateCallCount, 1)
-    }
-
     func testDictationReceivesAudioData() async {
         // Build a non-silent WAV buffer so the silence gate does not reject it.
         var pcmData = Data(capacity: 64000)
@@ -1111,23 +1067,6 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertEqual(dictation.dictateCallCount, 1)
         XCTAssertEqual(dictation.lastReceivedAudio, buffer.data)
         XCTAssertEqual(injector.injectionCount, 1)
-    }
-
-    func testInjectedContextMatchesStubbedContext() async {
-        let stubbedContext = AppContext(
-            bundleID: "com.example.myapp",
-            appName: "MyApp",
-            windowTitle: "Document 1"
-        )
-        let contextProvider = MockAppContextProvider(context: stubbedContext)
-        let (pipeline, audio, _, _, injector, _) = makePipeline(contextProvider: contextProvider)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        let injections = injector.injections
-        XCTAssertEqual(injections.count, 1)
-        XCTAssertEqual(injections.first?.context, stubbedContext)
     }
 
     func testDictationReceivesAppContext() async {

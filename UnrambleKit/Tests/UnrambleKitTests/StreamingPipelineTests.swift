@@ -3699,40 +3699,6 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(state, .idle)
     }
 
-    func testStreamingFullCycleInjectsText() async {
-        let streaming = MockStreamingProvider(stubbedText: "Hello streaming")
-        let (pipeline, audio, _, _, _, injector, _) = makeStreamingPipeline(
-            streamingProvider: streaming)
-
-        guard let sessionID = await pipeline.activate() else {
-            return XCTFail("Expected session admission")
-        }
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete(sessionID: sessionID)
-        emitTask.cancel()
-
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertEqual(injector.lastInjectedText, "Hello streaming")
-    }
-
-    func testStreamingFullCycleStartsAndStopsAudioCapture() async {
-        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline()
-
-        await pipeline.activate()
-        // Audio setup now runs in a background task after activate() returns.
-        // Wait briefly for the setup task to complete.
-        try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
-        XCTAssertEqual(audio.startCallCount, 1)
-        XCTAssertTrue(audio.isRecording)
-
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        XCTAssertEqual(audio.stopCallCount, 1)
-        XCTAssertFalse(audio.isRecording)
-    }
-
     func testStreamingFullCycleCallsStartStreaming() async {
         let (pipeline, audio, _, _, streaming, _, _) = makeStreamingPipeline()
 
@@ -4061,17 +4027,6 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "recovered local result")
     }
 
-    func testStreamingReadsContext() async {
-        let (pipeline, audio, context, _, _, _, _) = makeStreamingPipeline()
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        XCTAssertEqual(context.readContextCallCount, 1)
-    }
-
     func testStreamingPassesContextToStartStreaming() async {
         let ctx = AppContext(
             bundleID: "com.test.app",
@@ -4091,26 +4046,6 @@ final class StreamingPipelineTests: XCTestCase {
         let received = streaming.receivedContexts.first
         XCTAssertEqual(received?.bundleID, "com.test.app")
         XCTAssertEqual(received?.appName, "TestApp")
-    }
-
-    func testStreamingPassesContextToTextInjector() async {
-        let ctx = AppContext(
-            bundleID: "com.test.inject",
-            appName: "InjectApp",
-            windowTitle: "Inject Window"
-        )
-        let contextProvider = MockAppContextProvider(context: ctx)
-        let (pipeline, audio, _, _, _, injector, _) = makeStreamingPipeline(
-            contextProvider: contextProvider)
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        let injectedContext = injector.injections.first?.context
-        XCTAssertEqual(injectedContext?.bundleID, "com.test.inject")
-        XCTAssertEqual(injectedContext?.appName, "InjectApp")
     }
 
     // MARK: - State transitions

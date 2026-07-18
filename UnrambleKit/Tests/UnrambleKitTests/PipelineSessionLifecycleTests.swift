@@ -59,6 +59,38 @@ struct PipelineSessionLifecycleTests {
         await harness.runCycle()
         #expect(await buffer.lastTranscript == "second")
     }
+
+    // MARK: - Full cycle
+
+    @Test("a full cycle starts and stops audio capture", arguments: LifecycleMode.allCases)
+    func startsAndStopsCapture(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "captured", buffer: nil)
+        await harness.runCycle()
+
+        #expect(harness.audio.startCallCount == 1)
+        #expect(harness.audio.stopCallCount == 1)
+        #expect(harness.audio.isRecording == false)
+    }
+
+    @Test("a full cycle reads the app context once", arguments: LifecycleMode.allCases)
+    func readsContextOncePerCycle(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "context", buffer: nil)
+        await harness.runCycle()
+
+        #expect(harness.contextProvider.readContextCallCount == 1)
+    }
+
+    @Test("injection targets the context read at capture", arguments: LifecycleMode.allCases)
+    func injectsIntoReadContext(_ mode: LifecycleMode) async {
+        let context = AppContext(
+            bundleID: "com.example.myapp", appName: "MyApp", windowTitle: "Document 1")
+        let harness = LifecycleHarness(
+            mode: mode, resolvesTo: "targeted", buffer: nil, context: context)
+        await harness.runCycle()
+
+        #expect(harness.injector.injections.count == 1)
+        #expect(harness.injector.injections.first?.context == context)
+    }
 }
 
 /// The backend configuration a lifecycle behavior runs against.
@@ -93,8 +125,14 @@ private final class LifecycleHarness {
     let batch: MockBatchProvider
     let injector: MockTextInjector
     let coordinator: RecordingCoordinator
+    let contextProvider: MockAppContextProvider
 
-    init(mode: LifecycleMode, resolvesTo text: String, buffer: TranscriptBuffer?) {
+    init(
+        mode: LifecycleMode,
+        resolvesTo text: String,
+        buffer: TranscriptBuffer?,
+        context: AppContext = .stub
+    ) {
         self.mode = mode
         let audio = MockAudioProvider()
         audio.enablePCMStream = mode.streamsPCM
@@ -102,6 +140,7 @@ private final class LifecycleHarness {
         let batch = MockBatchProvider(stubbedText: "")
         let injector = MockTextInjector()
         let coordinator = RecordingCoordinator()
+        let contextProvider = MockAppContextProvider(context: context)
 
         let backend: DictationBackend
         switch mode {
@@ -121,9 +160,10 @@ private final class LifecycleHarness {
         self.batch = batch
         self.injector = injector
         self.coordinator = coordinator
+        self.contextProvider = contextProvider
         self.pipeline = DictationPipeline(
             audioProvider: audio,
-            contextProvider: MockAppContextProvider(),
+            contextProvider: contextProvider,
             backend: backend,
             textInjector: injector,
             coordinator: coordinator,
