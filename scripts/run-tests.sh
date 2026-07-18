@@ -11,7 +11,16 @@ REPORTER="$ROOT_DIR/scripts/parse-test-results.sh"
 INVOCATION_DIR="$PWD"
 SWIFT_BIN="${SWIFT_BIN:-swift}"
 
-CI_SKIP_REGEX='(AudioPipelineTests|CGEventTapHotkeyProviderTests|CoreAudioDeviceProviderTests|KeychainServiceTests|LocalModelIntegrationTests|MainThreadDelayTests|NemotronStreamingTests|OpenAIFileTranscriberLiveTests|OpenAIRealtimeLiveTests|OpenAIStreamingBenchmarkTests|PermissionProviderTests|PolishScenarioRegexTests|PolishScenarioDeterministicTests|ServiceConfigTests|SoundFeedbackPathTests)'
+# Host and OS-adapter suites live in the UnrambleKitOSTests target and run in
+# their own `os` lane, so the bounded CI selection excludes that whole target by
+# name prefix. The remaining entries are the live, model, keychain, and corpus
+# suites that run under their own gates.
+CI_SKIP_REGEX='(AudioPipelineTests|KeychainServiceTests|LocalModelIntegrationTests|NemotronStreamingTests|OpenAIFileTranscriberLiveTests|OpenAIRealtimeLiveTests|OpenAIStreamingBenchmarkTests|PolishScenarioRegexTests|PolishScenarioDeterministicTests|ServiceConfigTests|UnrambleKitOSTests\.)'
+# Positive selection for the host and OS-adapter lane. These suites exercise real
+# CoreAudio devices, CGEvent taps, the main run loop, and system sound files.
+# They degrade gracefully when a resource is absent, so they stay out of the
+# bounded CI selection and run explicitly here.
+OS_FILTER='UnrambleKitOSTests\.'
 # Focused timeout/deadline baseline gate. These deterministic suites also run in
 # the default and CI lanes; the explicit filter keeps a fast gate under
 # UNRAMBLE_TEST_SLOW. They use mocks and make no live, model, or network call.
@@ -30,7 +39,7 @@ CI_FLAG_PATHS=(
 )
 
 usage() {
-    printf 'usage: %s {default|ci|slow|keychain-slow}\n' "$0" >&2
+    printf 'usage: %s {default|ci|slow|os|keychain-slow}\n' "$0" >&2
 }
 
 die() {
@@ -142,6 +151,10 @@ run_swift_tests() {
             export UNRAMBLE_TEST_SLOW=1
             swift_args+=(--disable-automatic-resolution --filter "$SLOW_FILTER")
             ;;
+        os)
+            clear_ci_environment
+            swift_args+=(--disable-automatic-resolution --filter "$OS_FILTER")
+            ;;
         keychain-slow)
             export UNRAMBLE_TEST_KEYCHAIN=1
             export UNRAMBLE_TEST_SLOW=1
@@ -165,6 +178,9 @@ append_run_context() {
             ;;
         slow)
             printf 'Selection: deterministic slow timeout and deadline lane under UNRAMBLE_TEST_SLOW.\n'
+            ;;
+        os)
+            printf 'Selection: host and OS-adapter lane (UnrambleKitOSTests target only).\n'
             ;;
         keychain-slow)
             printf 'Selection: default plus Keychain and slow suites; live/model/evaluation gates unchanged.\n'
@@ -205,7 +221,7 @@ main() {
     }
     MODE="${1:-default}"
     case "$MODE" in
-        default|ci|slow|keychain-slow) ;;
+        default|ci|slow|os|keychain-slow) ;;
         *)
             usage
             die "unknown mode: $MODE"

@@ -24,6 +24,7 @@ The package contains XCTest and Swift Testing tests. Their native terminal summa
 make test               # Default package selection; inherits explicit test gates.
 make test-ci            # Bounded clean-CI selection; excludes host/live/model/corpus suites.
 make test-slow          # Deterministic slow timeout/deadline suites under UNRAMBLE_TEST_SLOW.
+make test-os            # Host and OS-adapter suites (the UnrambleKitOSTests target).
 make test-all           # Default selection plus Keychain and slow timeout suites.
 make test-runner-tests  # Runner/parser fixture checks; does not build the Swift package.
 make test-inventory     # Fail closed if the discovered test-suite set drifts from the committed inventory.
@@ -34,6 +35,8 @@ make test-inventory     # Fail closed if the discovered test-suite set drifts fr
 a lane and refresh the inventory with `scripts/check-test-inventory.sh update`.
 
 `make test-all` is not a literal all-tests lane. It enables only `UNRAMBLE_TEST_KEYCHAIN=1` and `UNRAMBLE_TEST_SLOW=1`; live OpenAI, local-model, dump, replay, benchmark, and compile-gated evaluation suites remain separately controlled.
+
+`make test-os` runs the `UnrambleKitOSTests` target, which holds the suites that touch real host resources — CoreAudio devices, CGEvent taps, the main run loop, and system sound files. They degrade gracefully when a resource is absent, so the lane is safe on a headless runner. Keeping them in a separate target leaves the default `UnrambleKitTests` target deterministic by construction.
 
 The default selection includes corpus-backed polish scenario tests and expects the ignored `training/polish-tests.json` file. Generate it from the committed YAML before the default or Keychain/slow lane when starting from a clean checkout. The isolated environment below installs only the generator's PyYAML dependency, not the MLX training stack:
 

@@ -1,4 +1,4 @@
-.PHONY: build run test test-ci test-slow test-inventory test-all test-runner-tests clean xcode generate models \
+.PHONY: build run test test-ci test-slow test-os test-inventory test-all test-runner-tests clean xcode generate models \
 	verify-models verify-app-models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
@@ -78,6 +78,12 @@ test-ci:
 # Network-free and model-free, so it is a clean CI baseline gate.
 test-slow:
 	@"scripts/run-tests.sh" slow
+
+# Run the host and OS-adapter suites (CoreAudio devices, CGEvent taps, the main
+# run loop, system sounds) in their own target. They degrade gracefully when a
+# resource is absent, so this lane is safe on a headless runner.
+test-os:
+	@"scripts/run-tests.sh" os
 
 # Fail closed when the discovered test-suite set drifts from the committed
 # inventory, so a new suite must be assigned to a lane before it can land.
