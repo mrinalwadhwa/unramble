@@ -47,8 +47,8 @@ python3 -m venv ../.scratch/polish-data-venv
 **Environment variable gates:**
 - `UNRAMBLE_TEST_KEYCHAIN=1` — enables Keychain tests (KeychainServiceTests and
   ServiceConfigTests). These trigger macOS login Keychain password prompts.
-- `UNRAMBLE_TEST_SLOW=1` — enables timeout tests (PipelineTimeoutTests ~75s) that
-  use real timeouts and waits.
+- `UNRAMBLE_TEST_SLOW=1` — set by `make test-slow` for the deterministic
+  timeout/deadline baseline lane (TimeoutOwnership and pipelineDeadline suites).
 - `UNRAMBLE_TEST_OPENAI=1` — enables live tests that hit the real OpenAI API.
   Requires `OPENAI_API_KEY` to be set in the environment.
 - `UNRAMBLE_TEST_OPENAI_BENCH=1` — enables the OpenAI Realtime latency benchmark

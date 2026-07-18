@@ -11,12 +11,11 @@ REPORTER="$ROOT_DIR/scripts/parse-test-results.sh"
 INVOCATION_DIR="$PWD"
 SWIFT_BIN="${SWIFT_BIN:-swift}"
 
-CI_SKIP_REGEX='(AudioPipelineTests|CGEventTapHotkeyProviderTests|CoreAudioDeviceProviderTests|KeychainServiceTests|LocalModelIntegrationTests|MainThreadDelayTests|NemotronStreamingTests|OpenAIFileTranscriberLiveTests|OpenAIRealtimeLiveTests|OpenAIStreamingBenchmarkTests|PermissionProviderTests|PipelineTimeoutTests|PolishScenarioRegexTests|PolishScenarioDeterministicTests|ServiceConfigTests|SoundFeedbackPathTests)'
-# Positive selection for the deterministic slow timeout/deadline lane. These
-# real-wall-clock suites are excluded from the bounded CI denylist, so a clean
-# baseline gate runs them explicitly under UNRAMBLE_TEST_SLOW. They use mocks and
-# make no live, model, keychain, or network call.
-SLOW_FILTER='(PipelineTimeoutTests|TimeoutOwnershipTests|PipelineDeadlineTests)'
+CI_SKIP_REGEX='(AudioPipelineTests|CGEventTapHotkeyProviderTests|CoreAudioDeviceProviderTests|KeychainServiceTests|LocalModelIntegrationTests|MainThreadDelayTests|NemotronStreamingTests|OpenAIFileTranscriberLiveTests|OpenAIRealtimeLiveTests|OpenAIStreamingBenchmarkTests|PermissionProviderTests|PolishScenarioRegexTests|PolishScenarioDeterministicTests|ServiceConfigTests|SoundFeedbackPathTests)'
+# Focused timeout/deadline baseline gate. These deterministic suites also run in
+# the default and CI lanes; the explicit filter keeps a fast gate under
+# UNRAMBLE_TEST_SLOW. They use mocks and make no live, model, or network call.
+SLOW_FILTER='(TimeoutOwnershipTests|PipelineDeadlineTests)'
 CI_FLAG_PATHS=(
     /tmp/unramble-test-categories
     /tmp/unramble-test-p1
