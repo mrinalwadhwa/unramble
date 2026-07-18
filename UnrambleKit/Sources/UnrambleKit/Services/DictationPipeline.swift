@@ -2758,13 +2758,12 @@ public actor DictationPipeline: PipelineProviding {
             let result = PolishPipeline.stripTrailingFiller(text)
             guard !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
-                Log.debug("[Pipeline] Local returned no text; retaining complete WAV")
-                retainRecovery(
-                    sessionID: sessionID,
-                    audio: audioBuffer.data,
-                    context: context,
-                    language: language)
-                _ = await coordinator.failDictation(sessionID: sessionID)
+                // No speech was recognized. Like the energy silence gate, this
+                // is a no-op, not a failure: reset to idle with no card. A retry
+                // would re-run recognition on the same speechless audio and
+                // return empty again, so nothing is retained.
+                Log.debug("[Pipeline] Local returned no text; resetting to idle")
+                _ = await coordinator.reset(sessionID: sessionID)
                 return nil
             }
             Log.debug(
@@ -3069,7 +3068,11 @@ public actor DictationPipeline: PipelineProviding {
                 language: language)
             guard ownsSession(sessionID) else { return nil }
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                Log.debug("[Pipeline] Batch returned no text; retaining complete WAV")
+                // A successful transcription with no recognized speech is a
+                // no-op, not a failure: reset to idle with no card and nothing
+                // retained. Only a genuine transport/API error (handled below)
+                // surfaces "Lost connection" with a retry.
+                Log.debug("[Pipeline] Batch returned no text; resetting to idle")
                 if let store = micDiagnosticStore,
                     let captureMetrics = audioProvider.metrics(
                         owner: audioOwner(sessionID))
@@ -3086,12 +3089,7 @@ public actor DictationPipeline: PipelineProviding {
                             result: .empty
                         ))
                 }
-                retainRecovery(
-                    sessionID: sessionID,
-                    audio: audioBuffer.data,
-                    context: context,
-                    language: language)
-                _ = await coordinator.failDictation(sessionID: sessionID)
+                _ = await coordinator.reset(sessionID: sessionID)
                 return nil
             }
             return text

@@ -155,8 +155,8 @@ struct PipelineDictationTests {
         #expect(stored == "Stored text.")
     }
 
-    @Test("Empty text remains recoverable without injection")
-    func emptyTextRemainsRecoverable() async {
+    @Test("Empty text resets to idle without a card or injection")
+    func emptyTextResetsToIdle() async {
         let dictation = MockBatchProvider(stubbedText: "   ")
         let (pipeline, audio, _, injector, coordinator, _) = makePipeline(
             batchProvider: dictation)
@@ -164,8 +164,9 @@ struct PipelineDictationTests {
         await activateAndWaitForCapture(pipeline, audioProvider: audio)
         await pipeline.complete()
 
+        // No recognized speech is a silent no-op, not a failure card.
         let state = await coordinator.state
-        #expect(state == .dictationFailed)
+        #expect(state == .idle)
         #expect(injector.injectionCount == 0)
     }
 

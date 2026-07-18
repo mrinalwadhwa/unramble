@@ -4249,7 +4249,7 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "Sparse setup recovery")
     }
 
-    func testStreamingStartFailureAndEmptyBatchPreserveCompleteWAV() async {
+    func testStreamingStartFailureAndEmptyBatchResetToIdle() async {
         let streaming = MockStreamingProvider()
         streaming.stubbedStartError = DictationError.networkError("connection refused")
         let dictation = MockBatchProvider(stubbedText: "")
@@ -4263,19 +4263,19 @@ final class StreamingPipelineTests: XCTestCase {
         await pipeline.complete()
         emitTask.cancel()
 
-        let failedState = await coordinator.state
-        XCTAssertEqual(failedState, .dictationFailed)
+        // Streaming failed to start, but the batch fallback ran and recognized
+        // no speech. An empty transcript is a no-op, not a failure: idle, no
+        // card, nothing retained. A retry has nothing to recover, so it is inert.
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
         XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
         XCTAssertEqual(injector.injectionCount, 0)
 
-        dictation.stubbedText = "Recovered setup fallback"
         await pipeline.retryDictation()
-
-        let recoveredState = await coordinator.state
-        XCTAssertEqual(recoveredState, .idle)
-        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertEqual(injector.lastInjectedText, "Recovered setup fallback")
+        let afterRetry = await coordinator.state
+        XCTAssertEqual(afterRetry, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
+        XCTAssertEqual(injector.injectionCount, 0)
     }
 
     func testStreamingFinishFailureFallsToBatch() async {
@@ -4321,7 +4321,7 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.lastInjectedText, "Batch result")
     }
 
-    func testBothEmptyResultsPreserveCompleteWAVForRetry() async {
+    func testBothEmptyResultsResetToIdle() async {
         let streaming = MockStreamingProvider(stubbedText: "")
         let dictation = MockBatchProvider(stubbedText: "")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
@@ -4333,31 +4333,21 @@ final class StreamingPipelineTests: XCTestCase {
         await pipeline.complete()
         emitTask.cancel()
 
+        // Both paths recognized no speech: a no-op, not a failure. Idle, no
+        // card, nothing retained; a retry has nothing to recover.
         let state = await coordinator.state
-        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(state, .idle)
         XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
         XCTAssertEqual(injector.injectionCount, 0)
 
         await pipeline.retryDictation()
-
-        let stillRecoverableState = await coordinator.state
-        XCTAssertEqual(stillRecoverableState, .dictationFailed)
-        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
+        let afterRetry = await coordinator.state
+        XCTAssertEqual(afterRetry, .idle)
+        XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
         XCTAssertEqual(injector.injectionCount, 0)
-
-        dictation.stubbedText = "Recovered after empty results"
-        await pipeline.retryDictation()
-
-        let recoveredState = await coordinator.state
-        XCTAssertEqual(recoveredState, .idle)
-        XCTAssertEqual(
-            dictation.receivedAudioData,
-            [completeWAV, completeWAV, completeWAV])
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertEqual(injector.lastInjectedText, "Recovered after empty results")
     }
 
-    func testBothWhitespaceOnlyResultsPreserveCompleteWAVForRetry() async {
+    func testBothWhitespaceOnlyResultsResetToIdle() async {
         let streaming = MockStreamingProvider(stubbedText: "   \n  ")
         let dictation = MockBatchProvider(stubbedText: "  \t  ")
         let (pipeline, audio, _, _, _, injector, coordinator) = makeStreamingPipeline(
@@ -4369,19 +4359,11 @@ final class StreamingPipelineTests: XCTestCase {
         await pipeline.complete()
         emitTask.cancel()
 
+        // Whitespace-only counts as no speech: same silent no-op.
         let state = await coordinator.state
-        XCTAssertEqual(state, .dictationFailed)
+        XCTAssertEqual(state, .idle)
         XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
         XCTAssertEqual(injector.injectionCount, 0)
-
-        dictation.stubbedText = "Recovered after whitespace results"
-        await pipeline.retryDictation()
-
-        let recoveredState = await coordinator.state
-        XCTAssertEqual(recoveredState, .idle)
-        XCTAssertEqual(dictation.receivedAudioData, [completeWAV, completeWAV])
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertEqual(injector.lastInjectedText, "Recovered after whitespace results")
     }
 
     // MARK: - Transcript buffer
@@ -5014,7 +4996,7 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(finalState, .idle)
     }
 
-    func testLocalEmptyResultRetainsExactCaptureForRetry() async {
+    func testLocalEmptyResultResetsToIdleWithoutCard() async {
         let sourcePCM = makeNonSilentPCMChunk(sampleCount: 1_600)
         let audio = makeStreamingAudioProvider()
         let streaming = MockStreamingProvider(stubbedText: " \n ")
@@ -5035,22 +5017,15 @@ final class StreamingPipelineTests: XCTestCase {
         audio.emitPCMChunk(sourcePCM)
         await pipeline.complete(sessionID: sessionID)
 
-        let failedState = await coordinator.state
-        XCTAssertEqual(failedState, .dictationFailed)
+        // No speech recognized locally is a silent no-op, not a failure: reset to
+        // idle with no failure card, nothing injected, and nothing retained.
+        // Retrying deterministic local recognition on the same audio would just
+        // return empty again, so no recovery is offered.
+        let state = await coordinator.state
+        XCTAssertEqual(state, .idle)
         XCTAssertEqual(injector.injectionCount, 0)
-
-        streaming.stubbedText = "recovered non-empty local result"
-        await pipeline.retryDictation(sessionID: sessionID)
-
-        XCTAssertEqual(streaming.startCallCount, 1)
-        XCTAssertEqual(streaming.finishCallCount, 1)
-        XCTAssertEqual(streaming.replayCallCount, 1)
-        XCTAssertEqual(injector.injectionCount, 1)
-        XCTAssertEqual(
-            injector.lastInjectedText,
-            "recovered non-empty local result")
-        let finalState = await coordinator.state
-        XCTAssertEqual(finalState, .idle)
+        let canRetry = await pipeline.canRetryDictation(sessionID: sessionID)
+        XCTAssertFalse(canRetry)
     }
 
     // MARK: - Language parameter
