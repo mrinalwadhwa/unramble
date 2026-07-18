@@ -154,6 +154,24 @@ struct PipelineSessionLifecycleTests {
         #expect(harness.contextProvider.readContextCallCount == texts.count)
     }
 
+    // MARK: - Silence gate
+
+    // A silent press must skip dictation on every backend. The two peak-RMS
+    // values cover both post-record silence paths: an exact 0 (the tap ran and
+    // captured nothing) and a nonzero level at or below the threshold.
+    @Test(
+        "audio below the silence threshold skips dictation without injecting",
+        arguments: LifecycleMode.allCases, [Float(0), Float(0.001)])
+    func silentAudioSkipsDictation(_ mode: LifecycleMode, _ peakRMS: Float) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "unheard", buffer: nil)
+        harness.audio.stubbedPeakRMS = peakRMS
+        await harness.runCycle()
+
+        #expect(harness.injector.injectionCount == 0)
+        #expect(harness.batch.dictateCallCount == 0)
+        #expect(await harness.coordinator.state == .idle)
+    }
+
     // MARK: - Injection failure
 
     @Test(

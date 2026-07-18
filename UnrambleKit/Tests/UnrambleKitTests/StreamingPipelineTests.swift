@@ -4873,31 +4873,6 @@ final class StreamingPipelineTests: XCTestCase {
             "cancel() must call cancelStreaming() even after complete() cleared isStreamingSession")
     }
 
-    // MARK: - Silence rejection
-
-    func testSilentStreamingSessionRejectsWithoutInjecting() async {
-        let audio = makeStreamingAudioProvider()
-        // Set peak RMS below the silence threshold so the early gate fires.
-        audio.stubbedPeakRMS = 0.001
-
-        let (pipeline, _, _, _, _, injector, coordinator) =
-            makeStreamingPipeline(audioProvider: audio)
-
-        await pipeline.activate()
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        let emitTask = emitChunksInBackground(audio, count: 2)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        // Pipeline should return to idle without injecting text.
-        let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-        XCTAssertEqual(
-            injector.injectionCount, 0,
-            "Silent audio should not produce any text injection")
-    }
-
     // MARK: - Sequential fallback (streaming → batch)
 
     func testStreamingSuccessSkipsBatch() async {

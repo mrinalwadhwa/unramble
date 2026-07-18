@@ -1241,35 +1241,6 @@ final class DictationPipelineTests: XCTestCase {
 
     // MARK: - Silence gate
 
-    func testSilentAudioSkipsDictationAndResetsToIdle() async {
-        // Build a WAV buffer with all-zero (silent) samples.
-        let silentPCM = Data(repeating: 0, count: 32000)
-        let silentWAV = WAVEncoder.encode(
-            pcmData: silentPCM, sampleRate: 16000, channels: 1, bitsPerSample: 16)
-        let silentBuffer = AudioBuffer(
-            data: silentWAV,
-            duration: 1.0,
-            sampleRate: 16000,
-            channels: 1,
-            bitsPerSample: 16
-        )
-
-        let audio = MockAudioProvider(stubbedBuffer: silentBuffer)
-        audio.stubbedPeakRMS = 0
-        let dictation = MockBatchProvider()
-        let (pipeline, audioProvider, _, _, injector, coordinator) = makePipeline(
-            audioProvider: audio, batchProvider: dictation)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audioProvider)
-        await pipeline.complete()
-
-        let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-        // Silent audio should skip dictation entirely.
-        XCTAssertEqual(dictation.dictateCallCount, 0)
-        XCTAssertEqual(injector.injectionCount, 0)
-    }
-
     func testNonSilentAudioProceedsToDictation() async {
         // The default MockAudioProvider now produces non-silent audio.
         let dictation = MockBatchProvider(stubbedText: "Hello")
