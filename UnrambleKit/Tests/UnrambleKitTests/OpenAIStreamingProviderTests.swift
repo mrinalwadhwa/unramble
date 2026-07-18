@@ -126,7 +126,7 @@ struct OpenAIRealtimeMessageTests {
     @Test("polish request preserves the transcript exactly")
     func polishRequest() throws {
         let transcript = "hello, quote \"this\"\nthen continue"
-        let json = OpenAIStreamingProvider.buildPolishRequest(
+        let json = OpenAIRealtimeWireCodec.buildPolishRequest(
             transcript: transcript)
         let obj = try #require(
             try JSONSerialization.jsonObject(
@@ -144,7 +144,7 @@ struct OpenAIRealtimeMessageTests {
 
     @Test("response.create requests text output")
     func responseCreate() throws {
-        let json = OpenAIStreamingProvider.buildResponseCreate()
+        let json = OpenAIRealtimeWireCodec.buildResponseCreate()
         let obj = try #require(
             try JSONSerialization.jsonObject(
                 with: json.data(using: .utf8)!) as? [String: Any])
@@ -156,7 +156,7 @@ struct OpenAIRealtimeMessageTests {
     @Test("audio append message contains base64 audio")
     func audioAppend() throws {
         let pcm = Data([0x00, 0x01, 0x02, 0x03])
-        let json = OpenAIStreamingProvider.buildAudioAppend(pcm24k: pcm)
+        let json = OpenAIRealtimeWireCodec.buildAudioAppend(pcm24k: pcm)
         let obj = try JSONSerialization.jsonObject(
             with: json.data(using: .utf8)!) as! [String: Any]
         #expect(obj["type"] as? String == "input_audio_buffer.append")
@@ -168,7 +168,7 @@ struct OpenAIRealtimeMessageTests {
 
     @Test("commit message has correct type")
     func commit() throws {
-        let json = OpenAIStreamingProvider.buildCommit()
+        let json = OpenAIRealtimeWireCodec.buildCommit()
         let obj = try JSONSerialization.jsonObject(
             with: json.data(using: .utf8)!) as! [String: Any]
         #expect(obj["type"] as? String == "input_audio_buffer.commit")
@@ -176,7 +176,7 @@ struct OpenAIRealtimeMessageTests {
 
     @Test("websocket URL has model parameter")
     func websocketURL() {
-        let url = OpenAIStreamingProvider.buildWebSocketURL(
+        let url = OpenAIRealtimeWireCodec.buildWebSocketURL(
             model: OpenAIStreamingProvider.defaultRealtimeModel)
         #expect(
             url.absoluteString
@@ -185,7 +185,7 @@ struct OpenAIRealtimeMessageTests {
 
     @Test("websocket URL scheme is wss")
     func websocketURLScheme() {
-        let url = OpenAIStreamingProvider.buildWebSocketURL(model: "m")
+        let url = OpenAIRealtimeWireCodec.buildWebSocketURL(model: "m")
         #expect(url.scheme == "wss")
     }
 }
@@ -376,7 +376,7 @@ struct OpenAIRealtimeEventTests {
              "event_id":"event-1","item_id":"item-1"}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(withoutPredecessor)
+            OpenAIRealtimeWireCodec.parseEvent(withoutPredecessor)
                 == .transcription(
                     .commitAcknowledged(
                         serverEventID: "event-1",
@@ -389,7 +389,7 @@ struct OpenAIRealtimeEventTests {
              "previous_item_id":null}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(nullPredecessor)
+            OpenAIRealtimeWireCodec.parseEvent(nullPredecessor)
                 == .transcription(
                     .commitAcknowledged(
                         serverEventID: "event-2",
@@ -402,7 +402,7 @@ struct OpenAIRealtimeEventTests {
              "previous_item_id":"item-2"}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(priorItem)
+            OpenAIRealtimeWireCodec.parseEvent(priorItem)
                 == .transcription(
                     .commitAcknowledged(
                         serverEventID: "event-3",
@@ -422,7 +422,7 @@ struct OpenAIRealtimeEventTests {
         ]
 
         for event in malformedEvents {
-            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+            if case .protocolError = OpenAIRealtimeWireCodec.parseEvent(event) {
                 continue
             }
             Issue.record("expected protocolError for \(event)")
@@ -441,7 +441,7 @@ struct OpenAIRealtimeEventTests {
                       "input_token_details":{"audio_tokens":10,"text_tokens":0}}}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .transcription(
                     .completed(
                         serverEventID: "event-completed",
@@ -456,7 +456,7 @@ struct OpenAIRealtimeEventTests {
             {"type":"conversation.item.input_audio_transcription.delta",
              "delta":"hel"}
             """
-        let parsed = OpenAIStreamingProvider.parseEvent(event)
+        let parsed = OpenAIRealtimeWireCodec.parseEvent(event)
         if case .transcriptionDelta(let delta) = parsed {
             #expect(delta == "hel")
         } else {
@@ -468,7 +468,7 @@ struct OpenAIRealtimeEventTests {
     func responseOutputTextDelta() {
         let event = #"{"type":"response.output_text.delta","output_index":2,"content_index":3,"delta":"Pol"}"#
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .responseTextDelta(
                     outputIndex: 2,
                     contentIndex: 3,
@@ -479,7 +479,7 @@ struct OpenAIRealtimeEventTests {
     func responseOutputTextDone() {
         let event = #"{"type":"response.output_text.done","output_index":4,"content_index":5,"text":"Polished."}"#
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .responseTextDone(
                     outputIndex: 4,
                     contentIndex: 5,
@@ -489,12 +489,12 @@ struct OpenAIRealtimeEventTests {
     @Test("response text events require string payloads")
     func responseTextRequiresStringPayload() {
         #expect(
-            OpenAIStreamingProvider.parseEvent(
+            OpenAIRealtimeWireCodec.parseEvent(
                 #"{"type":"response.output_text.delta"}"#)
                 == .protocolError(
                     "response.output_text.delta requires string delta"))
         #expect(
-            OpenAIStreamingProvider.parseEvent(
+            OpenAIRealtimeWireCodec.parseEvent(
                 #"{"type":"response.output_text.done","text":42}"#)
                 == .protocolError(
                     "response.output_text.done requires string text"))
@@ -503,14 +503,14 @@ struct OpenAIRealtimeEventTests {
     @Test("parses legacy response text event aliases")
     func responseTextAliases() {
         #expect(
-            OpenAIStreamingProvider.parseEvent(
+            OpenAIRealtimeWireCodec.parseEvent(
                 #"{"type":"response.text.delta","delta":"Pol"}"#)
                 == .responseTextDelta(
                     outputIndex: 0,
                     contentIndex: 0,
                     delta: "Pol"))
         #expect(
-            OpenAIStreamingProvider.parseEvent(
+            OpenAIRealtimeWireCodec.parseEvent(
                 #"{"type":"response.text.done","text":"Polished."}"#)
                 == .responseTextDone(
                     outputIndex: 0,
@@ -528,7 +528,7 @@ struct OpenAIRealtimeEventTests {
         ]
 
         for event in events {
-            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+            if case .protocolError = OpenAIRealtimeWireCodec.parseEvent(event) {
                 continue
             }
             Issue.record("expected protocolError for \(event)")
@@ -538,7 +538,7 @@ struct OpenAIRealtimeEventTests {
     @Test("parses completed response.done event")
     func responseDone() {
         let event = #"{"type":"response.done","response":{"status":"completed"}}"#
-        #expect(OpenAIStreamingProvider.parseEvent(event) == .responseDone)
+        #expect(OpenAIRealtimeWireCodec.parseEvent(event) == .responseDone)
     }
 
     @Test("failed response.done becomes an error")
@@ -549,7 +549,7 @@ struct OpenAIRealtimeEventTests {
               "status_details":{"error":{"message":"model failed"}}
             }}
             """
-        let parsed = OpenAIStreamingProvider.parseEvent(event)
+        let parsed = OpenAIRealtimeWireCodec.parseEvent(event)
         if case .error(let message) = parsed {
             #expect(message.contains("model failed"))
         } else {
@@ -560,11 +560,11 @@ struct OpenAIRealtimeEventTests {
     @Test("response.done requires an explicit completed status")
     func responseDoneRequiresStatus() {
         #expect(
-            OpenAIStreamingProvider.parseEvent(
+            OpenAIRealtimeWireCodec.parseEvent(
                 #"{"type":"response.done","response":{}}"#)
                 == .error("response.done missing status"))
         #expect(
-            OpenAIStreamingProvider.parseEvent(
+            OpenAIRealtimeWireCodec.parseEvent(
                 #"{"type":"response.done"}"#)
                 == .error("response.done missing response"))
     }
@@ -580,7 +580,7 @@ struct OpenAIRealtimeEventTests {
                       "message":"audio rejected","param":"audio"}}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .transcription(
                     .failed(
                         serverEventID: "event-failed",
@@ -609,7 +609,7 @@ struct OpenAIRealtimeEventTests {
             parameter: nil)
 
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .transcription(
                     .failed(
                         serverEventID: "event-failed",
@@ -628,7 +628,7 @@ struct OpenAIRealtimeEventTests {
                       "param":"audio","event_id":"client-commit-1"}}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .serverError(
                     OpenAIRealtimeServerError(
                         serverEventID: "server-error-1",
@@ -642,7 +642,7 @@ struct OpenAIRealtimeEventTests {
     @Test("ignores unknown event types")
     func ignoresUnknown() {
         let event = #"{"type":"session.created","session":{}}"#
-        let parsed = OpenAIStreamingProvider.parseEvent(event)
+        let parsed = OpenAIRealtimeWireCodec.parseEvent(event)
         if case .other = parsed {
             // Expected.
         } else {
@@ -659,7 +659,7 @@ struct OpenAIRealtimeEventTests {
             #"{"type":42}"#,
         ]
         for event in malformedEvents {
-            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+            if case .protocolError = OpenAIRealtimeWireCodec.parseEvent(event) {
                 continue
             }
             Issue.record("expected protocolError for \(event)")
@@ -675,7 +675,7 @@ struct OpenAIRealtimeEventTests {
              "transcript":""}
             """
         #expect(
-            OpenAIStreamingProvider.parseEvent(event)
+            OpenAIRealtimeWireCodec.parseEvent(event)
                 == .transcription(
                     .completed(
                         serverEventID: "event-completed",
@@ -701,7 +701,7 @@ struct OpenAIRealtimeEventTests {
             #"{"type":"conversation.item.input_audio_transcription.failed","event_id":"event-1","item_id":"item-1","content_index":0,"error":{"message":42}}"#,
         ]
         for event in malformedEvents {
-            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+            if case .protocolError = OpenAIRealtimeWireCodec.parseEvent(event) {
                 continue
             }
             Issue.record("expected protocolError for \(event)")
@@ -721,7 +721,7 @@ struct OpenAIRealtimeEventTests {
             #"{"type":"error","event_id":"event-1","error":{"type":"server_error","message":"failed","code":42}}"#,
         ]
         for event in malformedEvents {
-            if case .protocolError = OpenAIStreamingProvider.parseEvent(event) {
+            if case .protocolError = OpenAIRealtimeWireCodec.parseEvent(event) {
                 continue
             }
             Issue.record("expected protocolError for \(event)")
@@ -905,7 +905,7 @@ private enum OpenAIRealtimeFixtureError: Error {
 private func transcriptionEvent(
     _ text: String
 ) throws -> OpenAIRealtimeTranscriptionEvent {
-    let parsed = OpenAIStreamingProvider.parseEvent(text)
+    let parsed = OpenAIRealtimeWireCodec.parseEvent(text)
     guard case .transcription(let event) = parsed else {
         Issue.record("expected transcription event, got \(parsed)")
         throw OpenAIRealtimeFixtureError.expectedTranscriptionEvent

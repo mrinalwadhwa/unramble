@@ -54,7 +54,7 @@ struct OpenAIRealtimeCommitPolicyTests {
                 == maximumSourceBytes)
 
         let maximumResampledBytes = maximumSourceBytes * 3 / 2
-        let message = OpenAIStreamingProvider.buildAudioAppend(
+        let message = OpenAIRealtimeWireCodec.buildAudioAppend(
             pcm24k: Data(repeating: 0xFF, count: maximumResampledBytes),
             eventID: "event-id")
         #expect(message.utf8.count < 15_000_000)
