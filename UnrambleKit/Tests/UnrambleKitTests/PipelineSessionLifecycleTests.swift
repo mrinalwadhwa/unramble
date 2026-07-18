@@ -102,6 +102,39 @@ struct PipelineSessionLifecycleTests {
         let states = await harness.runCycleObservingStates()
         #expect(states == [.idle, .recording, .processing, .injecting, .idle])
     }
+
+    // MARK: - Cancellation
+
+    @Test("cancel from recording returns to idle", arguments: LifecycleMode.allCases)
+    func cancelFromRecordingReturnsToIdle(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "cancelled", buffer: nil)
+        await harness.activateToRecording()
+        #expect(await harness.coordinator.state == .recording)
+
+        await harness.pipeline.cancel()
+        #expect(await harness.coordinator.state == .idle)
+        #expect(harness.audio.isRecording == false)
+    }
+
+    @Test("cancel from idle stays idle", arguments: LifecycleMode.allCases)
+    func cancelFromIdleStaysIdle(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "cancelled", buffer: nil)
+        await harness.pipeline.cancel()
+        #expect(await harness.coordinator.state == .idle)
+    }
+
+    @Test("a cycle works after a cancel", arguments: LifecycleMode.allCases)
+    func cycleWorksAfterCancel(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "after cancel", buffer: nil)
+        await harness.pipeline.activate()
+        await harness.pipeline.cancel()
+        #expect(await harness.coordinator.state == .idle)
+
+        await harness.runCycle()
+        #expect(await harness.coordinator.state == .idle)
+        #expect(harness.injector.injectionCount == 1)
+        #expect(harness.injector.lastInjectedText == "after cancel")
+    }
 }
 
 /// The backend configuration a lifecycle behavior runs against.
@@ -190,12 +223,16 @@ private final class LifecycleHarness {
         }
     }
 
-    /// Run one activate → forward-PCM → complete cycle and let it settle.
-    func runCycle() async {
+    /// Activate and wait until live capture is ready (state is recording).
+    func activateToRecording() async {
         let previousReadyCount = audio.captureReadyCount
         await pipeline.activate()
         await waitForCaptureReady(after: previousReadyCount)
+    }
 
+    /// Run one activate → forward-PCM → complete cycle and let it settle.
+    func runCycle() async {
+        await activateToRecording()
         let emitTask = mode.streamsPCM ? emitChunks() : nil
         await pipeline.complete()
         emitTask?.cancel()

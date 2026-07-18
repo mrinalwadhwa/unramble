@@ -1096,53 +1096,6 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertEqual(injector.injectionCount, 3)
     }
 
-    // MARK: - Cancellation
-
-    func testCancelFromRecordingResetsToIdle() async {
-        let (pipeline, audio, _, _, _, coordinator) = makePipeline()
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        var currentState = await coordinator.state
-        XCTAssertEqual(currentState, .recording)
-
-        await pipeline.cancel()
-        currentState = await coordinator.state
-        XCTAssertEqual(currentState, .idle)
-        XCTAssertFalse(audio.isRecording)
-    }
-
-    func testCancelFromIdleRemainsIdle() async {
-        let (pipeline, _, _, _, _, coordinator) = makePipeline()
-
-        await pipeline.cancel()
-        let currentState = await coordinator.state
-        XCTAssertEqual(currentState, .idle)
-    }
-
-    func testCycleWorksAfterCancel() async {
-        let (pipeline, audio, _, _, injector, coordinator) = makePipeline()
-
-        // Start and cancel.
-        await pipeline.activate()
-        await pipeline.cancel()
-        var currentState = await coordinator.state
-        XCTAssertEqual(currentState, .idle)
-
-        // Start a fresh cycle — should work normally.
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        currentState = await coordinator.state
-        XCTAssertEqual(currentState, .recording)
-
-        await pipeline.complete()
-        currentState = await coordinator.state
-        XCTAssertEqual(currentState, .idle)
-        XCTAssertEqual(injector.injectionCount, 1)
-        // startCallCount may be 1 or 2 depending on whether the cancelled
-        // activate() reached startRecording() before the task was cancelled.
-        // The important invariant is that the second cycle started audio.
-        XCTAssertGreaterThanOrEqual(audio.startCallCount, 1)
-    }
-
     // MARK: - Edge cases: activate/complete out of order
 
     func testActivateWhileRecordingIsIgnored() async {
