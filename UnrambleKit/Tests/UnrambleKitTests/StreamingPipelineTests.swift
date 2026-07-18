@@ -3684,21 +3684,6 @@ final class StreamingPipelineTests: XCTestCase {
 
     // MARK: - Full streaming cycle
 
-    func testStreamingFullCycleTransitionsToIdleAfterCompletion() async {
-        let (pipeline, audio, _, _, _, _, coordinator) = makeStreamingPipeline()
-
-        await pipeline.activate()
-        var state = await coordinator.state
-        XCTAssertEqual(state, .recording)
-
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-    }
-
     func testStreamingFullCycleCallsStartStreaming() async {
         let (pipeline, audio, _, _, streaming, _, _) = makeStreamingPipeline()
 
@@ -4046,39 +4031,6 @@ final class StreamingPipelineTests: XCTestCase {
         let received = streaming.receivedContexts.first
         XCTAssertEqual(received?.bundleID, "com.test.app")
         XCTAssertEqual(received?.appName, "TestApp")
-    }
-
-    // MARK: - State transitions
-
-    func testStreamingStatePassesThroughAllPhases() async {
-        let coordinator = RecordingCoordinator()
-        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(coordinator: coordinator)
-
-        var collected: [RecordingState] = []
-        let expectation = XCTestExpectation(description: "Collect all state transitions")
-
-        let streamTask = Task {
-            for await state in await coordinator.stateStream {
-                collected.append(state)
-                // idle, recording, processing, injecting, idle
-                if collected.count >= 5 {
-                    break
-                }
-            }
-            expectation.fulfill()
-        }
-
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        await fulfillment(of: [expectation], timeout: 5.0)
-        streamTask.cancel()
-
-        XCTAssertEqual(collected, [.idle, .recording, .processing, .injecting, .idle])
     }
 
     // MARK: - Cancellation

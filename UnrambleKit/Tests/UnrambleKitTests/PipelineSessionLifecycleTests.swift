@@ -91,6 +91,17 @@ struct PipelineSessionLifecycleTests {
         #expect(harness.injector.injections.count == 1)
         #expect(harness.injector.injections.first?.context == context)
     }
+
+    // MARK: - State transitions
+
+    @Test(
+        "a cycle passes through the expected state sequence",
+        arguments: LifecycleMode.allCases)
+    func passesThroughStateSequence(_ mode: LifecycleMode) async {
+        let harness = LifecycleHarness(mode: mode, resolvesTo: "states", buffer: nil)
+        let states = await harness.runCycleObservingStates()
+        #expect(states == [.idle, .recording, .processing, .injecting, .idle])
+    }
 }
 
 /// The backend configuration a lifecycle behavior runs against.
@@ -188,6 +199,24 @@ private final class LifecycleHarness {
         let emitTask = mode.streamsPCM ? emitChunks() : nil
         await pipeline.complete()
         emitTask?.cancel()
+    }
+
+    /// Run one cycle while collecting the coordinator's state transitions,
+    /// returning the observed sequence once it settles back to idle.
+    func runCycleObservingStates() async -> [RecordingState] {
+        let coordinator = self.coordinator
+        let collector = Task { () -> [RecordingState] in
+            var collected: [RecordingState] = []
+            for await state in await coordinator.stateStream {
+                collected.append(state)
+                if collected.count >= 5 { break }
+            }
+            return collected
+        }
+        // Let the collector subscribe before the cycle drives transitions.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await runCycle()
+        return await collector.value
     }
 
     private func waitForCaptureReady(after previous: Int) async {

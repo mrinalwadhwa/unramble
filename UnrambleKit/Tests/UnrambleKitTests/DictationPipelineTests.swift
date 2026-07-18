@@ -205,19 +205,7 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertEqual(state, .idle)
     }
 
-    // MARK: - Full cycle: activate → complete → idle
-
-    func testFullCycleTransitionsToIdleAfterCompletion() async {
-        let (pipeline, audio, _, _, _, coordinator) = makePipeline()
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        var currentState = await coordinator.state
-        XCTAssertEqual(currentState, .recording)
-
-        await pipeline.complete()
-        currentState = await coordinator.state
-        XCTAssertEqual(currentState, .idle)
-    }
+    // MARK: - Capture boundary
 
     func testPhysicalReleaseHostTimeReachesAudioCaptureBoundary() async throws {
         let (pipeline, audio, _, _, _, _) = makePipeline()
@@ -1085,39 +1073,6 @@ final class DictationPipelineTests: XCTestCase {
 
         XCTAssertEqual(dictation.dictateCallCount, 1)
         XCTAssertEqual(dictation.lastReceivedContext, stubbedContext)
-    }
-
-    // MARK: - State transitions during full cycle
-
-    func testStatePassesThroughAllPhases() async {
-        let coordinator = RecordingCoordinator()
-        let (pipeline, audio, _, _, _, _) = makePipeline(coordinator: coordinator)
-
-        var collected: [RecordingState] = []
-        let expectation = XCTestExpectation(description: "Collect all state transitions")
-
-        let streamTask = Task {
-            for await state in await coordinator.stateStream {
-                collected.append(state)
-                // After returning to idle (the second idle), break.
-                if collected.count >= 5 {
-                    break
-                }
-            }
-            expectation.fulfill()
-        }
-
-        // Let the stream subscribe.
-        try? await Task.sleep(nanoseconds: 50_000_000)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        await fulfillment(of: [expectation], timeout: 5.0)
-        streamTask.cancel()
-
-        // Expected: idle (initial), recording, processing, injecting, idle
-        XCTAssertEqual(collected, [.idle, .recording, .processing, .injecting, .idle])
     }
 
     // MARK: - Multiple cycles
