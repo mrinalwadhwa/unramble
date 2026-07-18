@@ -59,6 +59,8 @@ python3 -m venv ../.scratch/polish-data-venv
 
 The first two are set automatically by `make test-all`.
 
+The test bundle blocks live network access by default. Any code path that builds a real OpenAI HTTP or WebSocket connection fails fast with a `NetworkGuard` error instead of hanging on a request or silently reaching the network, so a deterministic suite that forgets to inject a stub fails loudly. Set `UNRAMBLE_TEST_OPENAI=1` to opt a whole run into live traffic.
+
 By default, each invocation creates a unique directory under `.scratch/test-runs/` containing `swift-test.log`, `results-swift-testing.xml`, and `summary.txt`. The command prints those paths. Set `TEST_LOG` only when a caller needs an exact text-log path:
 
 ```bash

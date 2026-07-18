@@ -30,8 +30,9 @@ public struct OpenAIFileTranscriber: BatchDictationProviding {
         if let session {
             self.session = session
         } else {
-            self.session = URLSession(
-                configuration: Self.defaultSessionConfiguration())
+            let configuration = Self.defaultSessionConfiguration()
+            NetworkGuard.apply(to: configuration)
+            self.session = URLSession(configuration: configuration)
         }
     }
 

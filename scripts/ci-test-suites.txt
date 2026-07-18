@@ -67,6 +67,7 @@ MockTests
 ModeShortcutPolicyTests
 NemotronFloat16Tests
 NemotronStreamingTests
+NetworkGuardTests
 NoiseSoundsStillStrippedTests
 NormalizeFormattingTests
 NumberWordsSurviveTests

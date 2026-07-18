@@ -1225,6 +1225,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     static func buildTransport(
         apiKey: String, model: String
     ) throws -> any OpenAIRealtimeTransport {
+        try NetworkGuard.assertLiveNetworkAllowed("OpenAI Realtime WebSocket")
         let url = buildWebSocketURL(model: model)
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
