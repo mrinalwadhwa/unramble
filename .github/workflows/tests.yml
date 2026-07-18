@@ -36,6 +36,9 @@ jobs:
       - name: Run bounded clean package selection
         run: make test-ci
 
+      - name: Run slow timeout baseline
+        run: make test-slow
+
       - name: Print full test logs
         if: always()
         shell: bash

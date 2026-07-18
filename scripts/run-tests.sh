@@ -12,6 +12,11 @@ INVOCATION_DIR="$PWD"
 SWIFT_BIN="${SWIFT_BIN:-swift}"
 
 CI_SKIP_REGEX='(AudioPipelineTests|CGEventTapHotkeyProviderTests|CoreAudioDeviceProviderTests|KeychainServiceTests|LocalModelIntegrationTests|MainThreadDelayTests|NemotronStreamingTests|OpenAIFileTranscriberLiveTests|OpenAIRealtimeLiveTests|OpenAIStreamingBenchmarkTests|PermissionProviderTests|PipelineTimeoutTests|PolishScenarioRegexTests|PolishScenarioDeterministicTests|ServiceConfigTests|SoundFeedbackPathTests)'
+# Positive selection for the deterministic slow timeout/deadline lane. These
+# real-wall-clock suites are excluded from the bounded CI denylist, so a clean
+# baseline gate runs them explicitly under UNRAMBLE_TEST_SLOW. They use mocks and
+# make no live, model, keychain, or network call.
+SLOW_FILTER='(PipelineTimeoutTests|TimeoutOwnershipTests|PipelineDeadlineTests)'
 CI_FLAG_PATHS=(
     /tmp/unramble-test-categories
     /tmp/unramble-test-p1
@@ -26,7 +31,7 @@ CI_FLAG_PATHS=(
 )
 
 usage() {
-    printf 'usage: %s {default|ci|keychain-slow}\n' "$0" >&2
+    printf 'usage: %s {default|ci|slow|keychain-slow}\n' "$0" >&2
 }
 
 die() {
@@ -133,6 +138,11 @@ run_swift_tests() {
             clear_ci_environment
             swift_args+=(--disable-automatic-resolution --skip "$CI_SKIP_REGEX")
             ;;
+        slow)
+            clear_ci_environment
+            export UNRAMBLE_TEST_SLOW=1
+            swift_args+=(--disable-automatic-resolution --filter "$SLOW_FILTER")
+            ;;
         keychain-slow)
             export UNRAMBLE_TEST_KEYCHAIN=1
             export UNRAMBLE_TEST_SLOW=1
@@ -153,6 +163,9 @@ append_run_context() {
             ;;
         ci)
             printf 'Selection: bounded clean CI selection; host, live, model, corpus, and slow suites excluded.\n'
+            ;;
+        slow)
+            printf 'Selection: deterministic slow timeout and deadline lane under UNRAMBLE_TEST_SLOW.\n'
             ;;
         keychain-slow)
             printf 'Selection: default plus Keychain and slow suites; live/model/evaluation gates unchanged.\n'
@@ -193,7 +206,7 @@ main() {
     }
     MODE="${1:-default}"
     case "$MODE" in
-        default|ci|keychain-slow) ;;
+        default|ci|slow|keychain-slow) ;;
         *)
             usage
             die "unknown mode: $MODE"

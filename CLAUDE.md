@@ -23,6 +23,7 @@ The package contains XCTest and Swift Testing tests. Their native terminal summa
 ```bash
 make test               # Default package selection; inherits explicit test gates.
 make test-ci            # Bounded clean-CI selection; excludes host/live/model/corpus suites.
+make test-slow          # Deterministic slow timeout/deadline suites under UNRAMBLE_TEST_SLOW.
 make test-all           # Default selection plus Keychain and slow timeout suites.
 make test-runner-tests  # Runner/parser fixture checks; does not build the Swift package.
 ```

@@ -1,4 +1,4 @@
-.PHONY: build run test test-ci test-all test-runner-tests clean xcode generate models \
+.PHONY: build run test test-ci test-slow test-all test-runner-tests clean xcode generate models \
 	verify-models verify-app-models release archive sign notarize appcast version
 
 # XcodeGen must be installed: brew install xcodegen
@@ -73,6 +73,11 @@ test:
 # Run the bounded, clean-checkout CI selection without secrets or external test services.
 test-ci:
 	@"scripts/run-tests.sh" ci
+
+# Run the deterministic slow timeout and deadline suites under UNRAMBLE_TEST_SLOW.
+# Network-free and model-free, so it is a clean CI baseline gate.
+test-slow:
+	@"scripts/run-tests.sh" slow
 
 # Enable Keychain and slow timeout suites. Live, model, and evaluation gates are unchanged.
 test-all:
