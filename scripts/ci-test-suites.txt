@@ -36,6 +36,7 @@ DictationErrorTests
 DictationModeTransitionTests
 DictationPipelineIntegrationTests
 DictationPipelineTests
+FaithfulnessVerifierTests
 GainEndToEndTests
 GainFactorTests
 HomophonesSurvivePipelineTests
