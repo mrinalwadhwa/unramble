@@ -87,6 +87,7 @@ PCMConverterLifecycleTests
 PipelineDeadlineTests
 PipelineDictationTests
 PipelineIntegrationTests
+PipelineSessionLifecycleTests
 PipelineTimeoutTests
 PipelineTranscriptBufferIntegrationTests
 PolishBreakModeTests
