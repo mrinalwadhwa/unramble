@@ -94,6 +94,7 @@ ci RealtimeSilenceClassificationTests
 ci RealtimeTranscriptLedgerTests
 ci RecordingCoordinatorTests
 ci ReduplicationSurvivesTests
+ci RestoreFrequencyAdverbTests
 ci SentenceBoundaryTests
 ci SentenceInitialContentTests
 ci SerializedConverterOwnershipTests

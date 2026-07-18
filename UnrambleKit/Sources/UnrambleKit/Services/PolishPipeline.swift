@@ -1244,6 +1244,83 @@ public enum PolishPipeline {
         return result
     }
 
+    // MARK: - Frequency-Adverb Restoration
+
+    /// Frequency and recurrence adverbs form a closed class the model must
+    /// never rewrite: swapping one for another ("occasionally" -> "often")
+    /// always changes how often something happens, which polish never
+    /// legitimately does. Kept closed so the restore below only ever touches a
+    /// genuine one-for-another swap.
+    static let frequencyAdverbs: Set<String> = [
+        "never", "rarely", "seldom", "infrequently",
+        "occasionally", "sometimes", "periodically", "intermittently",
+        "sporadically", "often", "oftentimes", "frequently",
+        "usually", "normally", "generally", "regularly",
+        "routinely", "typically", "commonly", "mostly",
+        "always", "constantly", "continually", "continuously",
+        "repeatedly",
+    ]
+
+    /// Count each frequency adverb (case-insensitive, whole word) in `text`.
+    private static func frequencyAdverbCounts(in text: String) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        var current = ""
+        func flush() {
+            if frequencyAdverbs.contains(current) {
+                counts[current, default: 0] += 1
+            }
+            current = ""
+        }
+        for ch in text.lowercased() {
+            if ch.isLetter { current.append(ch) } else { flush() }
+        }
+        flush()
+        return counts
+    }
+
+    /// Restore a frequency adverb the model swapped for another.
+    ///
+    /// When the polished `output` drops exactly one frequency adverb the raw
+    /// `input` had and introduces exactly one it did not — a clean
+    /// one-for-another swap, with the same total count so nothing was added or
+    /// dropped — put the spoken word back. Only that single content word
+    /// changes, so the fidelity guards still bound the result. A reorder (the
+    /// multiset is unchanged) or an add/drop (unequal totals) is left to the
+    /// other guards.
+    static func restoreFrequencyAdverb(_ output: String, input: String) -> String {
+        let inCounts = frequencyAdverbCounts(in: input)
+        let outCounts = frequencyAdverbCounts(in: output)
+        guard inCounts != outCounts,
+              inCounts.values.reduce(0, +) == outCounts.values.reduce(0, +)
+        else { return output }
+
+        var missing: [String] = []
+        for (word, count) in inCounts {
+            let extra = count - (outCounts[word] ?? 0)
+            if extra > 0 { missing += Array(repeating: word, count: extra) }
+        }
+        var foreign: [String] = []
+        for (word, count) in outCounts {
+            let extra = count - (inCounts[word] ?? 0)
+            if extra > 0 { foreign += Array(repeating: word, count: extra) }
+        }
+        guard missing.count == 1, foreign.count == 1 else { return output }
+
+        let pattern = try! NSRegularExpression(
+            pattern: "\\b" + NSRegularExpression.escapedPattern(for: foreign[0])
+                + "\\b",
+            options: [.caseInsensitive])
+        let ns = output as NSString
+        guard let match = pattern.firstMatch(
+            in: output, range: NSRange(location: 0, length: ns.length))
+        else { return output }
+        let matched = ns.substring(with: match.range)
+        let replacement = matched.first?.isUppercase == true
+            ? missing[0].prefix(1).uppercased() + missing[0].dropFirst()
+            : missing[0]
+        return ns.replacingCharacters(in: match.range, with: replacement)
+    }
+
     // MARK: - Full Polish Pipeline
 
     /// How dictated paragraph/line breaks are handled through the model.
@@ -1375,6 +1452,11 @@ public enum PolishPipeline {
                 // ("layout breaks. On small screens," -> "breaks on small
                 // screens."). Punctuation-only, so the guards below still hold.
                 cleaned = rejoinVerbPrepModifier(cleaned, input: stripped)
+                // Put back a frequency adverb the model swapped for another
+                // ("occasionally" -> "often"): a closed-class, one-for-one swap
+                // that always changes meaning. One content word, so the guards
+                // below still hold.
+                cleaned = restoreFrequencyAdverb(cleaned, input: stripped)
                 if stripModelBreaks {
                     cleaned = stripModelNewlines(cleaned)
                 }

@@ -1539,3 +1539,61 @@ struct ConvertDecimalScaleBareTests {
             == "the main point is speed")
     }
 }
+
+@Suite("PolishPipeline – restoreFrequencyAdverb")
+struct RestoreFrequencyAdverbTests {
+
+    @Test("Restores a frequency adverb the model swapped for another")
+    func restoresSwap() {
+        let out = "Notifications often fire twice."
+        let input = "notifications occasionally fire twice"
+        #expect(PolishPipeline.restoreFrequencyAdverb(out, input: input)
+            == "Notifications occasionally fire twice.")
+    }
+
+    @Test("Leaves other frequency adverbs in the same unit untouched")
+    func preservesUnchangedNeighbors() {
+        let out = "The export sometimes times out. Notifications often fire twice."
+        let input = "the export sometimes times out notifications occasionally fire twice"
+        #expect(PolishPipeline.restoreFrequencyAdverb(out, input: input)
+            == "The export sometimes times out. Notifications occasionally fire twice.")
+    }
+
+    @Test("Preserves the capitalization of the swapped word")
+    func preservesCapitalization() {
+        let out = "Often the build fails."
+        let input = "occasionally the build fails"
+        #expect(PolishPipeline.restoreFrequencyAdverb(out, input: input)
+            == "Occasionally the build fails.")
+    }
+
+    @Test("Does nothing when the frequency adverbs match")
+    func noopWhenUnchanged() {
+        let out = "Notifications occasionally fire twice."
+        let input = "notifications occasionally fire twice"
+        #expect(PolishPipeline.restoreFrequencyAdverb(out, input: input) == out)
+    }
+
+    @Test("Does not fire on an add or drop, only a one-for-one swap")
+    func ignoresAddOrDrop() {
+        // The model dropped "occasionally" without introducing another adverb:
+        // that is the content guards' job, not a swap.
+        let dropped = "Notifications fire twice."
+        let droppedIn = "notifications occasionally fire twice"
+        #expect(PolishPipeline.restoreFrequencyAdverb(dropped, input: droppedIn)
+            == dropped)
+        // The model added "always" that was never spoken: also not a swap.
+        let added = "The build always fails."
+        let addedIn = "the build fails"
+        #expect(PolishPipeline.restoreFrequencyAdverb(added, input: addedIn)
+            == added)
+    }
+
+    @Test("Leaves a reordered but unchanged adverb set alone")
+    func ignoresReorder() {
+        // Same multiset {always, never}, just reordered: no swap to undo.
+        let out = "It never breaks and always ships."
+        let input = "it always ships and never breaks"
+        #expect(PolishPipeline.restoreFrequencyAdverb(out, input: input) == out)
+    }
+}
