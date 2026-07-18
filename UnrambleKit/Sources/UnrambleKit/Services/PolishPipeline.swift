@@ -479,6 +479,42 @@ public enum PolishPipeline {
             }
         }
 
+        // Bare word form without a scale word: "version two point one" -> "2.1",
+        // "three point zero" -> "3.0". Requiring a number word on BOTH sides of
+        // "point" keeps the noun sense out ("make one point clear", "a three
+        // point turn"), and the negative lookahead leaves the scaled cases above
+        // untouched.
+        let bareWordPattern = #"(?i)\b(zero|one|two|three|four|five|six|seven|eight|nine)\s+point\s+(zero|one|two|three|four|five|six|seven|eight|nine)\b(?!\s+(?:million|billion|thousand|trillion))"#
+        if let regex = try? NSRegularExpression(pattern: bareWordPattern) {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let r1 = Range(match.range(at: 1), in: result),
+                      let r2 = Range(match.range(at: 2), in: result),
+                      let d1 = digitWords[result[r1].lowercased()],
+                      let d2 = digitWords[result[r2].lowercased()]
+                else { continue }
+                result.replaceSubrange(fullRange, with: "\(d1).\(d2)")
+            }
+        }
+
+        // Bare digit form without a scale word: "3 point 5" -> "3.5".
+        let bareDigitPattern = #"\b(\d+)\s+point\s+(\d+)\b(?!\s+(?:million|billion|thousand|trillion))"#
+        if let regex = try? NSRegularExpression(
+            pattern: bareDigitPattern, options: .caseInsensitive) {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let r1 = Range(match.range(at: 1), in: result),
+                      let r2 = Range(match.range(at: 2), in: result)
+                else { continue }
+                result.replaceSubrange(
+                    fullRange, with: "\(result[r1]).\(result[r2])")
+            }
+        }
+
         return result
     }
 

@@ -1503,3 +1503,39 @@ struct VerbPrepRejoinTests {
         #expect(result == "The service operates on the legacy cluster. it's slower.")
     }
 }
+
+@Suite("PolishPipeline – convertDecimalScale bare decimals")
+struct ConvertDecimalScaleBareTests {
+
+    @Test("Bare spelled decimals convert to X.Y")
+    func bareSpelledDecimals() {
+        #expect(PolishPipeline.convertDecimalScale("ship version two point one")
+            == "ship version 2.1")
+        #expect(PolishPipeline.convertDecimalScale("now on version four point two")
+            == "now on version 4.2")
+        #expect(PolishPipeline.convertDecimalScale("three point zero in staging")
+            == "3.0 in staging")
+    }
+
+    @Test("Bare digit decimals convert to X.Y")
+    func bareDigitDecimals() {
+        #expect(PolishPipeline.convertDecimalScale("bumped it to 3 point 5")
+            == "bumped it to 3.5")
+    }
+
+    @Test("Scaled decimals still convert with the scale word")
+    func scaledStillWorks() {
+        #expect(PolishPipeline.convertDecimalScale("about two point five million rows")
+            == "about 2.5 million rows")
+    }
+
+    @Test("The noun 'point' is left alone when no number follows")
+    func nounPointUntouched() {
+        #expect(PolishPipeline.convertDecimalScale("let me make one point clear")
+            == "let me make one point clear")
+        #expect(PolishPipeline.convertDecimalScale("he did a three point turn")
+            == "he did a three point turn")
+        #expect(PolishPipeline.convertDecimalScale("the main point is speed")
+            == "the main point is speed")
+    }
+}
