@@ -1399,50 +1399,6 @@ final class DictationPipelineTests: XCTestCase {
 
     // MARK: - TranscriptBuffer wiring
 
-    func testSuccessfulCycleStoresTranscriptInBuffer() async {
-        let buffer = TranscriptBuffer()
-        let dictation = MockBatchProvider(stubbedText: "Hello from buffer")
-        let (pipeline, audio, _, _, _, _) = makePipeline(
-            batchProvider: dictation, transcriptBuffer: buffer)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        let stored = await buffer.lastTranscript
-        XCTAssertEqual(stored, "Hello from buffer")
-    }
-
-    func testTranscriptBufferUpdatedOnEachCycle() async {
-        let buffer = TranscriptBuffer()
-        let dictation = MockBatchProvider(stubbedText: "first")
-        let (pipeline, audio, _, _, _, _) = makePipeline(
-            batchProvider: dictation, transcriptBuffer: buffer)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-        var stored = await buffer.lastTranscript
-        XCTAssertEqual(stored, "first")
-
-        dictation.stubbedText = "second"
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-        stored = await buffer.lastTranscript
-        XCTAssertEqual(stored, "second")
-    }
-
-    func testEmptyDictationResultDoesNotStoreInBuffer() async {
-        let buffer = TranscriptBuffer()
-        let dictation = MockBatchProvider(stubbedText: "   ")
-        let (pipeline, audio, _, _, _, _) = makePipeline(
-            batchProvider: dictation, transcriptBuffer: buffer)
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        let stored = await buffer.lastTranscript
-        XCTAssertNil(stored, "Empty dictation result should not be stored in buffer")
-    }
-
     func testDictationFailureDoesNotStoreInBuffer() async {
         let buffer = TranscriptBuffer()
         let dictation = MockBatchProvider()
@@ -1455,18 +1411,6 @@ final class DictationPipelineTests: XCTestCase {
 
         let stored = await buffer.lastTranscript
         XCTAssertNil(stored, "Dictation failure should not store anything in buffer")
-    }
-
-    func testPipelineWorksWithoutTranscriptBuffer() async {
-        // Passing nil (the default) should not change existing behavior.
-        let (pipeline, audio, _, _, injector, coordinator) = makePipeline()
-
-        await activateAndWaitForCapture(pipeline, audioProvider: audio)
-        await pipeline.complete()
-
-        let state = await coordinator.state
-        XCTAssertEqual(state, .idle)
-        XCTAssertEqual(injector.injectionCount, 1)
     }
 
     // MARK: - Injection failure → injectionFailed

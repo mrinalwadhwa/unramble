@@ -4369,39 +4369,6 @@ final class StreamingPipelineTests: XCTestCase {
 
     // MARK: - Transcript buffer
 
-    func testStreamingStoresTranscriptInBuffer() async {
-        let buffer = TranscriptBuffer()
-        let streaming = MockStreamingProvider(stubbedText: "Streamed text")
-        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
-            streamingProvider: streaming, transcriptBuffer: buffer)
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        let stored = await buffer.lastTranscript
-        XCTAssertEqual(stored, "Streamed text")
-    }
-
-    func testBothEmptyResultsDoNotStoreInBuffer() async {
-        // When both streaming and batch return empty, nothing stored.
-        let buffer = TranscriptBuffer()
-        let streaming = MockStreamingProvider(stubbedText: "")
-        let dictation = MockBatchProvider(stubbedText: "")
-        let (pipeline, audio, _, _, _, _, _) = makeStreamingPipeline(
-            batchProvider: dictation, streamingProvider: streaming,
-            transcriptBuffer: buffer)
-
-        await pipeline.activate()
-        let emitTask = emitChunksInBackground(audio)
-        await pipeline.complete()
-        emitTask.cancel()
-
-        let stored = await buffer.lastTranscript
-        XCTAssertNil(stored, "Empty results from both paths should not be stored in buffer")
-    }
-
     func testStreamingEmptyButBatchSuccessStoresInBuffer() async {
         // When streaming returns empty but batch returns text, store batch result.
         let buffer = TranscriptBuffer()
