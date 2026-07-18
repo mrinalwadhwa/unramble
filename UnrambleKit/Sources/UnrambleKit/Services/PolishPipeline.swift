@@ -1128,6 +1128,86 @@ public enum PolishPipeline {
         return result
     }
 
+    // MARK: - Verb-Prep Rejoin
+
+    /// Verbs that govern "on" as a modifier ("the layout *breaks on* small
+    /// screens", "the sync *times out on* large accounts"). After such a verb,
+    /// "on X" is almost never a new heading, so a split there is a mis-attach.
+    /// Nouns before "on" are deliberately excluded: "usage on X" (keep) versus
+    /// "redesign on X" (split) is genuinely ambiguous, which the model handles.
+    static let verbsGoverningOn: Set<String> = [
+        "breaks", "break", "broke", "broken",
+        "crashes", "crash", "crashed",
+        "freezes", "freeze", "froze", "frozen",
+        "hangs", "hang", "hung",
+        "lags", "lag", "lagged",
+        "depends", "depend", "depended",
+        "relies", "rely", "relied",
+        "fails", "fail", "failed",
+        "spikes", "spike", "spiked",
+        "hinges", "hinge", "hinged",
+        "based", "focused", "blocked", "waiting",
+        // Additional unambiguous "verb + on" collocations. Deliberately omits
+        // noun homographs (acts, feeds, touches, borders, land) and phrasals
+        // whose token before "on" is "out" (times/maxes out on).
+        "lands", "landed",
+        "insists", "insist", "insisted",
+        "elaborates", "elaborate", "elaborated",
+        "capitalizes", "capitalize", "capitalized",
+        "dwells", "dwell", "dwelt", "dwelled",
+        "verges", "preys", "preyed",
+        "agrees", "agree", "agreed",
+        "decides", "decide", "decided",
+        "operates", "operate", "operated",
+        "reflects", "reflect", "reflected",
+        "draws", "drew",
+        "thrives", "thrive", "thrived",
+        "weighs", "weigh", "weighed",
+        "impinges", "impinge", "impinged",
+    ]
+
+    private static let verbPrepSplitPattern = try! NSRegularExpression(
+        pattern: #"\b(\w+)\.\s+On\s+([A-Za-z][^,.\n]*?)\s*([,.])"#)
+
+    /// Rejoin a verb-prep modifier the model wrongly split into a heading.
+    ///
+    /// When the model turns "<verb> on <X>" into a fronted heading
+    /// ("<verb>. On <X>, ..."), and the raw `input` had "<verb> on <X>"
+    /// contiguous, move the boundary back so it reads "<verb> on <X>. ...".
+    /// Only sentence punctuation moves — no content word is added or dropped —
+    /// so the fidelity guards still bound the result. The word after the new
+    /// period is re-capitalized by `normalizeFormatting`.
+    static func rejoinVerbPrepModifier(_ output: String, input: String) -> String {
+        let ns = output as NSString
+        let matches = verbPrepSplitPattern.matches(
+            in: output, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return output }
+
+        let inputNorm = input.lowercased().replacingOccurrences(
+            of: "\\s+", with: " ", options: .regularExpression)
+
+        var result = ""
+        var lastEnd = 0
+        for match in matches {
+            let verb = ns.substring(with: match.range(at: 1))
+            let x = ns.substring(with: match.range(at: 2))
+            let matchStart = match.range.location
+            let matchEnd = match.range.location + match.range.length
+            // Fire only for a verb that governs "on", and only when the raw
+            // input actually had "<verb> on <X>" contiguous (so this was a
+            // split, not a genuine heading the speaker introduced).
+            guard verbsGoverningOn.contains(verb.lowercased()),
+                  inputNorm.contains("\(verb.lowercased()) on \(x.lowercased())")
+            else { continue }
+            result += ns.substring(with: NSRange(
+                location: lastEnd, length: matchStart - lastEnd))
+            result += "\(verb) on \(x)."
+            lastEnd = matchEnd
+        }
+        result += ns.substring(from: lastEnd)
+        return result
+    }
+
     // MARK: - Full Polish Pipeline
 
     /// How dictated paragraph/line breaks are handled through the model.
@@ -1244,15 +1324,21 @@ public enum PolishPipeline {
             // little temperature and try again before falling back to raw.
             // Fidelity is unchanged either way — the guards bound every
             // attempt — but a resample often recovers a usable polish.
+            var lastModelOut = ""
             for (attempt, temperature) in [0.0, 0.4, 0.4].enumerated() {
                 let polished = try await polishThroughModel(
                     stripped, chatClient: chatClient, model: model,
                     tone: tone, precedingText: precedingText,
                     temperature: temperature)
                 if polished.isEmpty { continue }
+                lastModelOut = polished
 
                 var cleaned = guardAgainstEcho(
                     polished: polished, precedingText: precedingText)
+                // Undo a verb-prep modifier the model split into a heading
+                // ("layout breaks. On small screens," -> "breaks on small
+                // screens."). Punctuation-only, so the guards below still hold.
+                cleaned = rejoinVerbPrepModifier(cleaned, input: stripped)
                 if stripModelBreaks {
                     cleaned = stripModelNewlines(cleaned)
                 }

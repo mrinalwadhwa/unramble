@@ -1451,3 +1451,55 @@ struct ConvertNumberWordsTests {
         #expect(PolishPipeline.convertNumberWords("$49 per month") == "$49 per month")
     }
 }
+
+@Suite("PolishPipeline – rejoinVerbPrepModifier")
+struct VerbPrepRejoinTests {
+
+    @Test("Rejoins a verb-prep modifier the model split into a heading")
+    func rejoinsVerbPrepSplit() {
+        let out = "The mobile layout breaks. On small screens, the error messages are still too vague."
+        let input = "the mobile layout breaks on small screens and the error messages are still too vague"
+        let result = PolishPipeline.rejoinVerbPrepModifier(out, input: input)
+        #expect(result == "The mobile layout breaks on small screens. the error messages are still too vague.")
+    }
+
+    @Test("Rejoins a verb-prep split that ends the sentence")
+    func rejoinsAtSentenceEnd() {
+        let out = "The dashboard freezes. On older browsers."
+        let input = "the dashboard freezes on older browsers"
+        let result = PolishPipeline.rejoinVerbPrepModifier(out, input: input)
+        #expect(result == "The dashboard freezes on older browsers.")
+    }
+
+    @Test("Leaves a noun-before-on heading split alone")
+    func leavesNounHeading() {
+        // "redesign on the back end" — noun before "on"; a genuine area heading.
+        let out = "Rundown by team. We finally shipped the redesign. On the back end, we're chasing a leak."
+        let input = "rundown by team we finally ship the redesign on the back end we're chasing a leak"
+        #expect(PolishPipeline.rejoinVerbPrepModifier(out, input: input) == out)
+    }
+
+    @Test("Leaves a non-verb word before on alone")
+    func leavesNonVerb() {
+        let out = "The campaign went live yesterday. On legal, the contracts are signed."
+        let input = "the campaign went live yesterday on legal the contracts are signed"
+        #expect(PolishPipeline.rejoinVerbPrepModifier(out, input: input) == out)
+    }
+
+    @Test("Does not fire when the input was not contiguous")
+    func requiresContiguousInput() {
+        // "breaks" is a governing verb, but the raw input had other words between
+        // "breaks" and "on small screens" — a genuine boundary, so keep the split.
+        let out = "The build breaks. On small screens, we test."
+        let input = "the build breaks badly on small screens we test"
+        #expect(PolishPipeline.rejoinVerbPrepModifier(out, input: input) == out)
+    }
+
+    @Test("Rejoins a newly-listed governing verb")
+    func rejoinsExpandedVerb() {
+        let out = "The service operates. On the legacy cluster, it's slower."
+        let input = "the service operates on the legacy cluster it's slower"
+        let result = PolishPipeline.rejoinVerbPrepModifier(out, input: input)
+        #expect(result == "The service operates on the legacy cluster. it's slower.")
+    }
+}
