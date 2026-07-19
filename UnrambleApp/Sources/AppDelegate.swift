@@ -385,30 +385,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             })
 
-    /// Resolve a model directory path, checking the app bundle first,
-    /// then Application Support. Returns the directory path as a String,
-    /// or nil if not found in either location.
-    private static func resolveModelPath(
-        _ modelID: String, file: String,
-        modelManager: LocalModelManager
-    ) -> String? {
-        if let resources = Bundle.main.resourceURL {
-            let bundled = resources
-                .appendingPathComponent("models")
-                .appendingPathComponent(modelID)
-            if FileManager.default.fileExists(
-                atPath: bundled.appendingPathComponent(file).path) {
-                return bundled.path
-            }
-        }
-        let appSupport = modelManager.modelPath(for: modelID)
-        if FileManager.default.fileExists(
-            atPath: appSupport.appendingPathComponent(file).path) {
-            return appSupport.path
-        }
-        return nil
-    }
-
     private func setupPipeline(mode: DictationMode) {
         audioProvider.setAudioDeviceProvider(audioDeviceProvider)
         audioProvider.setSoundFeedbackProvider(soundFeedbackProvider)
@@ -423,28 +399,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #if arch(arm64)
             Log.debug("[AppDelegate] Using local models (STT + MLX)")
             let modelManager = LocalModelManager()
+            let bundledModelsRoot = Bundle.main.resourceURL?
+                .appendingPathComponent("models")
 
             // Resolve model paths: app bundle first, then Application Support.
-            guard let qwenModelPath = Self.resolveModelPath(
-                "qwen3-0.6b-4bit", file: "model.safetensors",
-                modelManager: modelManager)
+            guard let qwenModelPath = modelManager.resolveModelDirectory(
+                modelID: "qwen3-0.6b-4bit", file: "model.safetensors",
+                bundledModelsRoot: bundledModelsRoot)
             else {
                 fatalError(
                     "Required local model is missing: qwen3-0.6b-4bit")
             }
-            guard let adapterPath = Self.resolveModelPath(
-                "qwen3-0.6b-4bit-polish-adapter", file: "adapters.safetensors",
-                modelManager: modelManager)
+            guard let adapterPath = modelManager.resolveModelDirectory(
+                modelID: "qwen3-0.6b-4bit-polish-adapter", file: "adapters.safetensors",
+                bundledModelsRoot: bundledModelsRoot)
             else {
                 fatalError(
                     "Required local model is missing: "
                         + "qwen3-0.6b-4bit-polish-adapter")
             }
 
-            guard let nemotronPath = Self.resolveModelPath(
-                "nemotron-speech-streaming-en-0.6b-coreml",
+            guard let nemotronPath = modelManager.resolveModelDirectory(
+                modelID: "nemotron-speech-streaming-en-0.6b-coreml",
                 file: "nemotron_coreml_560ms/tokenizer.json",
-                modelManager: modelManager
+                bundledModelsRoot: bundledModelsRoot
             ) else {
                 fatalError(
                     "Required local model is missing: "

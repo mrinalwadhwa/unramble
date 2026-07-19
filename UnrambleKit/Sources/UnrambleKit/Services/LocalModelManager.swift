@@ -29,4 +29,29 @@ public struct LocalModelManager: Sendable {
     public func modelPath(for modelID: String) -> URL {
         modelsDirectory.appendingPathComponent(modelID)
     }
+
+    /// Resolve the directory holding a model, preferring the bundled model pack
+    /// and then this Application Support location. `bundledModelsRoot` is the
+    /// app bundle's `models` directory, or nil when the app has no resource
+    /// bundle. Return the directory path where `file` is present, or nil if the
+    /// model is missing from both locations.
+    public func resolveModelDirectory(
+        modelID: String,
+        file: String,
+        bundledModelsRoot: URL?
+    ) -> String? {
+        if let bundledModelsRoot {
+            let bundled = bundledModelsRoot.appendingPathComponent(modelID)
+            if FileManager.default.fileExists(
+                atPath: bundled.appendingPathComponent(file).path) {
+                return bundled.path
+            }
+        }
+        let appSupport = modelPath(for: modelID)
+        if FileManager.default.fileExists(
+            atPath: appSupport.appendingPathComponent(file).path) {
+            return appSupport.path
+        }
+        return nil
+    }
 }
