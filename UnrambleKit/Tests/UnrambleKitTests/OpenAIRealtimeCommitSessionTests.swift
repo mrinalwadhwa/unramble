@@ -557,7 +557,7 @@ struct OpenAIRealtimeCommitSessionTests {
 
         let exchange = InteractiveRealtimeExchange()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
@@ -623,7 +623,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let transport = SelectiveFailingRealtimeSend(
             rejectedType: "input_audio_buffer.commit")
 
-        try await OpenAIStreamingProvider.sendRealtimeAudio(
+        try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
             source,
             session: session,
             send: { try await transport.send($0) })
@@ -651,7 +651,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let transport = SelectiveFailingRealtimeSend(
             rejectedType: "input_audio_buffer.commit")
 
-        try await OpenAIStreamingProvider.sendRealtimeAudio(
+        try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
             source,
             session: session,
             send: { try await transport.send($0) })
@@ -672,14 +672,14 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let exchange = InteractiveRealtimeExchange()
         let evidenceRecorder = RealtimeEvidenceRecorder()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
 
         let audio = Data((0..<20).map(UInt8.init))
         let audioTask = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 audio,
                 session: session,
                 send: { await exchange.send($0) })
@@ -694,7 +694,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         try await audioTask.value
 
         let finishTask = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) },
                 onEvidence: { await evidenceRecorder.record($0) })
@@ -796,12 +796,12 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let session = makeOrchestrationSession()
         let exchange = InteractiveRealtimeExchange()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
         let audioTask = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { await exchange.send($0) })
@@ -812,7 +812,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         try await audioTask.value
 
         let finishTask = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
         }
@@ -912,12 +912,12 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let session = makeOrchestrationSession()
         let exchange = InteractiveRealtimeExchange()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
         let audioTask = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 0, count: 8),
                 session: session,
                 send: { await exchange.send($0) })
@@ -928,7 +928,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         try await audioTask.value
 
         let finishTask = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
         }
@@ -948,7 +948,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         enum SendFailure: Error { case rejected }
         let session = makeOrchestrationSession()
         await #expect(throws: SendFailure.self) {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { _ in throw SendFailure.rejected })
@@ -965,7 +965,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             rejectedType: "input_audio_buffer.commit")
 
         await #expect(throws: SelectiveFailingRealtimeSend.SendFailure.self) {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { try await transport.send($0) })
@@ -983,7 +983,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             rejectedType: "conversation.item.create")
 
         await #expect(throws: SelectiveFailingRealtimeSend.SendFailure.self) {
-            _ = try await OpenAIStreamingProvider.finishRealtimeSession(
+            _ = try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { try await transport.send($0) })
         }
@@ -1001,7 +1001,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             rejectedType: "response.create")
 
         await #expect(throws: SelectiveFailingRealtimeSend.SendFailure.self) {
-            _ = try await OpenAIStreamingProvider.finishRealtimeSession(
+            _ = try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { try await transport.send($0) })
         }
@@ -1018,12 +1018,12 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let session = makeOrchestrationSession()
         let exchange = InteractiveRealtimeExchange()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1046,12 +1046,12 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let session = makeOrchestrationSession()
         let exchange = InteractiveRealtimeExchange()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1062,7 +1062,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         try await audio.value
 
         let finish = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
         }
@@ -1083,12 +1083,12 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let session = makeOrchestrationSession()
         let exchange = InteractiveRealtimeExchange()
         let reader = Task {
-            try await OpenAIStreamingProvider.readRealtimeSessionEvents(
+            try await OpenAIRealtimeSessionDriver.readRealtimeSessionEvents(
                 session: session,
                 receive: { try await exchange.receive() })
         }
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1101,7 +1101,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         try await audio.value
 
         let finish = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
         }
@@ -1129,7 +1129,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             throws: OpenAIRealtimeCommitSession.Failure
                 .unalignedAudioByteCount(3)
         ) {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 3),
                 session: session,
                 send: { _ in
@@ -1140,7 +1140,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             throws: OpenAIRealtimeCommitSession.Failure
                 .unalignedAudioByteCount(3)
         ) {
-            _ = try await OpenAIStreamingProvider.finishRealtimeSession(
+            _ = try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { _ in
                     Issue.record("an invalid candidate must not be polished")
@@ -1162,7 +1162,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let exchange = BlockingRealtimeSend()
 
         let first = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data([1, 0]),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1171,7 +1171,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         await exchange.waitForSentCount(1)
 
         let second = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data([2, 0]),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1199,7 +1199,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let exchange = BlockingRealtimeSend()
 
         let first = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data([1, 0]),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1208,7 +1208,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         await exchange.waitForSentCount(1)
 
         let cancelled = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data([2, 0]),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1238,7 +1238,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             maxUnresolvedItems: 2)
         let exchange = BlockingRealtimeSend()
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data([1, 0]),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1261,7 +1261,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let session = makeOrchestrationSession()
         let exchange = InteractiveRealtimeExchange()
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data(repeating: 1, count: 8),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1299,7 +1299,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let finishCompletion = AsyncStartProbe()
 
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 Data([1, 0]),
                 session: session,
                 send: { await exchange.send($0) })
@@ -1308,7 +1308,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         await exchange.waitForSentCount(1)
 
         let finish = Task {
-            let result = try await OpenAIStreamingProvider.finishRealtimeSession(
+            let result = try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
             await finishCompletion.markStarted()
@@ -1348,17 +1348,17 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let first = pcm16([0, 300, 600])
         let second = pcm16([900, 1_200, 1_500])
 
-        try await OpenAIStreamingProvider.sendRealtimeAudio(
+        try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
             first,
             session: session,
             send: { await exchange.send($0) })
-        try await OpenAIStreamingProvider.sendRealtimeAudio(
+        try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
             second,
             session: session,
             send: { await exchange.send($0) })
 
         let finish = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
         }
@@ -1399,7 +1399,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
         let source = pcm16([3_000, -3_000, 3_000, -3_000, 3_000])
 
         let audio = Task {
-            try await OpenAIStreamingProvider.sendRealtimeAudio(
+            try await OpenAIRealtimeSessionDriver.sendRealtimeAudio(
                 source,
                 session: session,
                 send: { await exchange.send($0) })
@@ -1432,7 +1432,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             try await session.prepareCommit(force: false).commit)
 
         await #expect(throws: DictationError.self) {
-            try await OpenAIStreamingProvider.withRealtimeSessionTimeout(
+            try await OpenAIRealtimeSessionDriver.withRealtimeSessionTimeout(
                 seconds: 0.01,
                 waitingFor: "commit acknowledgement",
                 session: session,
@@ -1471,7 +1471,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             byteCount: 8,
             containsSpeech: true)
         let finish = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) })
         }
@@ -1506,7 +1506,7 @@ struct OpenAIRealtimeMultiCommitOrchestrationTests {
             byteCount: 8,
             containsSpeech: true)
         let finish = Task {
-            try await OpenAIStreamingProvider.finishRealtimeSession(
+            try await OpenAIRealtimeSessionDriver.finishRealtimeSession(
                 session: session,
                 send: { await exchange.send($0) },
                 onEvidence: onEvidence)
