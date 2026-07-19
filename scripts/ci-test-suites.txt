@@ -30,6 +30,7 @@ ci ConvertSpokenTimeTests
 ci DiagnosticsPrivacyTests
 ci DictatedPunctuationTests
 ci DictationAudioSinkTests
+ci DictationCompositionFactoryTests
 ci DictationErrorTests
 ci DictationModeAvailabilityTests
 ci DictationModeTransitionTests

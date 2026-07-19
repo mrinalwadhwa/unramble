@@ -391,8 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioDeviceProvider.setAudioCaptureProvider(audioProvider)
 
         let language = Settings.shared.language.languageCode
-        let backend: DictationBackend
-        let onSessionExpired: (@Sendable () -> Void)?
+        let composition: DictationComposition
 
         if mode == .local {
             // Local mode: on-device STT + fine-tuned MLX LLM polish.
@@ -401,74 +400,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let modelManager = LocalModelManager()
             let bundledModelsRoot = Bundle.main.resourceURL?
                 .appendingPathComponent("models")
-
-            // Resolve model paths: app bundle first, then Application Support.
-            guard let qwenModelPath = modelManager.resolveModelDirectory(
-                modelID: "qwen3-0.6b-4bit", file: "model.safetensors",
-                bundledModelsRoot: bundledModelsRoot)
-            else {
-                fatalError(
-                    "Required local model is missing: qwen3-0.6b-4bit")
+            composition = DictationCompositionFactory.makeLocal(
+                modelManager: modelManager,
+                bundledModelsRoot: bundledModelsRoot,
+                cycleInterval: DictationCompositionFactory.cycleInterval(
+                    from: ProcessInfo.processInfo.environment))
+            localModelRuntime = composition.localRuntime
+            if let runtime = composition.localRuntime {
+                startModelPreload(runtime)
             }
-            guard let adapterPath = modelManager.resolveModelDirectory(
-                modelID: "qwen3-0.6b-4bit-polish-adapter", file: "adapters.safetensors",
-                bundledModelsRoot: bundledModelsRoot)
-            else {
-                fatalError(
-                    "Required local model is missing: "
-                        + "qwen3-0.6b-4bit-polish-adapter")
-            }
-
-            guard let nemotronPath = modelManager.resolveModelDirectory(
-                modelID: "nemotron-speech-streaming-en-0.6b-coreml",
-                file: "nemotron_coreml_560ms/tokenizer.json",
-                bundledModelsRoot: bundledModelsRoot
-            ) else {
-                fatalError(
-                    "Required local model is missing: "
-                        + "nemotron-speech-streaming-en-0.6b-coreml")
-            }
-            let sttEngine = NemotronEngine(
-                modelManager: modelManager, modelPath: nemotronPath)
-            let llmEngine = MLXLLMEngine(
-                name: "Qwen3 0.6B Polish",
-                modelDirectory: URL(
-                    fileURLWithPath: qwenModelPath, isDirectory: true),
-                adapterDirectory: URL(
-                    fileURLWithPath: adapterPath, isDirectory: true))
-            let polisher: any PolishChatClient = MLXPolishClient(
-                engine: llmEngine)
-            let runtime = LocalModelRuntime(
-                sttEngine: sttEngine, llmEngine: llmEngine)
-            localModelRuntime = runtime
-            // Allow overriding the streaming cycle interval for tuning.
-            let cycleInterval: TimeInterval = {
-                if let raw = ProcessInfo.processInfo.environment[
-                    "UNRAMBLE_CYCLE_INTERVAL"], let value = Double(raw),
-                    value > 0 { return value }
-                return 3
-            }()
-            backend = .local(
-                streaming: LocalStreamingProvider(
-                    sttEngine: sttEngine, polishChatClient: polisher,
-                    cycleInterval: cycleInterval,
-                    loadSTT: { try await runtime.loadSTT() }))
-            onSessionExpired = nil
-
-            startModelPreload(runtime)
             #else
             fatalError("Local mode requires Apple Silicon")
             #endif
         } else {
             // Cloud mode: OpenAI STT + cloud polish.
-            backend = .cloud(
-                realtime: OpenAIStreamingProvider(
-                    apiKey: ServiceConfig.shared.openAIAPIKey ?? ""),
-                fallback: OpenAIFileTranscriber(
-                    apiKey: ServiceConfig.shared.openAIAPIKey ?? ""))
-            onSessionExpired = { [weak self] in
-                Task { @MainActor in self?.beginSessionRecovery() }
-            }
+            composition = DictationCompositionFactory.makeCloud(
+                apiKey: ServiceConfig.shared.openAIAPIKey ?? "",
+                onSessionExpired: { [weak self] in
+                    Task { @MainActor in self?.beginSessionRecovery() }
+                })
         }
 
         let isLocal = mode == .local
@@ -477,12 +427,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newPipeline = DictationPipeline(
             audioProvider: audioProvider,
             contextProvider: AXAppContextProvider(),
-            backend: backend,
+            backend: composition.backend,
             textInjector: textInjector,
             coordinator: coordinator,
             transcriptBuffer: transcriptBuffer,
             language: language,
-            onSessionExpired: onSessionExpired,
+            onSessionExpired: composition.onSessionExpired,
             micDiagnosticStore: micDiagnosticStore
         )
         pipeline = newPipeline
