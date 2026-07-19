@@ -173,30 +173,14 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
         let selectedRange = AXElementHelper.rangeValue(
             of: kAXSelectedTextRangeAttribute, from: focused)
 
-        let newValue: String
-        let newCursorPos: Int
-
-        if let range = selectedRange, range.length > 0 {
-            // Replace selected text (range is in UTF-16 offsets)
-            let start = stringIndexFromUTF16Offset(in: currentValue, utf16Offset: range.location)
-            let end = stringIndexFromUTF16Offset(
-                in: currentValue, utf16Offset: range.location + range.length)
-            var mutable = currentValue
-            mutable.replaceSubrange(start..<end, with: textToInject)
-            newValue = mutable
-            newCursorPos = range.location + utf16Count(of: textToInject)
-        } else if let pos = cursorPos {
-            // Insert at cursor position (pos is a UTF-16 offset)
-            let index = stringIndexFromUTF16Offset(in: currentValue, utf16Offset: pos)
-            var mutable = currentValue
-            mutable.insert(contentsOf: textToInject, at: index)
-            newValue = mutable
-            newCursorPos = pos + utf16Count(of: textToInject)
-        } else {
-            // Append to end
-            newValue = currentValue + textToInject
-            newCursorPos = utf16Count(of: newValue)
-        }
+        let plan = InjectionPlanner().plan(
+            insert: textToInject,
+            into: currentValue,
+            selectedRange: selectedRange.map { (location: $0.location, length: $0.length) },
+            cursorPosition: cursorPos
+        )
+        let newValue = plan.newValue
+        let newCursorPos = plan.newCursorPosition
 
         guard AXElementHelper.setValue(newValue, on: focused) else {
             throw InjectionError.allStrategiesFailed(bundleID: "accessibility-set-failed")
@@ -524,39 +508,6 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
             text: text,
             fieldContent: fieldContent,
             cursorPosition: cursorPosition)
-    }
-
-    /// Convert a UTF-16 offset to a String.Index, clamping to valid bounds.
-    ///
-    /// Accessibility APIs report positions in UTF-16 code units. This converts
-    /// to a Swift String.Index suitable for string mutations. If the offset
-    /// lands mid-grapheme, the index is rounded down to the nearest character
-    /// boundary.
-    private func stringIndexFromUTF16Offset(in string: String, utf16Offset: Int) -> String.Index {
-        let utf16 = string.utf16
-        let clamped = max(0, min(utf16Offset, utf16.count))
-        let utf16Index = utf16.index(utf16.startIndex, offsetBy: clamped)
-        // Round down to the nearest Character boundary
-        if let exact = String.Index(utf16Index, within: string) {
-            return exact
-        }
-        // If we landed mid-grapheme, scan backward for a valid boundary
-        var idx = utf16Index
-        while idx > utf16.startIndex {
-            utf16.formIndex(before: &idx)
-            if let valid = String.Index(idx, within: string) {
-                return valid
-            }
-        }
-        return string.startIndex
-    }
-
-    /// Return the UTF-16 length of a string.
-    ///
-    /// Used to compute new cursor positions after string mutations, since
-    /// Accessibility APIs expect UTF-16 offsets.
-    private func utf16Count(of string: String) -> Int {
-        return string.utf16.count
     }
 
     /// Add a leading space by reading the currently focused element's state.

@@ -44,6 +44,7 @@ ci HomophonesSurvivePipelineTests
 ci HotkeyPipelineDriverTests
 ci HotkeySettingTests
 ci InjectionErrorTerminalTests
+ci InjectionPlannerTests
 ci LeadingSpaceTests
 ci LocalModelManagerTests
 ci LocalModelRuntimeTests
