@@ -2,68 +2,6 @@ import CoreFoundation
 import CryptoKit
 import Foundation
 
-enum OpenAIRealtimeTransportCloseReason: Equatable, Sendable {
-    case normal
-    case goingAway
-    case abnormal
-}
-
-protocol OpenAIRealtimeTransport: Sendable {
-    func resume()
-    func send(_ text: String) async throws
-    func receiveText() async throws -> String
-    func close(_ reason: OpenAIRealtimeTransportCloseReason)
-}
-
-private final class URLSessionRealtimeTransport:
-    OpenAIRealtimeTransport, @unchecked Sendable
-{
-    private let task: URLSessionWebSocketTask
-    private let session: URLSession
-
-    init(task: URLSessionWebSocketTask, session: URLSession) {
-        self.task = task
-        self.session = session
-    }
-
-    func resume() {
-        task.resume()
-    }
-
-    func send(_ text: String) async throws {
-        try await task.send(.string(text))
-    }
-
-    func receiveText() async throws -> String {
-        let message: URLSessionWebSocketTask.Message
-        do {
-            message = try await task.receive()
-        } catch {
-            throw DictationError.networkError(
-                "WebSocket receive failed: \(error.localizedDescription)")
-        }
-
-        switch message {
-        case .string(let text):
-            return text
-        case .data(let data):
-            return String(data: data, encoding: .utf8) ?? ""
-        @unknown default:
-            return ""
-        }
-    }
-
-    func close(_ reason: OpenAIRealtimeTransportCloseReason) {
-        let code: URLSessionWebSocketTask.CloseCode = switch reason {
-        case .normal: .normalClosure
-        case .goingAway: .goingAway
-        case .abnormal: .abnormalClosure
-        }
-        task.cancel(with: code, reason: nil)
-        session.invalidateAndCancel()
-    }
-}
-
 /// Stream audio to the OpenAI Realtime API and return polished text.
 ///
 /// Opens a WebSocket to `wss://api.openai.com/v1/realtime` per dictation
@@ -330,7 +268,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         maxUnresolvedItems: Int,
         evidenceObserver: EvidenceObserver?,
         transportFactory: @escaping TransportFactory = {
-            try OpenAIStreamingProvider.buildTransport(apiKey: $0, model: $1)
+            try OpenAIRealtimeTransportFactory.buildTransport(apiKey: $0, model: $1)
         },
         setupAdmission: SetupAdmission? = nil,
         backupReadyObserver: BackupReadyObserver? = nil,
@@ -1215,29 +1153,6 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
     /// Build a fresh WebSocket transport for the OpenAI Realtime API.
     ///
-    /// The URLSessionConfiguration's `timeoutIntervalForRequest` applies to
-    /// the interval between data packets on the WebSocket, not the total
-    /// connection lifetime. We set it to 300 s so that a long idle window
-    /// during transcription of a long audio buffer does not drop the
-    /// connection mid-session. Previously this was the default (60 s),
-    /// which caused `NSPOSIXErrorDomain Code=57 "Socket is not connected"`
-    /// failures on dictations longer than about a minute.
-    static func buildTransport(
-        apiKey: String, model: String
-    ) throws -> any OpenAIRealtimeTransport {
-        try NetworkGuard.assertLiveNetworkAllowed("OpenAI Realtime WebSocket")
-        let url = OpenAIRealtimeWireCodec.buildWebSocketURL(model: model)
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 300
-        let session = URLSession(configuration: config)
-        return URLSessionRealtimeTransport(
-            task: session.webSocketTask(with: request),
-            session: session)
-    }
-
     private struct DetachedSession: @unchecked Sendable {
         let setup: Task<Void, Error>?
         let commit: OpenAIRealtimeCommitSession?

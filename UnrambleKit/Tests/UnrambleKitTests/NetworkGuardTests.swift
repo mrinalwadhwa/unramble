@@ -14,7 +14,7 @@ struct NetworkGuardTests {
         defer { NetworkGuard.setForcedFailClosed(nil) }
 
         #expect(throws: NetworkGuardError.self) {
-            _ = try OpenAIStreamingProvider.buildTransport(
+            _ = try OpenAIRealtimeTransportFactory.buildTransport(
                 apiKey: "sk-test", model: "gpt-4o-realtime")
         }
     }
@@ -25,7 +25,7 @@ struct NetworkGuardTests {
         defer { NetworkGuard.setForcedFailClosed(nil) }
 
         // Building the task does not open a connection, so it must not throw.
-        _ = try OpenAIStreamingProvider.buildTransport(
+        _ = try OpenAIRealtimeTransportFactory.buildTransport(
             apiKey: "sk-test", model: "gpt-4o-realtime")
     }
 

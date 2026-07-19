@@ -76,6 +76,7 @@ ci OpenAIRealtimeSessionOwnershipTests
 ci OpenAIRealtimeSessionSummaryTests
 ci OpenAIRealtimeTranscriptReducerTests
 ci OpenAIRealtimeTranscriptTimeoutTests
+ci OpenAIRealtimeTransportTests
 ci PCMConverterLifecycleTests
 ci PipelineDeadlineTests
 ci PipelineDictationTests
