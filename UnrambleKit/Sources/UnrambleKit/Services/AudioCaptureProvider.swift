@@ -874,7 +874,7 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
     /// Optional device provider for mic selection. When set, the engine
     /// is configured to capture from the selected device instead of the
     /// system default.
-    private weak var _audioDeviceProvider: CoreAudioDeviceProvider?
+    private weak var _audioDeviceProvider: (any AudioInputDeviceSnapshotProviding)?
 
     /// The device ID the engine was last configured with, or nil for
     /// system default. Used to detect when the device changed and the
@@ -984,7 +984,7 @@ public final class AudioCaptureProvider: AudioProviding, @unchecked Sendable {
     ///
     /// Call once during setup, before the first recording session. The
     /// provider is held weakly to avoid retain cycles with `AppDelegate`.
-    public func setAudioDeviceProvider(_ provider: CoreAudioDeviceProvider) {
+    public func setAudioDeviceProvider(_ provider: any AudioInputDeviceSnapshotProviding) {
         lock.withLock { _audioDeviceProvider = provider }
     }
 

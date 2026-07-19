@@ -31,7 +31,7 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
     /// does not emit configuration-change notifications when stopped,
     /// so without this, device changes between recording sessions
     /// leave the engine with stale CoreAudio state.
-    private weak var _audioCaptureProvider: AudioCaptureProvider?
+    private weak var _audioCaptureProvider: (any AudioCaptureRebuildSink)?
 
     /// Listeners registered with Core Audio for device changes.
     private var deviceListListenerBlock: AudioObjectPropertyListenerBlock?
@@ -47,7 +47,7 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
     ///
     /// Call once during setup, after both providers are created.
     /// The provider is held weakly to avoid retain cycles.
-    public func setAudioCaptureProvider(_ provider: AudioCaptureProvider) {
+    public func setAudioCaptureProvider(_ provider: any AudioCaptureRebuildSink) {
         lock.withLock { _audioCaptureProvider = provider }
     }
 
@@ -404,7 +404,7 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             let devicesBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 guard let self else { return }
                 Log.debug("[CoreAudioDeviceProvider] Device list changed")
-                let (selectedID, captureProvider): (UInt32?, AudioCaptureProvider?) = self.lock
+                let (selectedID, captureProvider): (UInt32?, (any AudioCaptureRebuildSink)?) = self.lock
                     .withLock {
                         (self._selectedDeviceID, self._audioCaptureProvider)
                     }
@@ -443,7 +443,7 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
 
             let defaultBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 Log.debug("[CoreAudioDeviceProvider] Default input device changed")
-                let (selectedID, captureProvider): (UInt32?, AudioCaptureProvider?) =
+                let (selectedID, captureProvider): (UInt32?, (any AudioCaptureRebuildSink)?) =
                     self?.lock.withLock {
                         (self?._selectedDeviceID, self?._audioCaptureProvider)
                     } ?? (nil, nil)
