@@ -484,7 +484,7 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         if !combined.isEmpty {
             finalPolished = await polishWithPreceding(
                 combined, preceding: snapshot.committed,
-                context: snapshot.context)
+                context: snapshot.context, finalFlush: true)
         }
         try requireCurrentSession(generation)
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
@@ -1158,7 +1158,8 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
     // MARK: - Polishing
 
     private func polishWithPreceding(
-        _ raw: String, preceding: String, context: AppContext
+        _ raw: String, preceding: String, context: AppContext,
+        finalFlush: Bool = false
     ) async -> String {
         let precedingText = preceding.isEmpty
             ? context.focusedFieldContent
@@ -1169,6 +1170,7 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
             model: polishModel,
             tone: PolishPipeline.toneLabel(for: context.bundleID),
             precedingText: precedingText,
-            breakMode: .commandsOnly)
+            breakMode: .commandsOnly,
+            finalFlush: finalFlush)
     }
 }

@@ -1597,3 +1597,59 @@ struct RestoreFrequencyAdverbTests {
         #expect(PolishPipeline.restoreFrequencyAdverb(out, input: input) == out)
     }
 }
+
+@Suite("PolishPipeline – stripBledPrefix")
+struct StripBledPrefixTests {
+
+    @Test("Strips a leading sentence that duplicates the preceding tail")
+    func stripsBledSentence() {
+        // The model re-emitted the previous sentence before polishing the unit.
+        let preceding = "So under load, the service ran out of database connections and started timing out."
+        let polished = "Under load, the service ran out of database connections and started timing out. We rolled back within about twenty minutes, and error rates recovered almost immediately."
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: preceding)
+            == "We rolled back within about twenty minutes, and error rates recovered almost immediately.")
+    }
+
+    @Test("Strips a lightly reworded bled sentence")
+    func stripsRewordedBleed() {
+        let preceding = "So the migration finally finished last night."
+        let polished = "The migration finally finished last night. Everything looks stable now."
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: preceding)
+            == "Everything looks stable now.")
+    }
+
+    @Test("Leaves output alone when nothing duplicates the preceding tail")
+    func leavesFreshOutput() {
+        let preceding = "Here is a quick intro to the plan."
+        let polished = "The search rewrite is scoped at six weeks. Notifications follow in a month."
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: preceding)
+            == polished)
+    }
+
+    @Test("Always keeps at least one sentence")
+    func keepsAtLeastOne() {
+        // Both sentences duplicate the preceding tail; the last one survives.
+        let preceding = "The dashboard has been stable for the last few days."
+        let polished = "The dashboard has been stable for the last few days. The dashboard has been stable for the last few days."
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: preceding)
+            == "The dashboard has been stable for the last few days.")
+    }
+
+    @Test("Does not strip a short leading sentence")
+    func ignoresShortLeadingSentence() {
+        // "Got it." is too short to judge as a duplicate; leave it.
+        let preceding = "Thanks for the update on the roadmap."
+        let polished = "Got it. I'll review the roadmap tomorrow."
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: preceding)
+            == polished)
+    }
+
+    @Test("No preceding text is a no-op")
+    func noPrecedingNoop() {
+        let polished = "The migration is done. Everything looks stable now."
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: nil)
+            == polished)
+        #expect(PolishPipeline.stripBledPrefix(polished, precedingText: "")
+            == polished)
+    }
+}

@@ -1337,6 +1337,12 @@ public enum PolishPipeline {
         case commandsOnly
     }
 
+    /// Total resample attempts a single finalize may spend across all of its
+    /// segments before the remaining failing segments fall back to raw
+    /// promptly. Bounds the post-release wait without denying a single
+    /// failing segment its usual recovery.
+    private static let finalizeResampleBudget = 2
+
     /// postprocess. This is the single source of truth for how raw
     /// dictated text becomes polished output. Used by both the
     /// streaming provider and the eval test suite.
@@ -1346,7 +1352,8 @@ public enum PolishPipeline {
         model: String = polishModel,
         tone: String? = nil,
         precedingText: String? = nil,
-        breakMode: BreakMode = .expandBeforeModel
+        breakMode: BreakMode = .expandBeforeModel,
+        finalFlush: Bool = false
     ) async -> String {
         let casual = tone == "casual"
         let substituted = substituteDictatedPunctuation(
@@ -1358,7 +1365,7 @@ public enum PolishPipeline {
             return await polishUnit(
                 substituted: substituted, chatClient: chatClient,
                 model: model, tone: tone, precedingText: precedingText,
-                casual: casual, stripModelBreaks: false)
+                casual: casual, stripModelBreaks: false).text
         }
 
         // Per-chunk streaming polish: keep only commanded breaks. Split at
@@ -1376,10 +1383,13 @@ public enum PolishPipeline {
             with: "$1", options: .regularExpression)
         let segments = splitOnCommands(forSplit)
         if segments.count == 1 {
+            // A single-segment finalize keeps full resample recovery — the
+            // compounding post-release wait only comes from many segments each
+            // retrying, so one segment is already bounded.
             return await polishUnit(
                 substituted: segments[0].text, chatClient: chatClient,
                 model: model, tone: tone, precedingText: precedingText,
-                casual: casual, stripModelBreaks: true)
+                casual: casual, stripModelBreaks: true).text
         }
 
         var result = ""
@@ -1388,6 +1398,12 @@ public enum PolishPipeline {
         // polishes without preceding context — which also capitalizes its
         // first character as a paragraph start.
         var preceding = precedingText
+        // The finalize shares one resample budget across all of its segments,
+        // so several failing segments can't each pay the full 3× retry and
+        // stack into a long post-release wait. Streaming units (finalFlush
+        // false) stay unbounded — their resamples are absorbed while the user
+        // is still speaking.
+        var resampleBudget = finalFlush ? finalizeResampleBudget : Int.max
         for segment in segments {
             // Trim the segment so its first character is the real word:
             // a leading space left by the split would otherwise defeat the
@@ -1395,10 +1411,12 @@ public enum PolishPipeline {
             let text = segment.text.trimmingCharacters(
                 in: .whitespacesAndNewlines)
             if !text.isEmpty {
-                let block = await polishUnit(
+                let (block, used) = await polishUnit(
                     substituted: text, chatClient: chatClient,
                     model: model, tone: tone, precedingText: preceding,
-                    casual: casual, stripModelBreaks: true)
+                    casual: casual, stripModelBreaks: true,
+                    maxResamples: min(2, resampleBudget))
+                resampleBudget -= used
                 result += block.trimmingCharacters(in: .whitespaces)
             }
             result += segment.breakAfter
@@ -1421,13 +1439,14 @@ public enum PolishPipeline {
         tone: String?,
         precedingText: String?,
         casual: Bool,
-        stripModelBreaks: Bool
-    ) async -> String {
+        stripModelBreaks: Bool,
+        maxResamples: Int = 2
+    ) async -> (text: String, resamplesUsed: Int) {
         let stripped = stripKeepTags(
             substituted, casual: casual, expandBreaks: !stripModelBreaks)
 
         guard let chatClient else {
-            return normalizeFormatting(stripped, casual: casual)
+            return (normalizeFormatting(stripped, casual: casual), 0)
         }
 
         let noPreceding = precedingText == nil || precedingText!.isEmpty
@@ -1436,9 +1455,15 @@ public enum PolishPipeline {
             // Greedy on the first attempt; when a guard fires, resample with a
             // little temperature and try again before falling back to raw.
             // Fidelity is unchanged either way — the guards bound every
-            // attempt — but a resample often recovers a usable polish.
+            // attempt — but a resample often recovers a usable polish. The
+            // caller caps `maxResamples`: the final flush shares one small
+            // resample budget across all its segments, so a multi-segment
+            // finalize can't compound many 3× retries into a long post-release
+            // wait, while a single-segment finalize still gets full recovery.
             var lastModelOut = ""
-            for (attempt, temperature) in [0.0, 0.4, 0.4].enumerated() {
+            let temperatures =
+                [0.0] + Array(repeating: 0.4, count: max(0, min(2, maxResamples)))
+            for (attempt, temperature) in temperatures.enumerated() {
                 let polished = try await polishThroughModel(
                     stripped, chatClient: chatClient, model: model,
                     tone: tone, precedingText: precedingText,
@@ -1448,6 +1473,12 @@ public enum PolishPipeline {
 
                 var cleaned = guardAgainstEcho(
                     polished: polished, precedingText: precedingText)
+                // Strip a leading run that re-emits the tail of the preceding
+                // context (a partial echo guardAgainstEcho misses). It removes
+                // only already-injected duplicate content, so the guards below
+                // still hold — and it lets a bled but otherwise-good polish
+                // pass the greedy attempt instead of falling back to raw.
+                cleaned = stripBledPrefix(cleaned, precedingText: precedingText)
                 // Undo a verb-prep modifier the model split into a heading
                 // ("layout breaks. On small screens," -> "breaks on small
                 // screens."). Punctuation-only, so the guards below still hold.
@@ -1484,23 +1515,25 @@ public enum PolishPipeline {
                     if attempt > 0 {
                         Log.debug("[POLISH_RESAMPLE_OK] attempt=\(attempt)")
                     }
-                    return adjustFirstCharCasing(
+                    let out = adjustFirstCharCasing(
                         normalizeFormatting(cleaned, casual: casual),
                         preprocessed: stripped, casual: casual,
                         noPreceding: noPreceding)
+                    return (out, attempt)
                 }
             }
 
             // Every attempt failed a guard or was empty: keep the raw unit, so
             // nothing is dropped, invented, or truncated.
             Log.debug("[POLISH_RAW_FALLBACK] all attempts failed guards")
-            return adjustFirstCharCasing(
+            let out = adjustFirstCharCasing(
                 normalizeFormatting(stripped, casual: casual),
                 preprocessed: stripped, casual: casual,
                 noPreceding: noPreceding)
+            return (out, temperatures.count - 1)
         } catch {
             Log.debug("[PolishPipeline] Polish failed: \(error)")
-            return normalizeFormatting(stripped, casual: casual)
+            return (normalizeFormatting(stripped, casual: casual), 0)
         }
     }
 
@@ -1893,6 +1926,88 @@ public enum PolishPipeline {
             "[ECHO_GUARD] Stripped echoed preceding text"
             + " (\(trimmed.count) chars)")
         return String(remainder)
+    }
+
+    /// Strip a leading run of `polished` that re-emits the tail of the
+    /// preceding context.
+    ///
+    /// The model is shown only the last ~80 characters of preceding context
+    /// (see `buildPolishPrompt`). On long dictation it sometimes starts its
+    /// output by repeating that last sentence or two — usually lightly
+    /// reworded — before polishing the new unit. That duplicated prefix trips
+    /// the duplication guard and forces a raw fallback, discarding the good
+    /// polish underneath. `guardAgainstEcho` misses it because that only
+    /// catches a verbatim echo of the *entire* preceding text.
+    ///
+    /// Detect it at the sentence level: drop each leading output sentence whose
+    /// content words are almost entirely contained in one of the last two
+    /// preceding sentences. Because the stripped content is already injected,
+    /// removing it never loses information — so this is a safe recovery, not an
+    /// edit. At least one sentence is always kept.
+    static func stripBledPrefix(
+        _ polished: String, precedingText: String?
+    ) -> String {
+        guard let preceding = precedingText, preceding.count >= 15
+        else { return polished }
+        let tailSets = sentenceStrings(preceding).suffix(2)
+            .map { Set(contentWords($0)) }
+            .filter { $0.count >= 4 }
+        guard !tailSets.isEmpty else { return polished }
+
+        let outSentences = sentenceStrings(polished)
+        guard outSentences.count >= 2 else { return polished }
+
+        var strip = 0
+        while strip < outSentences.count - 1 {
+            let set = Set(contentWords(outSentences[strip]))
+            guard set.count >= 4 else { break }
+            let duplicatesTail = tailSets.contains { tail in
+                Double(set.intersection(tail).count) / Double(set.count) >= 0.8
+            }
+            if duplicatesTail { strip += 1 } else { break }
+        }
+        guard strip > 0 else { return polished }
+
+        let remainder = dropLeadingSentences(polished, strip)
+        guard !remainder.isEmpty else { return polished }
+        Log.debug("[BLEED_GUARD] Stripped \(strip) bled sentence(s)")
+        return remainder
+    }
+
+    /// Split text into sentence strings at `.`/`!`/`?` boundaries. Each piece
+    /// keeps its terminator; trailing text without one is a final piece.
+    private static func sentenceStrings(_ text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        func flush() {
+            let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { result.append(trimmed) }
+            current = ""
+        }
+        for ch in text {
+            current.append(ch)
+            if ch == "." || ch == "!" || ch == "?" { flush() }
+        }
+        flush()
+        return result
+    }
+
+    /// Return `text` with its first `n` sentences removed, using the same
+    /// boundary rule as `sentenceStrings` so counts align.
+    private static func dropLeadingSentences(_ text: String, _ n: Int) -> String {
+        guard n > 0 else { return text }
+        var count = 0
+        var idx = text.startIndex
+        while idx < text.endIndex {
+            let ch = text[idx]
+            idx = text.index(after: idx)
+            if ch == "." || ch == "!" || ch == "?" {
+                count += 1
+                if count == n { break }
+            }
+        }
+        return String(text[idx...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Check whether the model aggressively truncated input by

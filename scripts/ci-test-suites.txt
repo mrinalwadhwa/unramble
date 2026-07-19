@@ -104,6 +104,7 @@ ci ShortcutConfigurationTests
 ci StrategySelectionTests
 ci StreamingFinishOperationTests
 ci StreamingPipelineTests
+ci StripBledPrefixTests
 ci StripFillerSoundsTests
 ci StripKeepTagsTests
 ci SystemPromptLanguageTests
