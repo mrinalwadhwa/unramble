@@ -520,55 +520,10 @@ public final class AppTextInjector: TextInjecting, @unchecked Sendable {
         fieldContent: String?,
         cursorPosition: Int?
     ) -> String {
-        guard let content = fieldContent, let pos = cursorPosition else {
-            return text
-        }
-
-        // If cursor is at the start, no space needed
-        guard pos > 0 else { return text }
-
-        // Accessibility cursor positions are reported in UTF-16 code units,
-        // not Swift Character offsets. Convert via the UTF-16 view so emoji
-        // and other multi-scalar graphemes do not trap String indexing.
-        guard let charBefore = characterBeforeUTF16Offset(in: content, utf16Offset: pos) else {
-            return text
-        }
-
-        // If the text already starts with a space or newline, don't add another
-        if text.hasPrefix(" ") || text.hasPrefix("\n") { return text }
-
-        // If the text starts with punctuation, don't add a space before it
-        if let first = text.first, first.isPunctuation { return text }
-
-        // Characters that don't need a space after them
-        let noSpaceAfter: Set<Character> = [
-            " ", "\t", "\n", "\r",  // whitespace
-            "(", "[", "{", "<",  // opening brackets
-            "\"", "'", "`",  // opening quotes
-            "/", "\\",  // path separators
-        ]
-
-        if noSpaceAfter.contains(charBefore) {
-            return text
-        }
-
-        return " " + text
-    }
-
-    private func characterBeforeUTF16Offset(in content: String, utf16Offset: Int) -> Character? {
-        guard utf16Offset > 0 else { return nil }
-
-        let utf16 = content.utf16
-        guard utf16Offset <= utf16.count else { return nil }
-
-        let utf16Index = utf16.index(utf16.startIndex, offsetBy: utf16Offset)
-        guard let stringIndex = String.Index(utf16Index, within: content),
-            stringIndex > content.startIndex
-        else {
-            return nil
-        }
-
-        return content[content.index(before: stringIndex)]
+        InjectionSpacing().leadingSpaced(
+            text: text,
+            fieldContent: fieldContent,
+            cursorPosition: cursorPosition)
     }
 
     /// Convert a UTF-16 offset to a String.Index, clamping to valid bounds.
