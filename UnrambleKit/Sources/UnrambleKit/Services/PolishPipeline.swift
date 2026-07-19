@@ -622,6 +622,15 @@ public enum PolishPipeline {
         "six", "seven", "eight", "nine",
     ]
 
+    /// Cardinals 1–12 that the spell-out style leaves as words. A percentage
+    /// always takes a numeral, so these are converted when they directly
+    /// precede "percent" (13 and up are already digits by then).
+    private static let percentCardinals: [(String, Int)] = [
+        ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
+        ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9),
+        ("ten", 10), ("eleven", 11), ("twelve", 12),
+    ]
+
     /// Convert unambiguous number words to digits.
     ///
     /// Handles hyphenated compounds ("twenty-seven" → "27"),
@@ -887,6 +896,16 @@ public enum PolishPipeline {
         // Collapse redundant terminal punctuation (e.g. "!." → "!").
         result = result.replacingOccurrences(
             of: #"([!?])\."#, with: "$1", options: .regularExpression)
+
+        // A percentage always takes a numeral, even for the small numbers the
+        // spell-out style otherwise leaves as words ("five percent" -> "5%",
+        // "twelve percent" -> "12%"). Only fires directly before "percent", so
+        // "five items" stays spelled.
+        for (word, digit) in percentCardinals {
+            result = result.replacingOccurrences(
+                of: "(?i)\\b\(word) percent\\b",
+                with: "\(digit) percent", options: .regularExpression)
+        }
 
         // Convert "X percent" → "X%" when preceded by a number.
         result = result.replacingOccurrences(

@@ -706,6 +706,31 @@ struct NormalizeFormattingTests {
         #expect(!result.contains("\u{21b5}"))
     }
 
+    @Test("small spelled numbers before percent become a numeral")
+    func smallPercentNumerals() {
+        #expect(PolishPipeline.normalizeFormatting("up five percent") == "up 5%")
+        #expect(PolishPipeline.normalizeFormatting("twelve percent") == "12%")
+        #expect(PolishPipeline.normalizeFormatting("about eight percent")
+            == "about 8%")
+        #expect(PolishPipeline.normalizeFormatting("ten percent") == "10%")
+        #expect(PolishPipeline.normalizeFormatting("eleven percent") == "11%")
+        #expect(PolishPipeline.normalizeFormatting("One percent") == "1%")
+    }
+
+    @Test("percent numeral works for digits and decimals too")
+    func digitPercentUnchanged() {
+        #expect(PolishPipeline.normalizeFormatting("30 percent") == "30%")
+        #expect(PolishPipeline.normalizeFormatting("3.1 percent") == "3.1%")
+    }
+
+    @Test("a spelled number not before percent stays spelled")
+    func smallNumberOutsidePercentUntouched() {
+        #expect(PolishPipeline.normalizeFormatting("five items")
+            == "five items")
+        #expect(PolishPipeline.normalizeFormatting("twelve people on the team")
+            == "twelve people on the team")
+    }
+
     @Test("doubled forward slash collapsed")
     func doubledSlash() {
         #expect(PolishPipeline.normalizeFormatting("config//settings") == "config/settings")
