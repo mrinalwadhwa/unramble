@@ -69,11 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if modeTransition.effectiveMode == .local,
-            !DictationMode.isLocalAvailable
-        {
-            modeTransition = DictationModeTransition(effectiveMode: .cloud)
-            Settings.shared.dictationMode = .cloud
+        let resolvedMode = DictationModeAvailability.resolveEffectiveMode(
+            stored: modeTransition.effectiveMode,
+            isLocalAvailable: DictationMode.isLocalAvailable)
+        if resolvedMode != modeTransition.effectiveMode {
+            modeTransition = DictationModeTransition(effectiveMode: resolvedMode)
+            Settings.shared.dictationMode = resolvedMode
         }
         setupMenuBar()
         setupPipeline(mode: modeTransition.effectiveMode)
@@ -615,9 +616,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
 
-        let isAvailable = newMode == .local
-            ? DictationMode.isLocalAvailable
-            : ServiceConfig.shared.isConfigured
+        let isAvailable = DictationModeAvailability.isAvailable(
+            for: newMode,
+            isLocalAvailable: DictationMode.isLocalAvailable,
+            isConfigured: ServiceConfig.shared.isConfigured)
         switch modeTransition.request(newMode, isAvailable: isAvailable) {
         case .unchanged:
             afterPublication?()

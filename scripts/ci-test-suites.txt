@@ -31,6 +31,7 @@ ci DiagnosticsPrivacyTests
 ci DictatedPunctuationTests
 ci DictationAudioSinkTests
 ci DictationErrorTests
+ci DictationModeAvailabilityTests
 ci DictationModeTransitionTests
 ci DictationPipelineIntegrationTests
 ci DictationPipelineTests
