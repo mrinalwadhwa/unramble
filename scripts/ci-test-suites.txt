@@ -27,6 +27,7 @@ ci ContextSanitizationTests
 ci ConvertDecimalScaleBareTests
 ci ConvertNumberWordsTests
 ci ConvertSpokenTimeTests
+ci DetachedPipelineGenerationTests
 ci DiagnosticsPrivacyTests
 ci DictatedPunctuationTests
 ci DictationAudioSinkTests

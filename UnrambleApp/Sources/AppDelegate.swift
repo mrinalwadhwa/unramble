@@ -37,22 +37,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didFenceApplicationTermination = false
     private var didDrainCaptureForTermination = false
 
-    private struct DetachedPipelineGeneration: Sendable {
-        let pipeline: DictationPipeline?
-        let runtime: LocalModelRuntime?
-        let preloadTask: Task<Void, Never>?
-
-        func drain() async {
-            // Fence the pipeline before Qwen cancellation can suspend. The
-            // cancellation drain then progresses alongside model teardown.
-            await pipeline?.beginRetirement()
-            await runtime?.beginShutdown()
-            await pipeline?.retire()
-            await runtime?.shutdown()
-            await preloadTask?.value
-        }
-    }
-
     private let keychain = KeychainService()
     private var updaterService: UpdaterService?
     private let micDiagnosticStore = MicDiagnosticStore()
