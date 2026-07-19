@@ -197,9 +197,9 @@ struct OpenAIRealtimeSessionSummaryTests {
 
     private func makeTiming(
         id: Int = 1,
-        setupKind: OpenAIStreamingProvider.SessionTiming.SetupKind = .adoptedBackup
-    ) -> OpenAIStreamingProvider.SessionTiming {
-        OpenAIStreamingProvider.SessionTiming(
+        setupKind: SessionTiming.SetupKind = .adoptedBackup
+    ) -> SessionTiming {
+        SessionTiming(
             id: id,
             startedAt: Date(timeIntervalSince1970: 1000),
             setupKind: setupKind)
@@ -209,7 +209,7 @@ struct OpenAIRealtimeSessionSummaryTests {
     func idAndSetup() {
         var t = makeTiming()
         t.endedAt = Date(timeIntervalSince1970: 1000.5)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("[RealtimeSession] id=1"))
         #expect(line.contains("setup=backup"))
         #expect(line.contains("total=0.500"))
@@ -219,7 +219,7 @@ struct OpenAIRealtimeSessionSummaryTests {
     func freshConnection() {
         var t = makeTiming(setupKind: .freshConnection)
         t.endedAt = Date(timeIntervalSince1970: 1000.1)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("setup=fresh"))
     }
 
@@ -228,7 +228,7 @@ struct OpenAIRealtimeSessionSummaryTests {
         var t = makeTiming()
         t.setupCompletedAt = Date(timeIntervalSince1970: 1000.050)
         t.endedAt = Date(timeIntervalSince1970: 1000.8)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("setup_wait=0.050"))
     }
 
@@ -238,7 +238,7 @@ struct OpenAIRealtimeSessionSummaryTests {
         t.audioBytesSent = 96000
         t.audioChunksSent = 12
         t.endedAt = Date(timeIntervalSince1970: 1000.5)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("bytes=96000"))
         #expect(line.contains("chunks=12"))
     }
@@ -250,7 +250,7 @@ struct OpenAIRealtimeSessionSummaryTests {
         t.transcriptCompletedAt = Date(timeIntervalSince1970: 1001.350)
         t.firstDeltaAt = Date(timeIntervalSince1970: 1001.500)
         t.endedAt = Date(timeIntervalSince1970: 1001.700)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("first_delta=0.500"))
         #expect(line.contains("transcript=0.350"))
     }
@@ -260,7 +260,7 @@ struct OpenAIRealtimeSessionSummaryTests {
         var t = makeTiming()
         t.polishKind = .realtimeOK
         t.endedAt = Date(timeIntervalSince1970: 1001.500)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("polish=realtime-ok"))
     }
 
@@ -269,7 +269,7 @@ struct OpenAIRealtimeSessionSummaryTests {
         var t = makeTiming()
         t.polishKind = .skip
         t.endedAt = Date(timeIntervalSince1970: 1000.5)
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("polish=skip"))
     }
 
@@ -278,7 +278,7 @@ struct OpenAIRealtimeSessionSummaryTests {
         var t = makeTiming()
         t.endedAt = Date(timeIntervalSince1970: 1000.5)
         t.failure = .network
-        let line = OpenAIStreamingProvider.formatSessionSummary(t)
+        let line = SessionTiming.formatSessionSummary(t)
         #expect(line.contains("failure=network"))
         #expect(!line.contains("error="))
     }
@@ -288,14 +288,14 @@ struct OpenAIRealtimeSessionSummaryTests {
         let secret = "dictated-secret-\(UUID().uuidString)"
 
         #expect(
-            OpenAIStreamingProvider.failureKind(
+            SessionTiming.failureKind(
                 for: DictationError.networkError(secret)) == .network)
         #expect(
-            OpenAIStreamingProvider.failureKind(
+            SessionTiming.failureKind(
                 for: DictationError.requestFailed(
                     statusCode: 500, message: secret)) == .request)
         #expect(
-            OpenAIStreamingProvider.failureKind(for: CancellationError())
+            SessionTiming.failureKind(for: CancellationError())
                 == .cancelled)
     }
 }
