@@ -731,6 +731,31 @@ struct NormalizeFormattingTests {
             == "twelve people on the team")
     }
 
+    @Test("a digit dollar amount takes a leading $")
+    func digitDollarsToCurrency() {
+        #expect(PolishPipeline.normalizeFormatting("around 45,000 dollars")
+            == "around $45,000")
+        #expect(PolishPipeline.normalizeFormatting("50 dollars") == "$50")
+        #expect(PolishPipeline.normalizeFormatting("it cost 50.5 dollars")
+            == "it cost $50.5")
+        #expect(PolishPipeline.normalizeFormatting("$50 dollars") == "$50")
+        #expect(PolishPipeline.normalizeFormatting(
+            "around 45,000 dollars, give or take a few thousand")
+            == "around $45,000, give or take a few thousand")
+    }
+
+    @Test("a spelled or vague dollar amount keeps its words")
+    func spelledOrVagueDollarsUntouched() {
+        #expect(PolishPipeline.normalizeFormatting("five dollars")
+            == "five dollars")
+        #expect(PolishPipeline.normalizeFormatting("twelve dollars richer")
+            == "twelve dollars richer")
+        #expect(PolishPipeline.normalizeFormatting("millions of dollars")
+            == "millions of dollars")
+        #expect(PolishPipeline.normalizeFormatting("a dollar amount")
+            == "a dollar amount")
+    }
+
     @Test("doubled forward slash collapsed")
     func doubledSlash() {
         #expect(PolishPipeline.normalizeFormatting("config//settings") == "config/settings")

@@ -1024,6 +1024,14 @@ public enum PolishPipeline {
             of: #"\b(\d+(?:\.\d+)?) percent\b"#,
             with: "$1%", options: .regularExpression)
 
+        // A monetary amount already in digits takes a leading "$": "45,000
+        // dollars" -> "$45,000". A small amount left spelled ("five dollars")
+        // keeps its words, and a vague amount ("millions of dollars") has no
+        // number directly before "dollars" to move.
+        result = result.replacingOccurrences(
+            of: #"\$?\b(\d[\d,]*(?:\.\d+)?) dollars?\b"#,
+            with: "\\$$1", options: .regularExpression)
+
         // Process line by line.
         // Strip trailing whitespace, normalize bullets, and strip
         // trailing periods from list items for consistent style.
