@@ -726,14 +726,13 @@ public enum PolishPipeline {
         return result
     }
 
-    /// Convert a spelled amount scaled by hundred or thousand to its grouped
-    /// digit form: "fifteen thousand" -> "15,000", "two hundred" -> "200",
-    /// "a hundred and twenty thousand" -> "120,000". A leading article counts
+    /// Convert a spelled amount to its digit form: "fifteen thousand" ->
+    /// "15,000", "two hundred" -> "200", "a hundred and twenty thousand" ->
+    /// "120,000", "fifteen million" -> "15 million". A leading article counts
     /// as one and is consumed ("a thousand" -> "1000"). Left untouched: a bare
-    /// or vague scale ("a few thousand", "thousands of"), spoken years or times
-    /// that additive parsing flags ambiguous ("nineteen eighty four"), and
-    /// runs scaled by million/billion (deferred). Four-digit results carry no
-    /// separator ("two thousand" -> "2000").
+    /// or vague scale ("a few thousand", "thousands of") and spoken years or
+    /// times that additive parsing flags ambiguous ("nineteen eighty four").
+    /// Four-digit results carry no separator ("two thousand" -> "2000").
     static func convertScaledNumbers(_ text: String) -> String {
         let ns = text as NSString
         let tokens: [(word: String, range: NSRange)] = wordTokenPattern
@@ -798,22 +797,31 @@ public enum PolishPipeline {
     private static let wordTokenPattern = try! NSRegularExpression(
         pattern: "[A-Za-z]+")
 
-    /// The grouped digit form for a spelled number run, or nil to leave it
-    /// spelled. Requires a hundred/thousand scale with a real leading number
-    /// (or article), no million/billion, and an unambiguous additive parse.
+    /// The digit form for a spelled number run, or nil to leave it spelled.
+    /// Requires a scale word with a real leading number (or article) and an
+    /// unambiguous additive parse. A million or billion keeps its word when the
+    /// value is a clean multiple ("fifteen million" -> "15 million"); a
+    /// hundred/thousand amount, or a non-clean compound, becomes grouped digits.
     private static func scaledDigits(
         run: [String], leadsWithArticle: Bool
     ) -> String? {
-        guard !run.contains("million"), !run.contains("billion") else {
-            return nil
-        }
-        guard run.contains("hundred") || run.contains("thousand") else {
-            return nil
-        }
+        guard run.contains("hundred") || run.contains("thousand")
+            || run.contains("million") || run.contains("billion")
+        else { return nil }
         let hasNumberWord = run.contains { numberWordValues[$0] != nil }
         guard hasNumberWord || leadsWithArticle else { return nil }
         let parsed = parseNumberRun(run)
         guard !parsed.ambiguous, parsed.value >= 100 else { return nil }
+
+        // A round million/billion reads better with the word kept.
+        if run.contains("billion"), parsed.value % 1_000_000_000 == 0 {
+            return "\(parsed.value / 1_000_000_000) billion"
+        }
+        if run.contains("million"), parsed.value % 1_000_000 == 0,
+            parsed.value < 1_000_000_000
+        {
+            return "\(parsed.value / 1_000_000) million"
+        }
         return groupedDigits(parsed.value)
     }
 

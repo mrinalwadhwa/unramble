@@ -1756,12 +1756,24 @@ struct ConvertScaledNumbersTests {
             == "several hundred people")
     }
 
-    @Test("Million and billion are deferred")
-    func millionDeferred() {
+    @Test("A round million or billion keeps its word")
+    func roundMillionKeepsWord() {
         #expect(PolishPipeline.convertScaledNumbers("fifteen million")
-            == "fifteen million")
+            == "15 million")
+        #expect(PolishPipeline.convertScaledNumbers("two billion users")
+            == "2 billion users")
         #expect(PolishPipeline.convertScaledNumbers("a hundred million users")
-            == "a hundred million users")
+            == "100 million users")
+        #expect(PolishPipeline.convertScaledNumbers("a million reasons")
+            == "1 million reasons")
+        #expect(PolishPipeline.convertScaledNumbers("two hundred fifty million")
+            == "250 million")
+    }
+
+    @Test("A non-round million compound becomes full digits")
+    func nonRoundMillionFullDigits() {
+        #expect(PolishPipeline.convertScaledNumbers(
+            "fifteen million five hundred thousand") == "15,500,000")
     }
 
     @Test("A number without a scale word is left for word conversion")
