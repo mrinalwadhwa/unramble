@@ -28,7 +28,7 @@ packages:
     path: UnrambleKit
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
-    from: 2.9.0
+    exactVersion: 2.9.4
 
 targets:
   UnrambleApp:

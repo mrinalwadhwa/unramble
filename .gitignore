@@ -24,8 +24,10 @@ xcuserdata/
 # Swift Package Manager
 .build/
 Packages/
+# Derived resolution: it flip-flops between package (swift build/test) and app
+# (xcodebuild) resolutions. Versions are exact-pinned in Package.swift and
+# project.yml, so this is redundant — keep it untracked.
 Package.resolved
-!UnrambleKit/Package.resolved
 
 # CocoaPods
 Pods/
