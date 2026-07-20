@@ -27,6 +27,7 @@ ci ConcurrentCancelSafetyTests
 ci ContextAssemblyTests
 ci ContextSanitizationTests
 ci ConvertDecimalScaleBareTests
+ci ConvertDecimalScaleCompoundTests
 ci ConvertNumberWordsTests
 ci ConvertScaledNumbersTests
 ci ConvertSpokenTimeTests
@@ -56,6 +57,7 @@ ci LocalStreamingProviderTests
 ci LocalStreamingSeamTests
 ci LocalUnitPolicyTests
 ci LocalUnitStreamingTests
+ci MergeDollarsAndCentsTests
 ci MicDiagnosticStoreTests
 ci MicrophoneCaptureCoordinatorTests
 ci MicrophonePreviewClientTests

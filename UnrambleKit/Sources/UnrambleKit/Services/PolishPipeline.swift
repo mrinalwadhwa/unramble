@@ -615,6 +615,34 @@ public enum PolishPipeline {
             }
         }
 
+        // Compound tens-plus-unit before a decimal: "twenty three point five"
+        // -> "23.5". Runs before the bare "X point Y" rule below so the tens
+        // word joins the integer part instead of being stranded ("twenty 3.5").
+        let tensValues: [String: Int] = [
+            "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+            "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90,
+        ]
+        let unitValues: [String: Int] = [
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        ]
+        let compoundPattern = #"(?i)\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-]+(one|two|three|four|five|six|seven|eight|nine)\s+point\s+(zero|one|two|three|four|five|six|seven|eight|nine)\b(?!\s+(?:million|billion|thousand|trillion))"#
+        if let regex = try? NSRegularExpression(pattern: compoundPattern) {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let r1 = Range(match.range(at: 1), in: result),
+                      let r2 = Range(match.range(at: 2), in: result),
+                      let r3 = Range(match.range(at: 3), in: result),
+                      let tens = tensValues[result[r1].lowercased()],
+                      let unit = unitValues[result[r2].lowercased()],
+                      let dec = digitWords[result[r3].lowercased()]
+                else { continue }
+                result.replaceSubrange(fullRange, with: "\(tens + unit).\(dec)")
+            }
+        }
+
         // Bare word form without a scale word: "version two point one" -> "2.1",
         // "three point zero" -> "3.0". Requiring a number word on BOTH sides of
         // "point" keeps the noun sense out ("make one point clear", "a three
@@ -651,6 +679,35 @@ public enum PolishPipeline {
             }
         }
 
+        return result
+    }
+
+    private static let dollarsCentsPattern: NSRegularExpression = {
+        // swiftlint:disable:next force_try
+        try! NSRegularExpression(
+            pattern: #"(?i)\$(\d[\d,]*)\s+and\s+(\d{1,2})\s+cents?\b"#, options: [])
+    }()
+
+    /// Fold a trailing cents amount into the dollar decimal: "$99 and 99
+    /// cents" -> "$99.99", "$5 and 50 cents" -> "$5.50". The cents are
+    /// zero-padded to two digits. Only fires when the dollar part is already a
+    /// digit amount, so a spelled small amount is untouched.
+    static func mergeDollarsAndCents(_ text: String) -> String {
+        let ns = text as NSString
+        let matches = dollarsCentsPattern.matches(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return text }
+        var result = text
+        for match in matches.reversed() {
+            guard let full = Range(match.range, in: result),
+                  let dr = Range(match.range(at: 1), in: result),
+                  let cr = Range(match.range(at: 2), in: result)
+            else { continue }
+            let dollars = result[dr]
+            var cents = String(result[cr])
+            if cents.count == 1 { cents = "0" + cents }
+            result.replaceSubrange(full, with: "$\(dollars).\(cents)")
+        }
         return result
     }
 
@@ -1169,6 +1226,11 @@ public enum PolishPipeline {
         result = result.replacingOccurrences(
             of: #"\$?\b(\d[\d,]*(?:\.\d+)?) dollars?\b"#,
             with: "\\$$1", options: .regularExpression)
+
+        // Fold a cents amount into the dollar decimal: "$99 and 99 cents" ->
+        // "$99.99", "$5 and 50 cents" -> "$5.50". Runs after the "$" rule
+        // above, so the dollar part is already a digit amount.
+        result = mergeDollarsAndCents(result)
 
         // Process line by line.
         // Strip trailing whitespace, normalize bullets, and strip

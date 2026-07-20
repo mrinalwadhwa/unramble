@@ -1870,3 +1870,63 @@ struct CollapseWordRepetitionTests {
             == "the quick brown fox jumps")
     }
 }
+
+@Suite("PolishPipeline – convertDecimalScale compound")
+struct ConvertDecimalScaleCompoundTests {
+
+    @Test("Absorbs a tens word into a decimal integer part")
+    func compoundDecimal() {
+        #expect(PolishPipeline.convertDecimalScale(
+            "the conversion rate is twenty three point five percent")
+            == "the conversion rate is 23.5 percent")
+        #expect(PolishPipeline.convertDecimalScale("forty two point seven")
+            == "42.7")
+        #expect(PolishPipeline.convertDecimalScale("ninety nine point nine")
+            == "99.9")
+    }
+
+    @Test("Leaves a bare single-digit decimal to the existing rule")
+    func bareStillWorks() {
+        #expect(PolishPipeline.convertDecimalScale("version two point one")
+            == "version 2.1")
+    }
+
+    @Test("Leaves a compound without a decimal alone")
+    func noDecimalUnchanged() {
+        #expect(PolishPipeline.convertDecimalScale("twenty three items")
+            == "twenty three items")
+    }
+}
+
+@Suite("PolishPipeline – mergeDollarsAndCents")
+struct MergeDollarsAndCentsTests {
+
+    @Test("Folds cents into the dollar decimal")
+    func folds() {
+        #expect(PolishPipeline.mergeDollarsAndCents("It costs $99 and 99 cents.")
+            == "It costs $99.99.")
+        #expect(PolishPipeline.mergeDollarsAndCents("$5 and 50 cents")
+            == "$5.50")
+    }
+
+    @Test("Zero-pads a single-digit cents amount")
+    func zeroPads() {
+        #expect(PolishPipeline.mergeDollarsAndCents("$5 and 5 cents")
+            == "$5.05")
+        #expect(PolishPipeline.mergeDollarsAndCents("$1 and 1 cent")
+            == "$1.01")
+    }
+
+    @Test("Leaves a non-cents phrase alone")
+    func nonCentsUnchanged() {
+        #expect(PolishPipeline.mergeDollarsAndCents("$99 and some change")
+            == "$99 and some change")
+    }
+
+    @Test("normalizeFormatting produces the full currency decimal")
+    func endToEnd() {
+        #expect(PolishPipeline.normalizeFormatting(
+            "It costs 99 dollars and 99 cents.")
+            == "It costs $99.99.")
+    }
+}
