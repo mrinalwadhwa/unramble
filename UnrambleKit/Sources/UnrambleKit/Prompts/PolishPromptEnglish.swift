@@ -111,15 +111,18 @@ it as one sentence: "no no no we can't do that" → "No, no, no, we \
 can't do that." Also keep 2-word emphasis: "please please", "never \
 ever", "now now", "yes yes", "no no".
 
-Convert all spelled-out numbers to digits, including small ones: \
-"twenty three" → "23", "third" → "3rd", "two thirty \
-PM" → "2:30 PM", "three fifty degrees" → "350°", "four bugs" \
-→ "4 bugs", "one ticket" → "1 ticket". Convert "minus" before a \
-number to the symbol: "minus ten" → "-10". Format phone numbers with \
-dashes: "five five five zero one two three four" → "555-0123-4", \
-"5551234567" → "555-123-4567". Format ratios with a colon: "one to \
-five" → "1:5". Use currency symbols: "five hundred dollars" → "$500". \
-Only use "$" when the speaker says "dollars".
+Spell out whole numbers one through twelve in prose ("four bugs", \
+"three minutes", "eight gigabytes"); use digits for 13 and up: \
+"twenty three" → "23". Keep fractions and idioms spelled ("a third", \
+"a dozen", "a couple"), and keep ordinals spelled in prose ("the \
+third floor", "the first release"). Always use digits for times \
+("two thirty PM" → "2:30 PM"), dates ("April fifteenth" → "April \
+15th"), money ("five hundred dollars" → "$500"; only use "$" when the \
+speaker says "dollars"), percentages, and temperatures ("three fifty \
+degrees" → "350°"). Convert "minus" before a number to the symbol: \
+"minus ten" → "-10". Format phone numbers with dashes: "five five \
+five zero one two three four" → "555-0123-4", "5551234567" → \
+"555-123-4567". Format ratios with a colon: "one to five" → "1:5".
 
 When the speaker mentions 3 or more items — whether joined by "and", \
 listed in sequence, or enumerated with "first/second" — always format \
@@ -210,14 +213,14 @@ sentences, expand contractions, or add words the speaker did not say. \
 "kinda" stays "kinda", "gonna" stays "gonna", "wanna" stays "wanna", \
 "dunno" stays "dunno", "lemme" stays "lemme", "sorta" stays "sorta", \
 "gotta" stays "gotta", "it'd" stays "it'd", "they'd" stays "they'd", \
-"we'd" stays "we'd", "he'd" stays "he'd". Always convert "one", \
-"two", "three" etc. to \
-digits — except when "one" is a pronoun ("this one", "one of the \
-servers", "one more thing"):
+"we'd" stays "we'd", "he'd" stays "he'd". Keep small counts one \
+through twelve spelled, as above — "one slot", "two replicas" stay \
+words — and keep "one" spelled when it is a pronoun ("this one", \
+"one of the servers", "one more thing"):
 Input: "there is only one slot left"
-Output: "There is only 1 slot left."
+Output: "There is only one slot left."
 Input: "we have two replicas running"
-Output: "We have 2 replicas running."
+Output: "We have two replicas running."
 Input: "one of the servers is down"
 Output: "One of the servers is down."
 Input: "this one is better"
