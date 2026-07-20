@@ -1260,6 +1260,12 @@ public enum PolishPipeline {
         }
         result = output.joined(separator: "\n")
 
+        // Collapse a run of three or more line breaks to a single paragraph
+        // break. No output intends more than one blank line, and a commanded
+        // break the model also rendered on its own would otherwise stack.
+        result = result.replacingOccurrences(
+            of: #"(\n[ \t]*){3,}"#, with: "\n\n", options: .regularExpression)
+
         if !casual {
             // Fix capitalization of known tech terms. These are product
             // names that should always be capitalized the same way. This

@@ -706,6 +706,17 @@ struct NormalizeFormattingTests {
         #expect(!result.contains("\u{21b5}"))
     }
 
+    @Test("stacked blank lines collapse to one paragraph break")
+    func stackedBlankLinesCollapse() {
+        #expect(PolishPipeline.normalizeFormatting("First\n\n\n\nsecond")
+            == "First\n\nSecond")
+        #expect(PolishPipeline.normalizeFormatting("First\n\n\nsecond")
+            == "First\n\nSecond")
+        // A single paragraph break is preserved.
+        #expect(PolishPipeline.normalizeFormatting("First\n\nsecond")
+            == "First\n\nSecond")
+    }
+
     @Test("small spelled numbers before percent become a numeral")
     func smallPercentNumerals() {
         #expect(PolishPipeline.normalizeFormatting("up five percent") == "up 5%")
