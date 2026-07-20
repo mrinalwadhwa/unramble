@@ -2649,10 +2649,22 @@ public enum PolishPipeline {
             let token = tokens[i]
             if let first = token.first, first.isNumber {
                 // Digit-led token: take the leading integer ("15th" -> 15).
-                if let value = Int(token.prefix { $0.isNumber }) {
+                if var value = Int(token.prefix { $0.isNumber }) {
+                    i += 1
+                    // Compose a following scale word so a digitized scaled
+                    // amount ("12 million") reads as one value, matching its
+                    // spelled form ("twelve million" -> 12,000,000) instead of
+                    // splitting into 12 and 1,000,000.
+                    while i < tokens.count,
+                        let scale = numberScaleValues[tokens[i]]
+                    {
+                        value *= scale
+                        i += 1
+                    }
                     values.append(value)
+                } else {
+                    i += 1
                 }
-                i += 1
             } else if isNumberWord(token) {
                 var run: [String] = []
                 while i < tokens.count {

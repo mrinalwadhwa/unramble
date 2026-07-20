@@ -96,4 +96,23 @@ struct PolishNumberGuardTests {
             polished: "That is about 1,200 rows.",
             preprocessed: "that is about twelve hundred rows") == nil)
     }
+
+    @Test("a digit kept with its scale word is faithful")
+    func digitScaleWordPasses() {
+        // "twelve million" digitizes to "12 million"; the digit and the scale
+        // word compose to the same value, so this must not read as 12 and
+        // 1,000,000 replacing 12,000,000.
+        #expect(PolishPipeline.guardAgainstNumberChange(
+            polished: "We have 12 million active users.",
+            preprocessed: "we have twelve million active users") == nil)
+    }
+
+    @Test("a substituted scaled amount falls back")
+    func substitutedScaledAmountFallsBack() {
+        // The scale word composes, so a real change of the amount still fires.
+        let raw = "we have twelve million active users"
+        let polished = "We have 15 million active users."
+        #expect(PolishPipeline.guardAgainstNumberChange(
+            polished: polished, preprocessed: raw) == raw)
+    }
 }
