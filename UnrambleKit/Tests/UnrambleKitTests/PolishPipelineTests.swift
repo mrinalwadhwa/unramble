@@ -1678,3 +1678,72 @@ struct StripBledPrefixTests {
             == polished)
     }
 }
+
+@Suite("PolishPipeline – convertScaledNumbers")
+struct ConvertScaledNumbersTests {
+
+    @Test("Thousands convert to grouped digits")
+    func thousands() {
+        #expect(PolishPipeline.convertScaledNumbers("up fifteen thousand")
+            == "up 15,000")
+        #expect(PolishPipeline.convertScaledNumbers("about ten thousand requests")
+            == "about 10,000 requests")
+        #expect(PolishPipeline.convertScaledNumbers("fifty thousand users")
+            == "50,000 users")
+    }
+
+    @Test("Hundreds convert without a separator")
+    func hundreds() {
+        #expect(PolishPipeline.convertScaledNumbers("above two hundred milliseconds")
+            == "above 200 milliseconds")
+        #expect(PolishPipeline.convertScaledNumbers("five hundred") == "500")
+    }
+
+    @Test("Compound amounts and a leading article")
+    func compoundAndArticle() {
+        #expect(PolishPipeline.convertScaledNumbers("forty five thousand dollars")
+            == "45,000 dollars")
+        #expect(PolishPipeline.convertScaledNumbers(
+            "a hundred and twenty thousand dollars") == "120,000 dollars")
+        #expect(PolishPipeline.convertScaledNumbers("a thousand reasons")
+            == "1000 reasons")
+        #expect(PolishPipeline.convertScaledNumbers("a hundred people")
+            == "100 people")
+    }
+
+    @Test("Four-digit results carry no comma")
+    func fourDigitNoComma() {
+        #expect(PolishPipeline.convertScaledNumbers("two thousand") == "2000")
+        #expect(PolishPipeline.convertScaledNumbers("two thousand twenty")
+            == "2020")
+        #expect(PolishPipeline.convertScaledNumbers("one thousand five hundred")
+            == "1500")
+    }
+
+    @Test("A bare or vague scale is left spelled")
+    func vagueScaleUntouched() {
+        let s = "the budget is around forty five thousand dollars, give or take a few thousand"
+        #expect(PolishPipeline.convertScaledNumbers(s)
+            == "the budget is around 45,000 dollars, give or take a few thousand")
+        #expect(PolishPipeline.convertScaledNumbers("thousands of users")
+            == "thousands of users")
+        #expect(PolishPipeline.convertScaledNumbers("several hundred people")
+            == "several hundred people")
+    }
+
+    @Test("Million and billion are deferred")
+    func millionDeferred() {
+        #expect(PolishPipeline.convertScaledNumbers("fifteen million")
+            == "fifteen million")
+        #expect(PolishPipeline.convertScaledNumbers("a hundred million users")
+            == "a hundred million users")
+    }
+
+    @Test("A number without a scale word is left for word conversion")
+    func noScaleUntouched() {
+        #expect(PolishPipeline.convertScaledNumbers("fifteen items")
+            == "fifteen items")
+        #expect(PolishPipeline.convertScaledNumbers("nineteen eighty four")
+            == "nineteen eighty four")
+    }
+}

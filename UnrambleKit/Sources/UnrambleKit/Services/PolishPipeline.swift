@@ -307,6 +307,12 @@ public enum PolishPipeline {
         // like "one point two million" → "200,000".
         result = convertDecimalScale(result)
 
+        // Convert a spelled amount scaled by hundred/thousand to grouped
+        // digits ("fifteen thousand" → "15,000"). Runs before number-word
+        // conversion, which otherwise leaves a number before a scale word
+        // spelled.
+        result = convertScaledNumbers(result)
+
         // Convert unambiguous number words to digits.
         result = convertNumberWords(result)
 
@@ -718,6 +724,112 @@ public enum PolishPipeline {
         }
 
         return result
+    }
+
+    /// Convert a spelled amount scaled by hundred or thousand to its grouped
+    /// digit form: "fifteen thousand" -> "15,000", "two hundred" -> "200",
+    /// "a hundred and twenty thousand" -> "120,000". A leading article counts
+    /// as one and is consumed ("a thousand" -> "1000"). Left untouched: a bare
+    /// or vague scale ("a few thousand", "thousands of"), spoken years or times
+    /// that additive parsing flags ambiguous ("nineteen eighty four"), and
+    /// runs scaled by million/billion (deferred). Four-digit results carry no
+    /// separator ("two thousand" -> "2000").
+    static func convertScaledNumbers(_ text: String) -> String {
+        let ns = text as NSString
+        let tokens: [(word: String, range: NSRange)] = wordTokenPattern
+            .matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .map { (ns.substring(with: $0.range).lowercased(), $0.range) }
+
+        var replacements: [(range: NSRange, text: String)] = []
+        var i = 0
+        while i < tokens.count {
+            guard isNumberWord(tokens[i].word) else { i += 1; continue }
+            let runStart = i
+            var run: [String] = []
+            while i < tokens.count {
+                let word = tokens[i].word
+                if isNumberWord(word) {
+                    run.append(word)
+                    i += 1
+                } else if word == "and", !run.isEmpty,
+                    i + 1 < tokens.count, isNumberWord(tokens[i + 1].word)
+                {
+                    i += 1  // keep "two hundred and fifty" as one run
+                } else {
+                    break
+                }
+            }
+            let runEnd = i - 1
+
+            // A directly-adjacent leading article ("a hundred") is one, and is
+            // consumed into the replaced span.
+            var spanStart = tokens[runStart].range.location
+            var leadsWithArticle = false
+            if runStart > 0 {
+                let prev = tokens[runStart - 1]
+                let gapStart = prev.range.location + prev.range.length
+                let gap = ns.substring(with: NSRange(
+                    location: gapStart,
+                    length: tokens[runStart].range.location - gapStart))
+                if (prev.word == "a" || prev.word == "an"),
+                    gap.allSatisfy({ $0 == " " })
+                {
+                    leadsWithArticle = true
+                    spanStart = prev.range.location
+                }
+            }
+
+            guard let digits = scaledDigits(
+                run: run, leadsWithArticle: leadsWithArticle)
+            else { continue }
+            let end = tokens[runEnd].range.location + tokens[runEnd].range.length
+            replacements.append((
+                NSRange(location: spanStart, length: end - spanStart), digits))
+        }
+
+        guard !replacements.isEmpty else { return text }
+        let result = NSMutableString(string: text)
+        for replacement in replacements.reversed() {
+            result.replaceCharacters(in: replacement.range, with: replacement.text)
+        }
+        return result as String
+    }
+
+    private static let wordTokenPattern = try! NSRegularExpression(
+        pattern: "[A-Za-z]+")
+
+    /// The grouped digit form for a spelled number run, or nil to leave it
+    /// spelled. Requires a hundred/thousand scale with a real leading number
+    /// (or article), no million/billion, and an unambiguous additive parse.
+    private static func scaledDigits(
+        run: [String], leadsWithArticle: Bool
+    ) -> String? {
+        guard !run.contains("million"), !run.contains("billion") else {
+            return nil
+        }
+        guard run.contains("hundred") || run.contains("thousand") else {
+            return nil
+        }
+        let hasNumberWord = run.contains { numberWordValues[$0] != nil }
+        guard hasNumberWord || leadsWithArticle else { return nil }
+        let parsed = parseNumberRun(run)
+        guard !parsed.ambiguous, parsed.value >= 100 else { return nil }
+        return groupedDigits(parsed.value)
+    }
+
+    /// Render an integer with thousands separators, except a four-digit value,
+    /// which reads fine without one ("2000", but "15,000").
+    private static func groupedDigits(_ value: Int) -> String {
+        guard value >= 10000 else { return String(value) }
+        let characters = Array(String(value))
+        var out = ""
+        for (offset, character) in characters.enumerated() {
+            if offset > 0, (characters.count - offset) % 3 == 0 {
+                out.append(",")
+            }
+            out.append(character)
+        }
+        return out
     }
 
     // MARK: - Cloud System Prompt
