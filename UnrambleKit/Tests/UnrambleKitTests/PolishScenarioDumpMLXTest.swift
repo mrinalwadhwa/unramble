@@ -74,12 +74,22 @@ private func runMLXDump(
     var categoryStats: [String: (match: Int, total: Int)] = [:]
     for s in evalSet {
         do {
+            // Run the SHIPPING per-unit streaming polish path (breakMode
+            // .commandsOnly), so the content-loss / fabrication / number guards
+            // and raw-fallback apply — the batch default (.expandBeforeModel)
+            // skips them. Faithful to production for single-unit inputs.
             let polished = await PolishPipeline.polish(
                 s.input,
                 chatClient: client,
                 tone: s.style,
-                precedingText: s.precedingText)
+                precedingText: s.precedingText,
+                breakMode: .commandsOnly)
             let result = PolishPipeline.stripTrailingFiller(polished)
+            if let json = try? JSONSerialization.data(
+                withJSONObject: ["uid": s.category, "input": s.input, "output": result]),
+               let line = String(data: json, encoding: .utf8) {
+                log.log("[[SCEN]] \(line)")
+            }
             let isMatch = s.matches(result)
             if isMatch { matches += 1 }
             var stats = categoryStats[s.category, default: (0, 0)]

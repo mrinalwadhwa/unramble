@@ -2781,6 +2781,7 @@ public actor DictationPipeline: PipelineProviding {
             }
             Log.debug(
                 "[Pipeline] Local dictation resolved (\(result.utf8.count) bytes)")
+            saveCapturedSample(wav: audioBuffer.data)
             return result
         } catch {
             Log.debug("[Pipeline] Local finishStreaming failed: \(error)")
@@ -3127,6 +3128,25 @@ public actor DictationPipeline: PipelineProviding {
             _ = await coordinator.failDictation(sessionID: sessionID)
             return nil
         }
+    }
+
+    /// Debug-only capture: when the collect flag file is present, save each
+    /// local dictation's audio to a samples directory to grow the replay
+    /// corpus. `audioBuffer.data` is already a complete WAV, so write it as-is.
+    /// Compiled out of Release, so the shipping app never collects raw speech —
+    /// see `ProductionSurfaceTests`.
+    private func saveCapturedSample(wav: Data) {
+        #if DEBUG
+        guard FileManager.default.fileExists(atPath: "/tmp/unramble-collect") else { return }
+        let dir = "/tmp/unramble-samples"
+        try? FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true)
+        let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir)
+            .filter { $0.hasSuffix(".wav") }) ?? []
+        let tag = String(format: "%03d", existing.count + 1)
+        try? wav.write(to: URL(fileURLWithPath: "\(dir)/sample-\(tag).wav"))
+        Log.debug("[Pipeline] captured sample-\(tag).wav")
+        #endif
     }
 
     private func retainRecovery(

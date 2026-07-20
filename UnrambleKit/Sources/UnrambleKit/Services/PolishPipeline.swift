@@ -1451,6 +1451,26 @@ public enum PolishPipeline {
     /// collapsed — the caller reinserts commanded breaks around this unit.
     /// Otherwise commanded breaks were already expanded to newlines before
     /// the model and are kept.
+    /// Debug-only diagnostic: emit the deterministic-vs-model stages of one
+    /// polish (preprocessed model input, raw model output, and the final text
+    /// after post-processing + guards) when the unit-trace flag file is
+    /// present. Compiled out of Release — it logs dictated content — see
+    /// `ProductionSurfaceTests`.
+    private static func tracePolish(
+        modelIn: String, modelOut: String, final: String, guardAction: String
+    ) {
+        #if DEBUG
+        guard FileManager.default.fileExists(atPath: "/tmp/unramble-unit-trace")
+        else { return }
+        if let data = try? JSONSerialization.data(withJSONObject: [
+            "model_in": modelIn, "model_out": modelOut,
+            "final": final, "guard": guardAction,
+        ]), let line = String(data: data, encoding: .utf8) {
+            Log.debug("[[POLISH]] \(line)")
+        }
+        #endif
+    }
+
     private static func polishUnit(
         substituted: String,
         chatClient: (any PolishChatClient)?,
@@ -1538,6 +1558,9 @@ public enum PolishPipeline {
                         normalizeFormatting(cleaned, casual: casual),
                         preprocessed: stripped, casual: casual,
                         noPreceding: noPreceding)
+                    tracePolish(modelIn: stripped, modelOut: polished,
+                        final: out, guardAction: attempt == 0 ? "ok"
+                            : "resample\(attempt)")
                     return (out, attempt)
                 }
             }
@@ -1549,6 +1572,8 @@ public enum PolishPipeline {
                 normalizeFormatting(stripped, casual: casual),
                 preprocessed: stripped, casual: casual,
                 noPreceding: noPreceding)
+            tracePolish(modelIn: stripped, modelOut: lastModelOut,
+                final: out, guardAction: "RAW_FALLBACK")
             return (out, temperatures.count - 1)
         } catch {
             Log.debug("[PolishPipeline] Polish failed: \(error)")

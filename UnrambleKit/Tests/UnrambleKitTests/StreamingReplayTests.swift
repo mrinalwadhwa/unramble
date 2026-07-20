@@ -79,16 +79,30 @@ struct StreamingReplay {
         let nemotron = NemotronEngine(modelManager: modelManager)
         try await nemotron.load()
 
-        // Qwen with the fine-tuned adapter if installed, matching production.
-        let adapterDir = modelManager.modelPath(
+        // Adapter selection: an explicit /tmp/unramble-replay-adapter-path wins;
+        // else /tmp/unramble-replay-no-adapter forces base; else the pack adapter.
+        let customAdapter = (try? String(
+            contentsOfFile: "/tmp/unramble-replay-adapter-path", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let forceBase = FileManager.default.fileExists(
+            atPath: "/tmp/unramble-replay-no-adapter")
+        let packAdapter = modelManager.modelPath(
             for: "qwen3-0.6b-4bit-polish-adapter")
-        let hasAdapter = FileManager.default.fileExists(
-            atPath: adapterDir.appendingPathComponent(
-                "adapters.safetensors").path)
+        let adapterURL: URL?
+        if let customAdapter, !customAdapter.isEmpty {
+            adapterURL = URL(fileURLWithPath: customAdapter, isDirectory: true)
+        } else if !forceBase && FileManager.default.fileExists(
+            atPath: packAdapter.appendingPathComponent(
+                "adapters.safetensors").path) {
+            adapterURL = packAdapter
+        } else {
+            adapterURL = nil
+        }
+        let hasAdapter = adapterURL != nil
         let engine = MLXLLMEngine(
             name: "Qwen3 0.6B Polish",
             modelDirectory: modelManager.modelPath(for: "qwen3-0.6b-4bit"),
-            adapterDirectory: hasAdapter ? adapterDir : nil)
+            adapterDirectory: adapterURL)
         let client = MLXPolishClient(engine: engine, timeoutSeconds: 30)
 
         let log = ReplayLog(path: "/tmp/unramble-streaming-replay.log")
@@ -106,6 +120,7 @@ struct StreamingReplay {
             // uses a fresh provider. Production injects the whole result once at
             // release, so the editor is reconstructed from that single result.
             for run in 0..<repeats {
+                Log.debug("[[WAV]] \(name)")
                 let provider = LocalStreamingProvider(
                     sttEngine: nemotron, polishChatClient: client,
                     cycleInterval: Double(stepMS) / 1000,

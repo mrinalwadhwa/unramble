@@ -829,6 +829,19 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         guard published else { return }
 
         Log.debug("[LocalStreaming] Closed unit (\(unitText.count) chars, reset=\(boundary == .hardPause), stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")
+
+        // Debug-only unit trace. Logs dictated content, so it is compiled out
+        // of Release — see `ProductionSurfaceTests`.
+        #if DEBUG
+        if FileManager.default.fileExists(atPath: "/tmp/unramble-unit-trace"),
+            let data = try? JSONSerialization.data(withJSONObject: [
+                "carry_in": heldCarry, "unit": unit, "combined": combined,
+                "polished": polished, "carry_out": newCarry,
+                "boundary": "\(boundary)",
+            ]), let line = String(data: data, encoding: .utf8) {
+            Log.debug("[[UNIT]] \(line)")
+        }
+        #endif
     }
 
     // MARK: - Joining

@@ -15,10 +15,14 @@ struct ProductionSurfaceTests {
         #expect(!relativePaths.contains("Services/AccessibilityPermissionProvider.swift"))
     }
 
-    @Test("Production target contains no raw speech or transcript collectors")
+    @Test("Release build collects no raw speech or dictated content")
     func excludesRawContentCollection() throws {
+        // Scan only what a Release build compiles: strip `#if DEBUG` regions so
+        // the debug-only diagnostics (the sample-capture hook, the polish/unit
+        // content traces) may live in the source yet never reach the shipping
+        // app. Their markers must not appear outside a `#if DEBUG` block.
         let corpus = try (productionSwiftSources() + applicationSwiftSources())
-            .map { try String(contentsOf: $0, encoding: .utf8) }
+            .map { try releaseVisibleSource(of: $0) }
             .joined(separator: "\n")
 
         let forbiddenMarkers = [
@@ -26,10 +30,28 @@ struct ProductionSurfaceTests {
             "/tmp/unramble-samples",
             "/tmp/unramble-stt-confidence",
             "/tmp/unramble-stt-confidence.log",
+            "/tmp/unramble-unit-trace",
+            "[[POLISH]]",
+            "[[UNIT]]",
         ]
         for marker in forbiddenMarkers {
-            #expect(!corpus.contains(marker), "production source contains \(marker)")
+            #expect(!corpus.contains(marker), "Release source contains \(marker)")
         }
+    }
+
+    @Test("The release-visibility filter strips debug regions, not everything")
+    func releaseVisibilityFilterHasTeeth() throws {
+        // The capture hook's marker is in the raw source but must be gone once
+        // `#if DEBUG` regions are stripped — proving the filter removes debug
+        // code rather than trivially passing everything. The surrounding
+        // signature must survive so it isn't over-stripping.
+        let url = packageRoot.appendingPathComponent(
+            "Sources/UnrambleKit/Services/DictationPipeline.swift")
+        let raw = try String(contentsOf: url, encoding: .utf8)
+        let visible = try releaseVisibleSource(of: url)
+        #expect(raw.contains("/tmp/unramble-collect"))
+        #expect(!visible.contains("/tmp/unramble-collect"))
+        #expect(visible.contains("func saveCapturedSample"))
     }
 
     @Test("Production streaming surface is session scoped")
@@ -87,6 +109,35 @@ struct ProductionSurfaceTests {
         #expect(!diagnosticsSource.contains("deviceName"))
         #expect(!diagnosticsSource.contains("result: String"))
         #expect(diagnosticsSource.contains("maximumCapacity"))
+    }
+
+    /// Return the file's source with every `#if DEBUG ... #endif` region
+    /// removed, so a check sees only what a Release build compiles. Handles a
+    /// nested `#if` inside a DEBUG region; assumes the DEBUG regions carry no
+    /// `#else` (the diagnostics add code, they don't replace it).
+    private func releaseVisibleSource(of url: URL) throws -> String {
+        let source = try String(contentsOf: url, encoding: .utf8)
+        var kept: [Substring] = []
+        var inDebug = false
+        var nesting = 0
+        for line in source.split(
+            separator: "\n", omittingEmptySubsequences: false)
+        {
+            let trimmed = String(line).trimmingCharacters(in: .whitespaces)
+            if !inDebug {
+                if trimmed.hasPrefix("#if DEBUG") {
+                    inDebug = true
+                    nesting = 0
+                } else {
+                    kept.append(line)
+                }
+            } else if trimmed.hasPrefix("#if") {
+                nesting += 1
+            } else if trimmed.hasPrefix("#endif") {
+                if nesting > 0 { nesting -= 1 } else { inDebug = false }
+            }
+        }
+        return kept.joined(separator: "\n")
     }
 
     private func productionSwiftSources() throws -> [URL] {
