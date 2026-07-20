@@ -1784,3 +1784,89 @@ struct ConvertScaledNumbersTests {
             == "nineteen eighty four")
     }
 }
+
+@Suite("PolishPipeline – collapseWordRepetition")
+struct CollapseWordRepetitionTests {
+
+    @Test("Collapses a single stuttered word")
+    func singleWord() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "we should fix the the login bug")
+            == "we should fix the login bug")
+    }
+
+    @Test("Collapses a stuttered two-word phrase")
+    func phrase() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "I think I think we should ship")
+            == "I think we should ship")
+        #expect(PolishPipeline.collapseWordRepetition(
+            "can you can you send me the report")
+            == "can you send me the report")
+    }
+
+    @Test("Collapses multiple stutters in one sentence")
+    func multiple() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "it's it's really important that we that we get this right")
+            == "it's really important that we get this right")
+        #expect(PolishPipeline.collapseWordRepetition(
+            "she said she said the timeline is is too aggressive")
+            == "she said the timeline is too aggressive")
+    }
+
+    @Test("Collapses a triple or longer run to one")
+    func tripleRun() {
+        #expect(PolishPipeline.collapseWordRepetition("the the the login")
+            == "the login")
+        #expect(PolishPipeline.collapseWordRepetition("the the the the login")
+            == "the login")
+    }
+
+    @Test("Keeps repetition separated by punctuation")
+    func punctuationKept() {
+        #expect(PolishPipeline.collapseWordRepetition("No, no, no.")
+            == "No, no, no.")
+        #expect(PolishPipeline.collapseWordRepetition("Done. Done.")
+            == "Done. Done.")
+    }
+
+    @Test("Keeps grammatical doubles and emphatic reduplication")
+    func nonStutterDoublesKept() {
+        // Grammatical doubles (excluded from the collapsible function words).
+        #expect(PolishPipeline.collapseWordRepetition("he had had enough")
+            == "he had had enough")
+        #expect(PolishPipeline.collapseWordRepetition(
+            "the fact that that happened")
+            == "the fact that that happened")
+        // Emphatic reduplication of content / interjection words.
+        #expect(PolishPipeline.collapseWordRepetition("that was very very good")
+            == "that was very very good")
+        #expect(PolishPipeline.collapseWordRepetition(
+            "please please send me the build")
+            == "please please send me the build")
+        #expect(PolishPipeline.collapseWordRepetition("wait wait slow down")
+            == "wait wait slow down")
+    }
+
+    @Test("Collapses a stuttered contraction")
+    func contraction() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "it's it's really important")
+            == "it's really important")
+    }
+
+    @Test("Keeps spoken digit sequences")
+    func numberSequenceKept() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "my number is five five five one two three")
+            == "my number is five five five one two three")
+    }
+
+    @Test("Leaves text without adjacent repeats unchanged")
+    func noRepeat() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "the quick brown fox jumps")
+            == "the quick brown fox jumps")
+    }
+}

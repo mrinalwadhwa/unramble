@@ -297,6 +297,12 @@ public enum PolishPipeline {
         // Strip pure filler sounds (um, uh, ah, hmm, etc.).
         result = stripFillerSounds(result)
 
+        // Collapse an immediately stuttered word or short phrase
+        // ("the the" → "the", "I think I think" → "I think"). Runs after
+        // filler stripping, which can itself create adjacent repeats
+        // ("we could um we could" → "we could we could" → "we could").
+        result = collapseWordRepetition(result)
+
         // Convert spoken clock times ("at three thirty" → "at 3:30") before the
         // model, which otherwise misconverts them (e.g. to "3:00"). Runs before
         // number-word conversion so the minute words are still spelled.
@@ -317,6 +323,130 @@ public enum PolishPipeline {
         result = convertNumberWords(result)
 
         return result.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Function words that a speaker only ever repeats by stuttering, so an
+    /// immediate double is safe to collapse ("the the" → "the", "is is" →
+    /// "is"). This is an allow-list, not a block-list: any word NOT here — a
+    /// content word, an interjection, or an intensifier that a speaker may
+    /// intentionally double ("please please", "wait wait", "very very", "no
+    /// no", "had had") — is left alone. Multi-word phrase repeats ("I think I
+    /// think") are disfluencies regardless and do not consult this set.
+    /// "had" and "that" are deliberately excluded (past perfect "had had",
+    /// complementizer "that that").
+    private static let doublableFunctionWords: Set<String> = [
+        "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
+        "with", "is", "are", "was", "were", "be", "i", "we", "you", "it",
+        "they", "he", "she", "my", "your", "our", "their", "his", "her",
+        "will", "would", "can", "could", "should", "do", "does", "did",
+        "has", "have",
+        "it's", "i'm", "we're", "you're", "they're", "that's", "there's",
+        "he's", "she's", "i'll", "we'll", "i've", "we've",
+        "don't", "doesn't", "didn't", "can't", "won't", "isn't", "aren't",
+        "wasn't",
+    ]
+
+    private static let wordTokenRegex: NSRegularExpression = {
+        // swiftlint:disable:next force_try
+        try! NSRegularExpression(pattern: "[\\p{L}\\p{N}']+", options: [])
+    }()
+
+    /// Collapse an immediately repeated 1–3 word run that a speaker stuttered
+    /// ("I think I think" → "I think", "the the" → "the"). Only collapses when
+    /// the runs are separated by whitespace alone — a comma or period between
+    /// them ("No, no", "Done. Done.") marks intentional repetition and is
+    /// kept. A single repeated word is also kept when it is whitelisted or a
+    /// number word, so grammatical doubles and spoken digit sequences
+    /// ("five five five …") survive. Longer restarts (self-corrections) are
+    /// left to the model.
+    static func collapseWordRepetition(_ text: String) -> String {
+        let ns = text as NSString
+        let matches = wordTokenRegex.matches(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        guard matches.count >= 2 else { return text }
+
+        let ranges = matches.map { $0.range }
+        let words = ranges.map { ns.substring(with: $0).lowercased() }
+
+        func separatorIsSpaceOnly(after i: Int) -> Bool {
+            let end = ranges[i].location + ranges[i].length
+            let start = ranges[i + 1].location
+            guard start > end else { return false }
+            let sep = ns.substring(with: NSRange(location: end, length: start - end))
+            return sep.allSatisfy { $0 == " " || $0 == "\t" }
+        }
+
+        // Two runs of `length` words match when the gaps spanning them are
+        // whitespace only and the words are pairwise equal.
+        func runsMatch(at i: Int, length: Int) -> Bool {
+            guard i + 2 * length <= words.count else { return false }
+            for k in i..<(i + 2 * length - 1) where !separatorIsSpaceOnly(after: k) {
+                return false
+            }
+            for k in 0..<length where words[i + k] != words[i + length + k] {
+                return false
+            }
+            return true
+        }
+
+        var drop = [Bool](repeating: false, count: words.count)
+        var i = 0
+        while i < words.count {
+            if drop[i] { i += 1; continue }
+            var collapsed = false
+            for length in stride(from: 3, through: 1, by: -1) {
+                // A phrase repeat needs a genuine phrase; a run that starts
+                // with a doubled word is left to the length-1 pass so any
+                // count collapses to one ("the the the the" → "the").
+                if length >= 2 && i + 1 < words.count && words[i] == words[i + 1] {
+                    continue
+                }
+                guard runsMatch(at: i, length: length) else { continue }
+                if length == 1 {
+                    // Only a stutter-prone function word collapses when a lone
+                    // word doubles; everything else (content words, emphatic
+                    // interjections, number sequences) is left intact.
+                    guard doublableFunctionWords.contains(words[i]) else {
+                        continue
+                    }
+                    // Collapse any further consecutive copies in one pass.
+                    var j = i + 1
+                    while j < words.count, separatorIsSpaceOnly(after: j - 1),
+                        words[j] == words[i]
+                    {
+                        drop[j] = true
+                        j += 1
+                    }
+                } else {
+                    for k in (i + length)..<(i + 2 * length) { drop[k] = true }
+                }
+                i += length  // advance past the kept first run
+                collapsed = true
+                break
+            }
+            if !collapsed { i += 1 }
+        }
+
+        guard drop.contains(true) else { return text }
+
+        // Rebuild, dropping each marked word together with the whitespace that
+        // immediately precedes it.
+        var result = ns.substring(
+            to: ranges.first!.location)  // leading text before the first word
+        for idx in words.indices where !drop[idx] {
+            if idx == 0 {
+                result += ns.substring(with: ranges[0])
+            } else {
+                let prevEnd = ranges[idx - 1].location + ranges[idx - 1].length
+                let start = ranges[idx].location
+                result += ns.substring(
+                    with: NSRange(location: prevEnd, length: start - prevEnd))
+                result += ns.substring(with: ranges[idx])
+            }
+        }
+        let lastEnd = ranges.last!.location + ranges.last!.length
+        result += ns.substring(from: lastEnd)
+        return result
     }
 
     /// Strength ordering used by `collapseAdjacentPunctuation`: stronger

@@ -307,13 +307,16 @@ struct ReduplicationSurvivesTests {
             "'aye aye' should survive pipeline: \(result)")
     }
 
-    // Stutters still pass through unchanged too (model handles them).
-    @Test("stutters pass through for model to handle")
-    func stutterPassThrough() {
+    // A stuttered phrase now collapses deterministically before the model,
+    // while the emphatic reduplications above still survive.
+    @Test("stutter collapses to a single occurrence")
+    func stutterCollapses() {
         let result = PolishPipeline.substituteDictatedPunctuation(
             "I think I think we should fix it")
-        #expect(result.lowercased().contains("i think i think"),
-            "Stutters should pass through to model: \(result)")
+        #expect(!result.lowercased().contains("i think i think"),
+            "Stutter should collapse: \(result)")
+        #expect(result.lowercased().contains("i think we should fix it"),
+            "Collapsed stutter should read cleanly: \(result)")
     }
 }
 
