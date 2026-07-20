@@ -21,6 +21,7 @@ ci BrowserURLReaderTests
 ci BufferedPasteOwnershipTests
 ci BuildUserPromptTests
 ci CloudDictationLiveHarnessTests
+ci CloudReplay
 ci CollapseWordRepetitionTests
 ci ConcurrentCancelSafetyTests
 ci ContextAssemblyTests
