@@ -107,6 +107,11 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     private var currentTimingSessionID: DictationSessionID?
     private var chunkReaderSessionID: DictationSessionID?
 
+    /// Whether the active session's target app uses a casual tone. Captured
+    /// from the context at `startStreaming` so `finishStreaming` can run the
+    /// shared `normalizeFormatting` with the same tone the local path uses.
+    private var activeCasual: Bool = false
+
     /// Invalidates post-session background work that was admitted before a
     /// disconnect completed.
     private var lifecycleEpoch: UInt64 = 0
@@ -283,6 +288,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
 
         // Checking and reserving ownership are one atomic operation so two
         // concurrent starts cannot both observe an idle provider.
+        let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
         let claimed = lock.withLock {
             guard activeSessionID == nil else { return false }
             let id = self.nextSessionID
@@ -291,6 +297,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             self.currentTimingSessionID = sessionID
             self.currentTiming = SessionTiming(id: id, startedAt: Date())
             self.commitSession = commitSession
+            self.activeCasual = casual
             return true
         }
         guard claimed else {
@@ -606,8 +613,17 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             throw await fail(error)
         }
 
-        let polished = finishResult.response.trimmingCharacters(
+        // Run the same deterministic formatting layer the local path applies
+        // inside `polishUnit`, so both paths agree on numbers, currency,
+        // percent, decimals, punctuation, capitalization, and bullets by
+        // construction. The model output is normalized here; the layer is
+        // idempotent, so downstream passes are no-ops.
+        let casual = lock.withLock { self.activeCasual }
+        let trimmed = finishResult.response.trimmingCharacters(
             in: .whitespacesAndNewlines)
+        let polished = trimmed.isEmpty
+            ? trimmed
+            : PolishPipeline.normalizeFormatting(trimmed, casual: casual)
         if polished.isEmpty {
             lock.withLock {
                 guard self.currentTimingSessionID == sessionID else { return }
