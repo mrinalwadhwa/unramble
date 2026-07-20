@@ -71,4 +71,42 @@ struct RealtimePolishValidationTests {
     func emptyTranscriptReturnsPolish() {
         #expect(validate("Anything.", raw: "") == "Anything.")
     }
+
+    // MARK: - Dictated-command round-trip
+
+    // The cloud path converts dictated commands to <keep> tokens before the
+    // model and reveals them after. This exercises that round-trip with an
+    // identity model: the input step and the output steps finishStreaming runs.
+    private func output(_ modelResponse: String) -> String {
+        PolishPipeline.normalizeFormatting(
+            PolishPipeline.stripKeepTags(
+                modelResponse.trimmingCharacters(in: .whitespacesAndNewlines)))
+    }
+
+    @Test("a dictated paragraph command round-trips to a break")
+    func paragraphCommandRoundTrips() {
+        let prepared = PolishPipeline.substituteDictatedPunctuation(
+            "First part new paragraph second part")
+        #expect(prepared.contains("<keep>[PAR]</keep>"))
+        let out = output(prepared)  // the model preserved the token
+        #expect(out.contains("\n\n"))
+        #expect(!out.contains("<keep>"))
+        #expect(!out.contains("[PAR]"))
+        #expect(!out.lowercased().contains("new paragraph"))
+    }
+
+    @Test("a model that also broke the line does not stack blanks")
+    func preservedTokenWithModelBreakStaysSingle() {
+        // The model kept the token and also rendered its own break.
+        let out = output("First part.\n\n<keep>[PAR]</keep>\n\nSecond part.")
+        #expect(out == "First part.\n\nSecond part.")
+    }
+
+    @Test("talking about a paragraph is not converted")
+    func paragraphAsContentNotConverted() {
+        let prepared = PolishPipeline.substituteDictatedPunctuation(
+            "start a new paragraph after the intro")
+        #expect(!prepared.contains("[PAR]"))
+        #expect(prepared.contains("new paragraph"))
+    }
 }

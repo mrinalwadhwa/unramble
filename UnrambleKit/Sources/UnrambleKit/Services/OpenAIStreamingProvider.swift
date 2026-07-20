@@ -112,6 +112,11 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
     /// shared `normalizeFormatting` with the same tone the local path uses.
     private var activeCasual: Bool = false
 
+    /// The target field's existing text at `startStreaming`, used as preceding
+    /// context when converting dictated commands so a command word at the very
+    /// start ("comma") is judged against what precedes it.
+    private var activePrecedingText: String?
+
     /// Invalidates post-session background work that was admitted before a
     /// disconnect completed.
     private var lifecycleEpoch: UInt64 = 0
@@ -289,6 +294,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         // Checking and reserving ownership are one atomic operation so two
         // concurrent starts cannot both observe an idle provider.
         let casual = PolishPipeline.toneLabel(for: context.bundleID) == "casual"
+        let precedingText = context.focusedFieldContent
         let claimed = lock.withLock {
             guard activeSessionID == nil else { return false }
             let id = self.nextSessionID
@@ -298,6 +304,7 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             self.currentTiming = SessionTiming(id: id, startedAt: Date())
             self.commitSession = commitSession
             self.activeCasual = casual
+            self.activePrecedingText = precedingText
             return true
         }
         guard claimed else {
@@ -565,6 +572,9 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             return self.currentTiming?.audioBytesSent ?? 0
         }
         let transcriptTimeout = Self.transcriptTimeout(forAudioBytes: bytesSent)
+        let (finishCasual, finishPreceding) = lock.withLock {
+            (self.activeCasual, self.activePrecedingText)
+        }
         let finishResult: RealtimeFinishResult
         do {
             finishResult = try await OpenAIRealtimeSessionDriver.withRealtimeSessionTimeout(
@@ -579,6 +589,11 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
                         session: commitSession,
                         send: { try await transport.send($0) },
                         includeEvidence: evidenceObserver != nil,
+                        prepareTranscript: {
+                            PolishPipeline.substituteDictatedPunctuation(
+                                $0, casual: finishCasual,
+                                precedingText: finishPreceding)
+                        },
                         onAppendSent: { [self] _, submittedBytes in
                             lock.withLock {
                                 guard currentTimingSessionID == sessionID else { return }
@@ -613,17 +628,19 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             throw await fail(error)
         }
 
-        // Run the same deterministic formatting layer the local path applies
-        // inside `polishUnit`, so both paths agree on numbers, currency,
-        // percent, decimals, punctuation, capitalization, and bullets by
-        // construction. The model output is normalized here; the layer is
-        // idempotent, so downstream passes are no-ops.
+        // Run the same deterministic post-model layer the local path applies:
+        // reveal the symbols carried through the model in <keep> tags and
+        // expand the [PAR]/[NL] break tokens, then normalize numbers, currency,
+        // percent, decimals, punctuation, capitalization, and bullets. Both
+        // steps are idempotent, so a downstream pass is a no-op.
         let casual = lock.withLock { self.activeCasual }
         let trimmed = finishResult.response.trimmingCharacters(
             in: .whitespacesAndNewlines)
         let polished = trimmed.isEmpty
             ? trimmed
-            : PolishPipeline.normalizeFormatting(trimmed, casual: casual)
+            : PolishPipeline.normalizeFormatting(
+                PolishPipeline.stripKeepTags(trimmed, casual: casual),
+                casual: casual)
         if polished.isEmpty {
             lock.withLock {
                 guard self.currentTimingSessionID == sessionID else { return }

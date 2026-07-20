@@ -117,6 +117,7 @@ enum OpenAIRealtimeSessionDriver {
         send: @escaping @Sendable (String) async throws -> Void,
         eventID: @escaping @Sendable () -> String = { UUID().uuidString },
         includeEvidence: Bool = false,
+        prepareTranscript: (@Sendable (String) -> String)? = nil,
         onAppendSent: (@Sendable (Int, Int) -> Void)? = nil,
         onCommitSent: (@Sendable () -> Void)? = nil
     ) async throws -> OpenAIStreamingProvider.RealtimeFinishResult {
@@ -143,16 +144,24 @@ enum OpenAIRealtimeSessionDriver {
                     evidence: evidence)
             }
 
+            // Convert dictated formatting commands ("new paragraph", "comma")
+            // into the <keep>[PAR]</keep> / symbol tokens the polish prompt
+            // expects, so the model treats them as commands rather than words.
+            // The prepared transcript is also the fidelity reference: the
+            // command words are now tokens, so a polish that expands them is
+            // not counted as dropping content.
+            let prepared = prepareTranscript?(transcript) ?? transcript
+
             try await session.beginPolish()
             try await send(
                 OpenAIRealtimeWireCodec.buildPolishRequest(
-                    transcript: transcript,
+                    transcript: prepared,
                     eventID: eventID()))
             try await send(OpenAIRealtimeWireCodec.buildResponseCreate(eventID: eventID()))
             let response = try await session.waitForPolishedResponse()
             let validatedResponse = validatedRealtimePolish(
                 response,
-                rawTranscript: transcript)
+                rawTranscript: prepared)
             await session.releaseTransportTurn()
             return OpenAIStreamingProvider.RealtimeFinishResult(
                 response: validatedResponse,
