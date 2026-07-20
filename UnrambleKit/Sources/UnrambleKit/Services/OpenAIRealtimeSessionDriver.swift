@@ -194,6 +194,13 @@ enum OpenAIRealtimeSessionDriver {
             || PolishPipeline.guardAgainstFabrication(
                 polished: candidate,
                 preprocessed: rawTranscript) != nil
+            // A substituted number is the costliest fidelity failure. The
+            // check compares numeric values, so a faithful digitization
+            // ("five" -> "5") passes and only a real substitution (a value
+            // dropped while another is invented) falls back to the transcript.
+            || PolishPipeline.guardAgainstNumberChange(
+                polished: candidate,
+                preprocessed: rawTranscript) != nil
         if guardFires {
             Log.debug(
                 "[REALTIME_POLISH_RAW_FALLBACK] fidelity guard rejected polish")

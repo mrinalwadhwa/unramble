@@ -100,6 +100,7 @@ ci PreambleSurvivesTests
 ci ProductionSurfaceTests
 ci PunctuationFalsePositiveTests
 ci PunctuationWordsAsContentTests
+ci RealtimePolishValidationTests
 ci RealtimeSilenceClassificationTests
 ci RealtimeTranscriptLedgerTests
 ci RecordingCoordinatorTests
