@@ -1901,6 +1901,46 @@ struct CollapseWordRepetitionTests {
             == "it's really important")
     }
 
+    @Test("Collapses a doubled content word")
+    func contentDoubleCollapsed() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "I bought yogurt yogurt at the store")
+            == "I bought yogurt at the store")
+        #expect(PolishPipeline.collapseWordRepetition(
+            "the meeting is Monday Monday")
+            == "the meeting is Monday")
+        #expect(PolishPipeline.collapseWordRepetition("send me the email email")
+            == "send me the email")
+    }
+
+    @Test("Collapses a long run of a non-emphatic word")
+    func longNonEmphaticRunCollapsed() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "if if if if if if if if if we ship")
+            == "if we ship")
+    }
+
+    @Test("Keeps a doubled emphatic content word")
+    func emphaticContentKept() {
+        #expect(PolishPipeline.collapseWordRepetition("this is so so good")
+            == "this is so so good")
+        #expect(PolishPipeline.collapseWordRepetition("that was a big big win")
+            == "that was a big big win")
+    }
+
+    @Test("Keeps doubled single-letter initials")
+    func initialsKept() {
+        #expect(PolishPipeline.collapseWordRepetition("the grade was B B")
+            == "the grade was B B")
+    }
+
+    @Test("Keeps a meaningful doubled word")
+    func meaningfulDoubleKept() {
+        #expect(PolishPipeline.collapseWordRepetition(
+            "move the launch to next next Thursday")
+            == "move the launch to next next Thursday")
+    }
+
     @Test("Keeps spoken digit sequences")
     func numberSequenceKept() {
         #expect(PolishPipeline.collapseWordRepetition(

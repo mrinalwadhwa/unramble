@@ -327,13 +327,11 @@ public enum PolishPipeline {
 
     /// Function words that a speaker only ever repeats by stuttering, so an
     /// immediate double is safe to collapse ("the the" → "the", "is is" →
-    /// "is"). This is an allow-list, not a block-list: any word NOT here — a
-    /// content word, an interjection, or an intensifier that a speaker may
-    /// intentionally double ("please please", "wait wait", "very very", "no
-    /// no", "had had") — is left alone. Multi-word phrase repeats ("I think I
-    /// think") are disfluencies regardless and do not consult this set.
-    /// "had" and "that" are deliberately excluded (past perfect "had had",
-    /// complementizer "that that").
+    /// "is"). A doubled word outside this set collapses too when it is a
+    /// content stutter ("email email" → "email", "Monday Monday" → "Monday");
+    /// the exceptions a speaker doubles on purpose are held in
+    /// `emphaticDoubleWords`. Multi-word phrase repeats ("I think I think")
+    /// are disfluencies regardless and do not consult this set.
     private static let doublableFunctionWords: Set<String> = [
         "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
         "with", "is", "are", "was", "were", "be", "i", "we", "you", "it",
@@ -344,6 +342,37 @@ public enum PolishPipeline {
         "he's", "she's", "i'll", "we'll", "i've", "we've",
         "don't", "doesn't", "didn't", "can't", "won't", "isn't", "aren't",
         "wasn't",
+    ]
+
+    /// Words a speaker doubles on purpose, so a repeat is kept at any count.
+    /// Intensifiers and interjections reduplicate for emphasis ("really
+    /// really", "wait wait wait", "no no no"); a handful of words form
+    /// lexical reduplications or comforting doubles ("bye bye", "so-so",
+    /// "there there"); and two are grammatical doubles (past perfect "had
+    /// had", complementizer "that that"). Everything else collapses when
+    /// doubled. Spoken digit sequences ("five five five") and single letters
+    /// are excluded separately in `collapseWordRepetition`.
+    private static let emphaticDoubleWords: Set<String> = [
+        // Intensifiers.
+        "very", "really", "so", "too", "super", "real", "quite", "pretty",
+        "way", "much", "many", "more", "big", "huge", "tiny", "long", "far",
+        "close", "fast", "hard", "high", "low",
+        // Affirmations / negations / interjections.
+        "no", "yes", "yeah", "yep", "nope", "nah", "sure", "right", "ok",
+        "okay", "please", "thanks", "wow", "oh", "ah", "ha", "ho", "hey",
+        "yay", "boo", "aye", "well", "now", "there", "here",
+        // Emphatic adverbs / commands.
+        "exactly", "absolutely", "definitely", "totally", "completely",
+        "seriously", "literally", "honestly", "truly", "never", "always",
+        "must", "wait", "stop", "go", "come", "run", "hurry", "easy", "slow",
+        "quick", "hush", "done", "good", "great",
+        // Lexical reduplications / onomatopoeia.
+        "bye", "night", "choo", "chop", "knock", "tut", "tsk", "blah", "yada",
+        "tick", "tock", "ding", "dong", "beep", "boom", "bang", "woof", "moo",
+        "tee", "hear",
+        // Grammatical and meaningful doubles ("had had", "that that", "next
+        // next Thursday" = the Thursday after next).
+        "had", "that", "next",
     ]
 
     private static let wordTokenRegex: NSRegularExpression = {
@@ -403,16 +432,21 @@ public enum PolishPipeline {
                 }
                 guard runsMatch(at: i, length: length) else { continue }
                 if length == 1 {
-                    // Only a stutter-prone function word collapses when a lone
-                    // word doubles; everything else (content words, emphatic
-                    // interjections, number sequences) is left intact.
-                    guard doublableFunctionWords.contains(words[i]) else {
-                        continue
-                    }
+                    // A lone doubled word collapses when it is a stutter — a
+                    // stutter-prone function word, or any other word not
+                    // reduplicated on purpose. Emphatic/reduplicated doubles
+                    // ("really really", "bye bye"), grammatical doubles ("had
+                    // had"), spoken digit sequences ("five five five"), and
+                    // single letters (initials) survive.
+                    let word = words[i]
+                    let collapsible = doublableFunctionWords.contains(word)
+                        || (word.count >= 2 && !isNumberWord(word)
+                            && !emphaticDoubleWords.contains(word))
+                    guard collapsible else { continue }
                     // Collapse any further consecutive copies in one pass.
                     var j = i + 1
                     while j < words.count, separatorIsSpaceOnly(after: j - 1),
-                        words[j] == words[i]
+                        words[j] == word
                     {
                         drop[j] = true
                         j += 1
