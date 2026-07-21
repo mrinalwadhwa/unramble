@@ -643,6 +643,38 @@ public enum PolishPipeline {
             }
         }
 
+        // Multi-part version string: "two point one point four" -> "2.1.4". A
+        // chain of three or more single digits joined by "point" is a version
+        // number, not a decimal, so every part joins with a dot. Runs before the
+        // two-part rule below, which would otherwise convert only the leading
+        // pair and strand the rest ("2.1 point four"). A two-part run (one
+        // "point") stays a decimal.
+        let versionWordPattern = #"(?i)\b(zero|one|two|three|four|five|six|seven|eight|nine)(?:\s+point\s+(?:zero|one|two|three|four|five|six|seven|eight|nine)){2,}\b"#
+        if let regex = try? NSRegularExpression(pattern: versionWordPattern) {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result) else { continue }
+                let tokens = result[fullRange]
+                    .lowercased()
+                    .split(whereSeparator: \.isWhitespace)
+                    .map(String.init)
+                var digits: [String] = []
+                var valid = true
+                for (index, token) in tokens.enumerated() {
+                    if index.isMultiple(of: 2) {
+                        guard let digit = digitWords[token] else { valid = false; break }
+                        digits.append(digit)
+                    } else if token != "point" {
+                        valid = false
+                        break
+                    }
+                }
+                guard valid, digits.count >= 3 else { continue }
+                result.replaceSubrange(fullRange, with: digits.joined(separator: "."))
+            }
+        }
+
         // Bare word form without a scale word: "version two point one" -> "2.1",
         // "three point zero" -> "3.0". Requiring a number word on BOTH sides of
         // "point" keeps the noun sense out ("make one point clear", "a three

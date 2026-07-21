@@ -28,6 +28,7 @@ ci ContextAssemblyTests
 ci ContextSanitizationTests
 ci ConvertDecimalScaleBareTests
 ci ConvertDecimalScaleCompoundTests
+ci ConvertDecimalScaleVersionTests
 ci ConvertNumberWordsTests
 ci ConvertScaledNumbersTests
 ci ConvertSpokenTimeTests

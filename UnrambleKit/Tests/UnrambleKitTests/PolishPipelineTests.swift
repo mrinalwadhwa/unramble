@@ -1601,6 +1601,40 @@ struct ConvertDecimalScaleBareTests {
     }
 }
 
+@Suite("PolishPipeline – convertDecimalScale version chains")
+struct ConvertDecimalScaleVersionTests {
+
+    @Test("Three-part version joins every part with dots")
+    func threePartVersion() {
+        #expect(PolishPipeline.convertDecimalScale(
+            "bump to version two point one point four")
+            == "bump to version 2.1.4")
+        #expect(PolishPipeline.convertDecimalScale(
+            "shipped it in version two point one point four")
+            == "shipped it in version 2.1.4")
+    }
+
+    @Test("Four-part version joins every part with dots")
+    func fourPartVersion() {
+        #expect(PolishPipeline.convertDecimalScale(
+            "pin it to three point one point four point one")
+            == "pin it to 3.1.4.1")
+    }
+
+    @Test("A two-part run stays a decimal, not a version")
+    func twoPartStaysDecimal() {
+        #expect(PolishPipeline.convertDecimalScale("on version two point one")
+            == "on version 2.1")
+    }
+
+    @Test("A trailing non-number keeps the version to its real length")
+    func trailingNonNumberBounded() {
+        #expect(PolishPipeline.convertDecimalScale(
+            "two point one point being the release")
+            == "2.1 point being the release")
+    }
+}
+
 @Suite("PolishPipeline – restoreFrequencyAdverb")
 struct RestoreFrequencyAdverbTests {
 
