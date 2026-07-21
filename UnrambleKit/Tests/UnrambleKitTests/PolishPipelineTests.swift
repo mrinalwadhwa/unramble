@@ -2033,6 +2033,92 @@ struct MergeDollarsAndCentsTests {
     }
 }
 
+@Suite("PolishPipeline – ensureTerminalPunctuation")
+struct EnsureTerminalPunctuationTests {
+
+    @Test("Adds a period when prose ends without one")
+    func addsPeriod() {
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "we agreed to ship on Friday", casual: false)
+            == "we agreed to ship on Friday.")
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "let's regroup Friday at 9:30", casual: false)
+            == "let's regroup Friday at 9:30.")
+    }
+
+    @Test("Leaves existing terminal punctuation alone")
+    func keepsExisting() {
+        for ending in ["Done.", "Really?", "Stop!", "wait\u{2026}"] {
+            #expect(PolishPipeline.ensureTerminalPunctuation(ending, casual: false)
+                == ending)
+        }
+    }
+
+    @Test("Skips casual tone")
+    func skipsCasual() {
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "hey wanna grab dinner", casual: true)
+            == "hey wanna grab dinner")
+    }
+
+    @Test("Leaves a trailing list item and a lead-in colon alone")
+    func skipsListAndColon() {
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "Groceries:\n- milk\n- eggs", casual: false)
+            == "Groceries:\n- milk\n- eggs")
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "The action items are:", casual: false)
+            == "The action items are:")
+    }
+
+    @Test("Leaves a trailing numbered list item alone")
+    func skipsNumberedList() {
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "Steps:\n1. Clone the repo\n2. Run tests\n3. Deploy", casual: false)
+            == "Steps:\n1. Clone the repo\n2. Run tests\n3. Deploy")
+        // A decimal that starts a prose line is not a numbered item.
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "3.2 is the release", casual: false)
+            == "3.2 is the release.")
+    }
+
+    @Test("Adds a period to the last line of multi-line prose")
+    func multiLineProse() {
+        #expect(PolishPipeline.ensureTerminalPunctuation(
+            "First, we ship.\nSecond, we measure", casual: false)
+            == "First, we ship.\nSecond, we measure.")
+    }
+}
+
+@Suite("PolishPipeline – insertVocativeComma")
+struct InsertVocativeCommaTests {
+
+    @Test("Adds a comma after a greeting and name")
+    func addsComma() {
+        #expect(PolishPipeline.insertVocativeComma(
+            "Hi Sarah just following up on the note")
+            == "Hi Sarah, just following up on the note")
+        #expect(PolishPipeline.insertVocativeComma("Hey Marcus can you review this")
+            == "Hey Marcus, can you review this")
+        #expect(PolishPipeline.insertVocativeComma("Hi there I wanted to check in")
+            == "Hi there, I wanted to check in")
+    }
+
+    @Test("Leaves an existing comma alone")
+    func keepsExistingComma() {
+        #expect(PolishPipeline.insertVocativeComma("Hi Jen, confirming our meeting")
+            == "Hi Jen, confirming our meeting")
+    }
+
+    @Test("Does not fire without a greeting or when nothing follows")
+    func noFalsePositive() {
+        #expect(PolishPipeline.insertVocativeComma("Thanks Sarah for the update")
+            == "Thanks Sarah for the update")
+        #expect(PolishPipeline.insertVocativeComma("Hi Sarah.")
+            == "Hi Sarah.")
+    }
+}
+
 @Suite("PolishPipeline – recombineSplitNumbers")
 struct RecombineSplitNumbersTests {
 

@@ -178,7 +178,7 @@ struct LocalStreamingProviderTests {
         let result = try await provider.finishStreaming(
             sessionID: replacementSession)
 
-        #expect(result == "Replacement")
+        #expect(result == "Replacement.")
         #expect(engine.finishCallCount == 1)
     }
 
@@ -550,7 +550,7 @@ struct LocalStreamingProviderTests {
             makePCM(bytes: 64), sessionID: sessionID)
         let result = try await provider.finishStreaming(sessionID: sessionID)
 
-        #expect(result == "Hello world")
+        #expect(result == "Hello world.")
     }
 }
 

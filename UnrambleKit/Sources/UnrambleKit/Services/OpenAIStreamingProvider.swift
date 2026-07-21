@@ -638,8 +638,11 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
             in: .whitespacesAndNewlines)
         let polished = trimmed.isEmpty
             ? trimmed
-            : PolishPipeline.normalizeFormatting(
-                PolishPipeline.stripKeepTags(trimmed, casual: casual),
+            : PolishPipeline.ensureTerminalPunctuation(
+                PolishPipeline.insertVocativeComma(
+                    PolishPipeline.normalizeFormatting(
+                        PolishPipeline.stripKeepTags(trimmed, casual: casual),
+                        casual: casual)),
                 casual: casual)
         if polished.isEmpty {
             lock.withLock {

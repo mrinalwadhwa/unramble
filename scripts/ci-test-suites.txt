@@ -44,6 +44,7 @@ ci DictationModeAvailabilityTests
 ci DictationModeTransitionTests
 ci DictationPipelineIntegrationTests
 ci DictationPipelineTests
+ci EnsureTerminalPunctuationTests
 ci FaithfulnessVerifierTests
 ci GainEndToEndTests
 ci GainFactorTests
@@ -52,6 +53,7 @@ ci HotkeyPipelineDriverTests
 ci HotkeySettingTests
 ci InjectionErrorTerminalTests
 ci InjectionPlannerTests
+ci InsertVocativeCommaTests
 ci LeadingSpaceTests
 ci LocalModelManagerTests
 ci LocalModelRuntimeTests

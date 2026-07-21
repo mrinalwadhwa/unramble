@@ -1005,6 +1005,60 @@ public enum PolishPipeline {
         }
     }
 
+    private static let vocativeGreetingPattern = try! NSRegularExpression(
+        // swiftlint:disable:next force_try
+        pattern: #"^(\s*(?:Hi|Hey|Hello|Hiya)\s+(?:[A-Z][a-zA-Z]+|there))(?=\s+[A-Za-z])"#)
+
+    /// Insert a vocative comma after an opening greeting and address ("Hi Sarah
+    /// just ..." -> "Hi Sarah, just ..."). Fires only at the very start, only
+    /// when a name (or "there") is directly addressed and the sentence
+    /// continues, and never when a comma already follows.
+    static func insertVocativeComma(_ text: String) -> String {
+        let ns = text as NSString
+        guard let match = vocativeGreetingPattern.firstMatch(
+            in: text, range: NSRange(location: 0, length: ns.length)),
+            let greeting = Range(match.range(at: 1), in: text)
+        else { return text }
+        return String(text[..<greeting.upperBound]) + ","
+            + String(text[greeting.upperBound...])
+    }
+
+    /// Add a sentence-ending period when the final line is prose that stops
+    /// without terminal punctuation, so a dictation never ends mid-air. Skips
+    /// casual tone (texting omits the final period), a list item (its trailing
+    /// period is stripped by house style), and a lead-in colon. Only a line
+    /// ending in a letter or digit gets a period, so quotes and brackets are
+    /// left untouched.
+    static func ensureTerminalPunctuation(_ text: String, casual: Bool) -> String {
+        guard !casual else { return text }
+        var end = text.endIndex
+        while end > text.startIndex {
+            let prev = text.index(before: end)
+            if text[prev].isWhitespace { end = prev } else { break }
+        }
+        guard end > text.startIndex else { return text }
+        let trimmed = text[..<end]
+        let lineStart = trimmed.lastIndex(of: "\n")
+            .map { trimmed.index(after: $0) } ?? trimmed.startIndex
+        let lastLine = trimmed[lineStart...].drop(while: { $0 == " " || $0 == "\t" })
+        if let first = lastLine.first, "-*•".contains(first) { return text }
+        // Skip a numbered list item ("3. Deploy", "2) Fix") — a digit run
+        // followed by "." or ")" and a space, whose trailing period is dropped
+        // by house style like a bullet's.
+        let digits = lastLine.prefix(while: \.isNumber)
+        if !digits.isEmpty {
+            let afterDigits = lastLine.dropFirst(digits.count)
+            if let mark = afterDigits.first, mark == "." || mark == ")" {
+                let following = afterDigits.dropFirst().first
+                if following == nil || following!.isWhitespace { return text }
+            }
+        }
+        guard let last = trimmed.last, last.isLetter || last.isNumber else {
+            return text
+        }
+        return String(trimmed) + "."
+    }
+
     private static let teens: [(String, Int)] = [
         ("thirteen", 13), ("fourteen", 14), ("fifteen", 15),
         ("sixteen", 16), ("seventeen", 17), ("eighteen", 18),
