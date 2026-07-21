@@ -29,6 +29,7 @@ ci ContextSanitizationTests
 ci ConvertDecimalScaleBareTests
 ci ConvertDecimalScaleCompoundTests
 ci ConvertDecimalScaleVersionTests
+ci ConvertDigitSequencesTests
 ci ConvertNumberWordsTests
 ci ConvertOrdinalDatesTests
 ci ConvertScaledNumbersTests

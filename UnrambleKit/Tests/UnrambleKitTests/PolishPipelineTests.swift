@@ -2086,6 +2086,58 @@ struct RecombineSplitNumbersTests {
     }
 }
 
+@Suite("PolishPipeline – convertDigitSequences")
+struct ConvertDigitSequencesTests {
+
+    @Test("Concatenates a three-digit code with an interior 'oh'")
+    func threeDigitCode() {
+        #expect(PolishPipeline.convertDigitSequences("we return a four oh four")
+            == "we return a 404")
+        #expect(PolishPipeline.convertDigitSequences("you get a four oh one")
+            == "you get a 401")
+    }
+
+    @Test("Concatenates a code without a zero")
+    func codeWithoutZero() {
+        #expect(PolishPipeline.convertDigitSequences("just call nine one one")
+            == "just call 911")
+    }
+
+    @Test("Dash-formats a phone number")
+    func phoneFormatting() {
+        #expect(PolishPipeline.convertDigitSequences(
+            "my number is five five five one two three four five six seven")
+            == "my number is 555-123-4567")
+        #expect(PolishPipeline.convertDigitSequences(
+            "dial five five five one two three four")
+            == "dial 555-1234")
+    }
+
+    @Test("Leaves a run of fewer than three digits alone")
+    func shortRunKept() {
+        #expect(PolishPipeline.convertDigitSequences("we need four five things")
+            == "we need four five things")
+        #expect(PolishPipeline.convertDigitSequences("about two or three of them")
+            == "about two or three of them")
+    }
+
+    @Test("Leaves a boundary 'oh' interjection alone")
+    func boundaryOhKept() {
+        #expect(PolishPipeline.convertDigitSequences("that is four five oh well")
+            == "that is four five oh well")
+        #expect(PolishPipeline.convertDigitSequences("oh four five later")
+            == "oh four five later")
+    }
+
+    @Test("A spoken time still wins over a bare code")
+    func timePrecedence() {
+        #expect(PolishPipeline.substituteDictatedPunctuation("meet at four oh four")
+            == "Meet at 4:04")
+        #expect(PolishPipeline.substituteDictatedPunctuation("return a four oh four")
+            == "Return a 404")
+    }
+}
+
 @Suite("PolishPipeline – convertOrdinalDates")
 struct ConvertOrdinalDatesTests {
 

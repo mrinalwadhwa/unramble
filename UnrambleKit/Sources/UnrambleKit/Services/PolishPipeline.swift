@@ -308,6 +308,11 @@ public enum PolishPipeline {
         // number-word conversion so the minute words are still spelled.
         result = convertSpokenTime(result)
 
+        // Concatenate a spoken digit sequence ("four oh four" → "404", "four
+        // one five ..." → a phone number). Runs after time conversion so a
+        // spoken time ("at four oh four" → "4:04") wins over a bare code.
+        result = convertDigitSequences(result)
+
         // Convert "X point Y million/billion/thousand" to decimal form
         // before the model sees it. Prevents hallucinated conversions
         // like "one point two million" → "200,000".
@@ -926,6 +931,78 @@ public enum PolishPipeline {
             }
         }
         return result
+    }
+
+    /// Concatenate a spoken run of three or more single digits into a number
+    /// ("four oh four" -> "404", "four one five ..." -> a phone number), so
+    /// codes, extensions, and phone numbers stop reading as words. "oh" counts
+    /// as zero only between two digits, so a boundary interjection ("four five,
+    /// oh well") is left alone. A run of fewer than three digits (a prose
+    /// count) never converts. A 7- or 10-digit run is dash-formatted.
+    static func convertDigitSequences(_ text: String) -> String {
+        let ns = text as NSString
+        let matches = wordTokenPattern.matches(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        guard matches.count >= 3 else { return text }
+        let ranges = matches.map { $0.range }
+        let words = ranges.map { ns.substring(with: $0).lowercased() }
+
+        func spaceOnly(_ i: Int) -> Bool {
+            let end = ranges[i].location + ranges[i].length
+            let start = ranges[i + 1].location
+            guard start >= end else { return false }
+            return ns.substring(
+                with: NSRange(location: end, length: start - end)
+            ).allSatisfy { $0 == " " }
+        }
+        func isDigit(_ i: Int) -> Bool { digitWords[words[i]] != nil }
+        // "oh" reads as zero only when it sits directly between two digits.
+        func isMember(_ i: Int) -> Bool {
+            if isDigit(i) { return true }
+            return words[i] == "oh" && i > 0 && i + 1 < words.count
+                && isDigit(i - 1) && isDigit(i + 1)
+                && spaceOnly(i - 1) && spaceOnly(i)
+        }
+
+        var replacements: [(range: NSRange, text: String)] = []
+        var i = 0
+        while i < words.count {
+            guard isDigit(i) else { i += 1; continue }
+            var j = i
+            while j + 1 < words.count, spaceOnly(j), isMember(j + 1) { j += 1 }
+            // Trim a trailing "oh" so the run ends on a real digit.
+            while j > i, !isDigit(j) { j -= 1 }
+            if j - i + 1 >= 3 {
+                let digits = (i...j).map { digitWords[words[$0]] ?? "0" }.joined()
+                let span = NSRange(
+                    location: ranges[i].location,
+                    length: ranges[j].location + ranges[j].length
+                        - ranges[i].location)
+                replacements.append((span, formatDigitRun(digits)))
+            }
+            i = j + 1
+        }
+        guard !replacements.isEmpty else { return text }
+        let result = NSMutableString(string: text)
+        for replacement in replacements.reversed() {
+            result.replaceCharacters(
+                in: replacement.range, with: replacement.text)
+        }
+        return result as String
+    }
+
+    /// Dash-format a run of digits that reads as a phone number; a run of any
+    /// other length stays a plain concatenation ("404", "41550198").
+    private static func formatDigitRun(_ digits: String) -> String {
+        switch digits.count {
+        case 7:
+            return "\(digits.prefix(3))-\(digits.suffix(4))"
+        case 10:
+            let mid = digits.dropFirst(3).prefix(3)
+            return "\(digits.prefix(3))-\(mid)-\(digits.suffix(4))"
+        default:
+            return digits
+        }
     }
 
     private static let teens: [(String, Int)] = [
