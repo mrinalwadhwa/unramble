@@ -2033,6 +2033,41 @@ struct MergeDollarsAndCentsTests {
     }
 }
 
+@Suite("PolishPipeline – content-loss correction exception")
+struct ContentLossCorrectionTests {
+
+    @Test("A long correction that drops the replaced value is allowed")
+    func longCorrectionAllowed() {
+        #expect(PolishPipeline.guardAgainstContentLoss(
+            polished: "I'll book the flight for Wednesday.",
+            preprocessed:
+                "I'll book the flight for Tuesday actually make that Wednesday")
+            == nil)
+        #expect(PolishPipeline.guardAgainstContentLoss(
+            polished: "We deployed to the production region.",
+            preprocessed:
+                "We deployed to the staging region sorry I mean the production region")
+            == nil)
+    }
+
+    @Test("A marker-free dropped run still falls back")
+    func markerFreeLossCaught() {
+        let preprocessed =
+            "we carefully reviewed the quarterly revenue growth margin numbers"
+        #expect(PolishPipeline.guardAgainstContentLoss(
+            polished: "we reviewed numbers", preprocessed: preprocessed)
+            == preprocessed)
+    }
+
+    @Test("A short drop still passes")
+    func shortDropPasses() {
+        #expect(PolishPipeline.guardAgainstContentLoss(
+            polished: "send it to Sarah instead",
+            preprocessed: "send the report to John no wait to Sarah instead")
+            == nil)
+    }
+}
+
 @Suite("PolishPipeline – ensureTerminalPunctuation")
 struct EnsureTerminalPunctuationTests {
 

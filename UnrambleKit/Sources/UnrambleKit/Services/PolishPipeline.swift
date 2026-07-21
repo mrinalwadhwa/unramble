@@ -2829,6 +2829,15 @@ public enum PolishPipeline {
     /// pass.
     ///
     /// Returns the preprocessed text as fallback, or nil if no dropped run.
+    /// Content-length words (3+ letters) that mark a spoken self-correction.
+    /// A dropped run that spans one is the speaker replacing what they said,
+    /// not lost content. Shorter markers ("no") are never content words, so
+    /// they don't need listing here.
+    private static let correctionMarkers: Set<String> = [
+        "actually", "wait", "mean", "rather", "scratch", "sorry",
+        "instead", "meant", "correction",
+    ]
+
     static func guardAgainstContentLoss(
         polished: String, preprocessed: String,
         maxConsecutiveMissing: Int = 3
@@ -2836,14 +2845,25 @@ public enum PolishPipeline {
         let inputWords = contentWords(preprocessed)
         let matched = orderedMatchMask(inputWords, contentWords(polished))
         var longestMissingRun = 0
-        var currentRun = 0
-        for isMatched in matched {
-            if isMatched {
-                currentRun = 0
-            } else {
-                currentRun += 1
-                longestMissingRun = max(longestMissingRun, currentRun)
+        var i = 0
+        while i < matched.count {
+            guard !matched[i] else { i += 1; continue }
+            // Measure a whole run of consecutive dropped words at once.
+            var j = i
+            var spansCorrection = false
+            while j < matched.count, !matched[j] {
+                if correctionMarkers.contains(inputWords[j]) {
+                    spansCorrection = true
+                }
+                j += 1
             }
+            // A dropped run that spans a self-correction marker ("actually",
+            // "no wait", "I mean") is a replacement, not lost content, so it
+            // does not count. A marker-free dropped run still triggers the guard.
+            if !spansCorrection {
+                longestMissingRun = max(longestMissingRun, j - i)
+            }
+            i = j
         }
         if longestMissingRun > maxConsecutiveMissing {
             Log.debug(

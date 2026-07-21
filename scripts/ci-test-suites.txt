@@ -24,6 +24,7 @@ ci CloudDictationLiveHarnessTests
 ci CloudReplay
 ci CollapseWordRepetitionTests
 ci ConcurrentCancelSafetyTests
+ci ContentLossCorrectionTests
 ci ContextAssemblyTests
 ci ContextSanitizationTests
 ci ConvertDecimalScaleBareTests
