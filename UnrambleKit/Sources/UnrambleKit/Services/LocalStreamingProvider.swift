@@ -490,9 +490,11 @@ public final class LocalStreamingProvider: LocalAudioReplayProviding,
         let polishElapsed = CFAbsoluteTimeGetCurrent() - polishStart
         // A lone "i" is always the pronoun "I"; guarantee it on the final text
         // regardless of which internal path produced each piece.
-        let full = Self.reconcileSplitWords(
-            Self.capitalizePronounI(
-                Self.joinPolished(snapshot.committed, finalPolished)),
+        let full = PolishPipeline.recombineSplitNumbers(
+            Self.reconcileSplitWords(
+                Self.capitalizePronounI(
+                    Self.joinPolished(snapshot.committed, finalPolished)),
+                raw: trimmed),
             raw: trimmed)
 
         Log.debug("[LocalStreaming] Finish (stt=\(String(format: "%.2f", sttElapsed))s polish=\(String(format: "%.2f", polishElapsed))s)")

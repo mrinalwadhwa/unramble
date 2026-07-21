@@ -104,6 +104,7 @@ ci PunctuationWordsAsContentTests
 ci RealtimePolishValidationTests
 ci RealtimeSilenceClassificationTests
 ci RealtimeTranscriptLedgerTests
+ci RecombineSplitNumbersTests
 ci RecordingCoordinatorTests
 ci ReduplicationSurvivesTests
 ci RestoreFrequencyAdverbTests

@@ -2015,3 +2015,56 @@ struct MergeDollarsAndCentsTests {
             == "It costs $99.99.")
     }
 }
+
+@Suite("PolishPipeline – recombineSplitNumbers")
+struct RecombineSplitNumbersTests {
+
+    @Test("Folds a hundreds tail split off after a thousands group")
+    func thousandsPlusHundreds() {
+        #expect(PolishPipeline.recombineSplitNumbers(
+            "we committed about 12,000 500 to the conference",
+            raw: "we committed about twelve thousand five hundred to the conference")
+            == "we committed about 12,500 to the conference")
+    }
+
+    @Test("Folds an 'and' tens tail back into the amount")
+    func compoundWithAndTail() {
+        #expect(PolishPipeline.recombineSplitNumbers(
+            "it comes to $10,600 and 25",
+            raw: "it comes to ten thousand six hundred and twenty five")
+            == "it comes to $10,625")
+    }
+
+    @Test("Leaves two genuinely separate numbers alone")
+    func separateNumbersKept() {
+        // "dollars" breaks the raw run, so 5,500 was never one spoken number.
+        #expect(PolishPipeline.recombineSplitNumbers(
+            "that is 5,000 dollars and 500 more",
+            raw: "that is five thousand dollars and five hundred more")
+            == "that is 5,000 dollars and 500 more")
+    }
+
+    @Test("Leaves an adjacent count that was not one spoken number")
+    func nonContiguousKept() {
+        #expect(PolishPipeline.recombineSplitNumbers(
+            "we shipped 5,000 100 times",
+            raw: "we shipped five thousand a hundred times")
+            == "we shipped 5,000 100 times")
+    }
+
+    @Test("Does nothing when the raw holds no matching run")
+    func noRawRun() {
+        #expect(PolishPipeline.recombineSplitNumbers(
+            "the code is 12,000 500",
+            raw: "the code is one two three")
+            == "the code is 12,000 500")
+    }
+
+    @Test("Leaves a sub-thousand base untouched")
+    func subThousandBaseKept() {
+        #expect(PolishPipeline.recombineSplitNumbers(
+            "chapter 200 5 pages",
+            raw: "chapter two hundred five pages")
+            == "chapter 200 5 pages")
+    }
+}

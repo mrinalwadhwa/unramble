@@ -1093,6 +1093,90 @@ public enum PolishPipeline {
         return out
     }
 
+    private static let splitNumberPattern = try! NSRegularExpression(
+        // swiftlint:disable:next force_try
+        pattern: #"(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d{3,})\s+(?:and\s+)?(\d{1,3})\b"#)
+
+    /// Recombine a scaled number split across a streaming unit seam. A number
+    /// spoken across a unit boundary ("twelve thousand | five hundred") has
+    /// each half converted independently, so the joined text reads "12,000
+    /// 500". Fold the trailing sub-group back in ("12,500") — but only when the
+    /// raw transcript held the two halves as one contiguous spoken number, so
+    /// two genuinely separate adjacent numbers ("5,000 dollars and 500 more")
+    /// are never merged.
+    static func recombineSplitNumbers(_ text: String, raw: String) -> String {
+        let rawValues = spelledNumberRunValues(raw)
+        guard !rawValues.isEmpty else { return text }
+
+        let ns = text as NSString
+        let matches = splitNumberPattern.matches(
+            in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return text }
+
+        let result = NSMutableString(string: text)
+        for match in matches.reversed() {
+            guard match.numberOfRanges == 3,
+                let baseRange = Range(match.range(at: 1), in: text),
+                let tailRange = Range(match.range(at: 2), in: text),
+                let base = Int(
+                    text[baseRange].replacingOccurrences(of: ",", with: "")),
+                let tail = Int(text[tailRange])
+            else { continue }
+            // The tail must slot into the base's trailing zeros (a real
+            // compound), the base must reach the thousands that split across a
+            // seam, and the recombined value must be one the speaker said as a
+            // single run.
+            let magnitude = powerOfTen(text[tailRange].count)
+            guard base >= 1000, tail > 0, tail < magnitude,
+                base % magnitude == 0,
+                rawValues.contains(base + tail)
+            else { continue }
+            result.replaceCharacters(
+                in: match.range, with: groupedDigits(base + tail))
+        }
+        return result as String
+    }
+
+    private static func powerOfTen(_ exponent: Int) -> Int {
+        var value = 1
+        for _ in 0..<exponent { value *= 10 }
+        return value
+    }
+
+    /// Values of contiguous spelled number runs (two or more number words) in
+    /// the text. A split number is only recombined when its whole value shows
+    /// up here, confirming the speaker said it as one number.
+    private static func spelledNumberRunValues(_ text: String) -> Set<Int> {
+        let ns = text as NSString
+        let tokens = wordTokenPattern
+            .matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .map { ns.substring(with: $0.range).lowercased() }
+        var values = Set<Int>()
+        var i = 0
+        while i < tokens.count {
+            guard isNumberWord(tokens[i]) else { i += 1; continue }
+            var run: [String] = []
+            while i < tokens.count {
+                let word = tokens[i]
+                if isNumberWord(word) {
+                    run.append(word)
+                    i += 1
+                } else if word == "and", !run.isEmpty,
+                    i + 1 < tokens.count, isNumberWord(tokens[i + 1])
+                {
+                    i += 1
+                } else {
+                    break
+                }
+            }
+            if run.count >= 2 {
+                let parsed = parseNumberRun(run)
+                if !parsed.ambiguous { values.insert(parsed.value) }
+            }
+        }
+        return values
+    }
+
     // MARK: - Cloud System Prompt
 
     /// Build a dynamic system prompt for cloud polish models.
