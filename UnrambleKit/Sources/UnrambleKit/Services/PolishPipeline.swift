@@ -1413,6 +1413,15 @@ public enum PolishPipeline {
         result = result.replacingOccurrences(
             of: #"\bp\.m\.(?=$|\n)"#, with: "PM.", options: .regularExpression)
 
+        // A bare spoken hour before a meridiem takes a numeral: "three PM" ->
+        // "3 PM", "nine AM" -> "9 AM". H:MM times are digitized upstream; this
+        // covers the on-the-hour case. Fires only directly before AM/PM.
+        for (word, digit) in percentCardinals {
+            result = result.replacingOccurrences(
+                of: "(?i)\\b\(word) (AM|PM)\\b",
+                with: "\(digit) $1", options: .regularExpression)
+        }
+
         // Collapse redundant terminal punctuation (e.g. "!." → "!").
         result = result.replacingOccurrences(
             of: #"([!?])\."#, with: "$1", options: .regularExpression)

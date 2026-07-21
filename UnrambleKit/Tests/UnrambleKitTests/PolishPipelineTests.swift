@@ -684,6 +684,23 @@ struct NormalizeFormattingTests {
         #expect(PolishPipeline.normalizeFormatting("  -Item") == "  - Item")
     }
 
+    @Test("bare hour before a meridiem takes a numeral")
+    func bareHourMeridiem() {
+        #expect(PolishPipeline.normalizeFormatting("send it before three PM")
+            == "send it before 3 PM")
+        #expect(PolishPipeline.normalizeFormatting(
+            "the rotation switches at nine AM Monday")
+            == "the rotation switches at 9 AM Monday")
+        #expect(PolishPipeline.normalizeFormatting("the doors open at twelve PM")
+            == "the doors open at 12 PM")
+    }
+
+    @Test("a count not before a meridiem stays spelled")
+    func countNotMeridiemKept() {
+        #expect(PolishPipeline.normalizeFormatting("we need three people")
+            == "we need three people")
+    }
+
     @Test("trailing whitespace stripped")
     func trailingWhitespace() {
         let result = PolishPipeline.normalizeFormatting("hello   \nworld  ")
