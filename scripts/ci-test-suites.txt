@@ -30,6 +30,7 @@ ci ConvertDecimalScaleBareTests
 ci ConvertDecimalScaleCompoundTests
 ci ConvertDecimalScaleVersionTests
 ci ConvertNumberWordsTests
+ci ConvertOrdinalDatesTests
 ci ConvertScaledNumbersTests
 ci ConvertSpokenTimeTests
 ci DetachedPipelineGenerationTests

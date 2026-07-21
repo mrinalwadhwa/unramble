@@ -865,6 +865,69 @@ public enum PolishPipeline {
         return result
     }
 
+    /// Match a spoken ordinal in a date context: after a capitalized month
+    /// ("March fifteenth") or anchored to a weekday ("Friday the twenty
+    /// second"). The month and weekday stay case-sensitive so the modal "may"
+    /// and lowercase prose never match; only the capitalized proper nouns do.
+    private static let ordinalDatePatterns: [NSRegularExpression] = {
+        let months = "January|February|March|April|May|June|July|August"
+            + "|September|October|November|December"
+        let weekdays =
+            "Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday"
+        let ords = "first|second|third|fourth|fifth|sixth|seventh|eighth"
+            + "|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth"
+            + "|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth"
+        let tail = "((?i:twenty|thirty)\\s+)?((?i:\(ords)))\\b"
+        return [
+            "\\b((?:\(months))\\s+(?i:the\\s+)?)" + tail,
+            "\\b((?:\(weekdays)),?\\s+(?i:the)\\s+)" + tail,
+        ].compactMap { try? NSRegularExpression(pattern: $0) }
+    }()
+
+    private static func ordinalSuffix(_ day: Int) -> String {
+        if (11...13).contains(day % 100) { return "th" }
+        switch day % 10 {
+        case 1: return "st"
+        case 2: return "nd"
+        case 3: return "rd"
+        default: return "th"
+        }
+    }
+
+    /// Convert a spoken ordinal in a date context to its "Nth" form. Only a
+    /// month-adjacent ordinal ("March fifteenth") or a weekday-anchored one
+    /// ("Friday the twenty second") converts, so a prose ordinal ("the first
+    /// release") stays spelled.
+    static func convertOrdinalDates(_ text: String) -> String {
+        var result = text
+        for regex in ordinalDatePatterns {
+            let matches = regex.matches(
+                in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let full = Range(match.range, in: result),
+                    let prefixR = Range(match.range(at: 1), in: result),
+                    let ordR = Range(match.range(at: 3), in: result),
+                    let unit = ordinalWordValues[result[ordR].lowercased()]
+                else { continue }
+                var day = unit
+                if match.range(at: 2).location != NSNotFound,
+                    let tensR = Range(match.range(at: 2), in: result)
+                {
+                    // A tens word only combines with a unit ordinal (1–9):
+                    // "twenty second" -> 22. "twenty twentieth" is nonsense.
+                    guard (1...9).contains(unit) else { continue }
+                    let tens =
+                        result[tensR].lowercased().contains("thirty") ? 30 : 20
+                    day = tens + unit
+                }
+                guard (1...31).contains(day) else { continue }
+                result.replaceSubrange(
+                    full, with: "\(result[prefixR])\(day)\(ordinalSuffix(day))")
+            }
+        }
+        return result
+    }
+
     private static let teens: [(String, Int)] = [
         ("thirteen", 13), ("fourteen", 14), ("fifteen", 15),
         ("sixteen", 16), ("seventeen", 17), ("eighteen", 18),
@@ -1381,6 +1444,11 @@ public enum PolishPipeline {
         // "$99.99", "$5 and 50 cents" -> "$5.50". Runs after the "$" rule
         // above, so the dollar part is already a digit amount.
         result = mergeDollarsAndCents(result)
+
+        // A spoken ordinal in a date context takes the "Nth" form: "March
+        // fifteenth" -> "March 15th", "Friday the twenty second" -> "Friday
+        // the 22nd". A prose ordinal ("the first release") stays spelled.
+        result = convertOrdinalDates(result)
 
         // Process line by line.
         // Strip trailing whitespace, normalize bullets, and strip

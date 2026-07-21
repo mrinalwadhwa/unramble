@@ -2068,3 +2068,41 @@ struct RecombineSplitNumbersTests {
             == "chapter 200 5 pages")
     }
 }
+
+@Suite("PolishPipeline – convertOrdinalDates")
+struct ConvertOrdinalDatesTests {
+
+    @Test("Converts a month-adjacent ordinal")
+    func monthOrdinal() {
+        #expect(PolishPipeline.convertOrdinalDates(
+            "the review is on March fifteenth")
+            == "the review is on March 15th")
+        #expect(PolishPipeline.convertOrdinalDates("due March the third")
+            == "due March the 3rd")
+    }
+
+    @Test("Converts a weekday-anchored ordinal, including compounds")
+    func weekdayOrdinal() {
+        #expect(PolishPipeline.convertOrdinalDates(
+            "the deadline is Friday the twenty second")
+            == "the deadline is Friday the 22nd")
+        #expect(PolishPipeline.convertOrdinalDates(
+            "meeting Wednesday, the fourteenth")
+            == "meeting Wednesday, the 14th")
+        #expect(PolishPipeline.convertOrdinalDates(
+            "ship by Monday the thirty first")
+            == "ship by Monday the 31st")
+    }
+
+    @Test("Leaves a prose ordinal spelled")
+    func proseOrdinalKept() {
+        #expect(PolishPipeline.convertOrdinalDates("this is the first release")
+            == "this is the first release")
+        #expect(PolishPipeline.convertOrdinalDates(
+            "you may first want to check")
+            == "you may first want to check")
+        #expect(PolishPipeline.convertOrdinalDates(
+            "the fifteenth attempt failed")
+            == "the fifteenth attempt failed")
+    }
+}
