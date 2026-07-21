@@ -26,8 +26,7 @@ struct ProductionSurfaceTests {
             .joined(separator: "\n")
 
         let forbiddenMarkers = [
-            "/tmp/unramble-collect",
-            "/tmp/unramble-samples",
+            "Application Support/Unramble/recordings",
             "/tmp/unramble-stt-confidence",
             "/tmp/unramble-stt-confidence.log",
             "/tmp/unramble-unit-trace",
@@ -49,8 +48,8 @@ struct ProductionSurfaceTests {
             "Sources/UnrambleKit/Services/DictationPipeline.swift")
         let raw = try String(contentsOf: url, encoding: .utf8)
         let visible = try releaseVisibleSource(of: url)
-        #expect(raw.contains("/tmp/unramble-collect"))
-        #expect(!visible.contains("/tmp/unramble-collect"))
+        #expect(raw.contains("Application Support/Unramble/recordings"))
+        #expect(!visible.contains("Application Support/Unramble/recordings"))
         #expect(visible.contains("func saveCapturedSample"))
     }
 

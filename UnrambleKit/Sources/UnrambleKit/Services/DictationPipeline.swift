@@ -3130,22 +3130,31 @@ public actor DictationPipeline: PipelineProviding {
         }
     }
 
-    /// Debug-only capture: when the collect flag file is present, save each
-    /// local dictation's audio to a samples directory to grow the replay
-    /// corpus. `audioBuffer.data` is already a complete WAV, so write it as-is.
+    /// Debug-only capture: save every local dictation's audio to a durable
+    /// directory so recordings are never lost — no flag to forget, and not a
+    /// temporary directory that a reboot wipes. A test run is skipped so
+    /// harness audio can never pollute or overwrite real recordings.
+    /// `audioBuffer.data` is already a complete WAV, so write it as-is.
     /// Compiled out of Release, so the shipping app never collects raw speech —
     /// see `ProductionSurfaceTests`.
     private func saveCapturedSample(wav: Data) {
         #if DEBUG
-        guard FileManager.default.fileExists(atPath: "/tmp/unramble-collect") else { return }
-        let dir = "/tmp/unramble-samples"
+        // Never capture under a test run — that audio is synthetic and would
+        // pollute the real corpus. The test bundle links XCTest; the shipping
+        // app never does, so this is nil only in a real run.
+        guard NSClassFromString("XCTestCase") == nil else { return }
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support/Unramble/recordings",
+                isDirectory: true)
         try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true)
-        let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir)
-            .filter { $0.hasSuffix(".wav") }) ?? []
-        let tag = String(format: "%03d", existing.count + 1)
-        try? wav.write(to: URL(fileURLWithPath: "\(dir)/sample-\(tag).wav"))
-        Log.debug("[Pipeline] captured sample-\(tag).wav")
+            at: dir, withIntermediateDirectories: true)
+        // A millisecond timestamp names each file uniquely and keeps them
+        // ordered, without a race on counting existing files.
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        let url = dir.appendingPathComponent("dictation-\(stamp).wav")
+        try? wav.write(to: url)
+        Log.debug("[Pipeline] captured \(url.lastPathComponent)")
         #endif
     }
 
