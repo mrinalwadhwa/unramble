@@ -136,12 +136,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Decide what to show on launch based on stored config.
     ///
     /// Local mode on Apple Silicon needs no API key, so skip straight to
-    /// permissions. Cloud mode requires a key — if one is stored, proceed;
-    /// otherwise show onboarding.
+    /// permissions once onboarding is finished; a local user who quit before
+    /// finishing resumes onboarding. Cloud mode requires a key — if one is
+    /// stored, proceed; otherwise show onboarding.
     private func determineLaunchFlow() {
         if modeTransition.effectiveMode == .local && DictationMode.isLocalAvailable {
-            Log.debug("[AppDelegate] Local mode, checking permissions")
-            checkPermissions()
+            if hasFinishedOnboarding {
+                Log.debug("[AppDelegate] Local mode, checking permissions")
+                checkPermissions()
+            } else {
+                Log.debug("[AppDelegate] Local mode not onboarded, resuming onboarding")
+                showOnboarding()
+            }
         } else if ServiceConfig.shared.isConfigured {
             Log.debug("[AppDelegate] API key present, checking permissions")
             checkPermissions()
@@ -149,6 +155,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.debug("[AppDelegate] No API key, showing onboarding")
             showOnboarding()
         }
+    }
+
+    /// Whether the user finished onboarding, or onboarded before the app
+    /// recorded a completion flag. Fall back to granted permissions so an
+    /// existing local-mode user is never sent back through onboarding.
+    private var hasFinishedOnboarding: Bool {
+        if Settings.shared.hasCompletedOnboarding { return true }
+        return permissionProvider.checkAccessibility() == .granted
+            && permissionProvider.checkMicrophone() == .granted
     }
 
     // MARK: - Onboarding
@@ -200,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             Log.debug("[AppDelegate] Onboarding complete")
+            Settings.shared.hasCompletedOnboarding = true
             self.stopOnboardingDictationObserver()
             self.onboardingController = nil
             self.menuBarController?.setOnboardingMode(false)

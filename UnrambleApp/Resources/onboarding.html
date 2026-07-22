@@ -353,11 +353,10 @@
                 background: rgba(255, 255, 255, 0.7);
             }
 
-            .entry-choice-header {
-                display: flex;
-                align-items: center;
-                gap: 0.5rem;
-                margin-bottom: 0.125rem;
+            .entry-choice-badge-row {
+                margin-top: 0.75rem;
+                margin-left: -0.5rem;
+                text-align: left;
             }
 
             .entry-choice-badge {
@@ -384,6 +383,12 @@
                 color: var(--color-text);
                 line-height: 1.6;
                 margin-bottom: 0.125rem;
+            }
+
+            .entry-choice-title-note {
+                font-weight: 400;
+                font-size: 0.8125rem;
+                color: var(--color-muted);
             }
 
             .entry-choice-copy {
@@ -1038,7 +1043,7 @@
             <section class="step-section step-hidden" data-step="microphone">
                 <div class="step-icon step-icon-warm"><img data-symbol="mic.circle" /></div>
                 <h1>Microphone access</h1>
-                <p>Unramble keeps your microphone ready while it is running so dictation includes speech from the moment you press the shortcut. macOS will show its microphone indicator.</p>
+                <p>Unramble keeps the microphone ready so it captures your first words the instant you press the shortcut. macOS shows a microphone indicator while Unramble runs.</p>
 
                 <div id="microphone-status" class="permission-status"></div>
 
@@ -1468,25 +1473,21 @@
                     card.id = "entry-local";
                     card.type = "button";
 
-                    var header = '<div class="entry-choice-header">'
-                        + '<div class="entry-choice-title">Transcribe on this Mac</div>';
-                    if (recommended) {
-                        header += '<span class="entry-choice-badge">Recommended</span>';
-                    }
-                    header += '</div>';
+                    var header = '<div class="entry-choice-title">Transcribe on this Mac'
+                        + ' <span class="entry-choice-title-note">(Incognito Mode)</span></div>';
 
-                    var copy;
-                    if (isEnglish) {
-                        copy = "Highly accurate and very fast. "
-                            + "Works offline and nothing leaves your Mac. "
-                            + "English only. Powered by models fine-tuned for dictation.";
-                    } else {
-                        copy = "Works offline and nothing leaves your Mac. "
-                            + "English only. Powered by models fine-tuned for dictation.";
-                    }
+                    var badge = recommended
+                        ? '<div class="entry-choice-badge-row">'
+                            + '<span class="entry-choice-badge">Recommended</span></div>'
+                        : "";
+
+                    var copy = "Everything runs on your Mac, so your speech "
+                        + "stays private. No internet or API key needed. "
+                        + "English only.";
 
                     card.innerHTML = header
-                        + '<div class="entry-choice-copy">' + copy + '</div>';
+                        + '<div class="entry-choice-copy">' + copy + '</div>'
+                        + badge;
 
                     return card;
                 }
@@ -1497,23 +1498,25 @@
                     card.id = "entry-cloud";
                     card.type = "button";
 
-                    var header = '<div class="entry-choice-header">'
-                        + '<div class="entry-choice-title">Transcribe in the cloud</div>';
-                    if (recommended) {
-                        header += '<span class="entry-choice-badge">Recommended</span>';
-                    }
-                    header += '</div>';
+                    var header = '<div class="entry-choice-title">Transcribe in the cloud</div>';
+
+                    var badge = recommended
+                        ? '<div class="entry-choice-badge-row">'
+                            + '<span class="entry-choice-badge">Recommended</span></div>'
+                        : "";
 
                     var copy;
                     if (recommended && langName) {
                         copy = "Best quality for " + langName + ". "
-                            + "Supports 57 languages. Requires an OpenAI API key.";
+                            + "Uses OpenAI in the cloud. Needs an API key.";
                     } else {
-                        copy = "Supports 57 languages. Requires an OpenAI API key.";
+                        copy = "Uses OpenAI in the cloud. "
+                            + "Works in many languages. Needs an API key.";
                     }
 
                     card.innerHTML = header
-                        + '<div class="entry-choice-copy">' + copy + '</div>';
+                        + '<div class="entry-choice-copy">' + copy + '</div>'
+                        + badge;
 
                     return card;
                 }

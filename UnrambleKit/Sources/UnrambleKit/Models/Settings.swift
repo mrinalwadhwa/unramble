@@ -24,6 +24,7 @@ public final class Settings: @unchecked Sendable {
         case hotkeyConfiguration = "hotkeyConfiguration"
         case selectedLanguage = "selectedLanguage"
         case dictationMode = "dictationMode"
+        case hasCompletedOnboarding = "hasCompletedOnboarding"
         case handsfreeShortcutLabel = "handsfreeShortcutLabel"
         case pasteShortcutLabel = "pasteShortcutLabel"
         case cancelShortcutLabel = "cancelShortcutLabel"
@@ -166,6 +167,25 @@ public final class Settings: @unchecked Sendable {
                 name: .settingsDidChange,
                 object: self,
                 userInfo: ["key": Key.dictationMode.rawValue]
+            )
+        }
+    }
+
+    // MARK: - Onboarding
+
+    /// Whether the user reached the end of the onboarding flow.
+    /// Defaults to `false` until onboarding completes.
+    public var hasCompletedOnboarding: Bool {
+        get {
+            defaults.bool(forKey: Key.hasCompletedOnboarding.rawValue)
+        }
+        set {
+            defaults.set(
+                newValue, forKey: Key.hasCompletedOnboarding.rawValue)
+            NotificationCenter.default.post(
+                name: .settingsDidChange,
+                object: self,
+                userInfo: ["key": Key.hasCompletedOnboarding.rawValue]
             )
         }
     }

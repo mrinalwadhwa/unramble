@@ -333,6 +333,21 @@ struct SettingsTests {
         #expect(defaults.string(forKey: "privateModeShortcutLabel") == nil)
     }
 
+    @Test("hasCompletedOnboarding round-trips and clears on reset")
+    func hasCompletedOnboardingRoundTrips() throws {
+        let suiteName = "SettingsTests.hasCompletedOnboarding"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = Settings(defaults: defaults)
+
+        #expect(settings.hasCompletedOnboarding == false)
+        settings.hasCompletedOnboarding = true
+        #expect(settings.hasCompletedOnboarding == true)
+        settings.resetAll()
+        #expect(settings.hasCompletedOnboarding == false)
+    }
+
     @Test("Missing mode binding repairs around a retained Control dictation key")
     func missingModeShortcutRepairsAroundControlDictation() throws {
         let suiteName =
