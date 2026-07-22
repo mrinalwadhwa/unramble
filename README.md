@@ -1,80 +1,43 @@
-# Unramble – seamless speech to text in any app
+# Unramble — dictate incognito
 
-Press a hotkey, dictate naturally, polished text appears in any app.
+Press a hotkey, speak, and cleaned-up text lands at your cursor, in any app.
 
-Ramble, use filler words, correct yourself mid-sentence. Unramble turns messy
-speech into clean writing and injects it wherever your cursor is: your messaging app,
-your editor, your coding agent, the terminal, email, anything.
+More and more, we get things done by instructing agents. Speaking is the most
+direct way to hand agents what you mean at full fidelity. But turning voice into
+filler-free, polished text has so far needed models too big to run anywhere but
+in the cloud. So every word you dictate, whether to an agent, an email, or a
+terminal, first goes to someone else's servers.
 
-It is open source, so you have the [freedom to customize](DEVELOP.md#customize) it any way you
-want. It runs entirely on your Mac and talks directly to OpenAI with your own API key,
-so your audio and transcripts never pass through anyone else's servers.
+That's changed. Small, open-weight models are now good enough, and fast.
+Unramble runs them locally, so your voice never leaves your machine.
 
-## Demo (sound on 🔊)
+<!-- Demo: recorded walkthrough — to be added -->
 
-In this demo, you'll hear rambling speech with filler words and corrections. Watch what appears at the cursor.
+## Two modes
 
-https://github.com/user-attachments/assets/da62c769-d56b-4c16-be04-148197536dfa
+You pick a mode when you set up Unramble, and switch between them anytime by
+pressing ⌃⇧M (Control-Shift-M).
+
+|                    | 🔒 Incognito          | ☁️ Cloud            |
+|--------------------|-----------------------|---------------------|
+| Your voice         | stays on your machine | goes to OpenAI      |
+| API key            | none                  | your own            |
+| Offline            | yes                   | no                  |
+| Cost               | free                  | OpenAI's API rates  |
 
 ## Install
 
-Requires **macOS 14** or later. Install with [Homebrew](https://brew.sh) or [download the DMG](https://github.com/mrinalwadhwa/unramble/releases/latest/download/Unramble.dmg) directly.
+Install with [Homebrew](https://brew.sh) or
+[download the DMG](https://github.com/mrinalwadhwa/unramble/releases/latest/download/Unramble.dmg).
+Requires macOS 14 or later.
 
-```
-brew install mrinalwadhwa/unramble/unramble
-```
+    brew install mrinalwadhwa/unramble/unramble
 
-On first launch, Unramble asks for your OpenAI API key and stores it in the macOS
-Keychain. Create one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
-After that, grant accessibility and microphone permissions and you are ready to dictate.
+On first launch, Unramble walks you through setup: pick a mode, grant
+Accessibility and Microphone permissions, and try a dictation.
 
-## Fast
-
-Audio streams to OpenAI's Realtime API over a persistent WebSocket while you
-speak. The model transcribes incrementally, so much of the work is complete by
-the time you release the key. The current Realtime-response polish path still
-needs a fresh published latency and warm-connection run; the historical
-baseline is recorded in [BENCHMARK.md](BENCHMARK.md).
-
-A warm backup connection is kept pre-opened in the background so later
-dictations can skip the WebSocket handshake.
-
-The same Realtime connection transcribes the audio and returns one polished
-response after key release. If that streaming path fails before delivery,
-Unramble recovers through HTTP file transcription and deterministic cleanup
-using the exact complete recording.
-
-Long Realtime sessions start continued transcription items only after detected
-pauses. If a defensive hard boundary occurs without a pause and audio
-continues, Unramble rejects that candidate and uses the complete recording
-instead of trusting a word cut across independent transcription items.
-
-See [BENCHMARK.md](BENCHMARK.md) for detailed timing, long-dictation evidence,
-and the cloud verification environment.
-
-## Private
-
-Local mode uses Nemotron speech recognition and a fine-tuned Qwen polisher on
-Apple Silicon. Audio and transcripts stay on this Mac, and local mode needs no
-API key or network connection. In cloud mode, audio and transcripts flow
-directly to OpenAI with your own API key; there is no Unramble server in the
-middle.
-
-## Open
-
-Everything is in this repo: the app, the providers, the polish pipeline, the
-prompts. Change the models, rewrite the prompts, add a language, or fork the
-whole thing. See [DEVELOP.md](DEVELOP.md#customize).
-
-## Contribute
-
-Jump in, we'd love your help.
-
-The single most useful contribution right now is
-[mic compatibility data](https://github.com/mrinalwadhwa/unramble/issues/2).
-Unramble works well with built-in mics and AirPods, but every USB mic,
-headset, and audio interface is different. The app's "Contribute Mic
-Data" menu item generates a one-click diagnostic report that
-can help us improve accuracy of dictation for everyone.
-
-Want to add or improve support for a language? [Here's how.](https://github.com/mrinalwadhwa/unramble/issues/1) Found an app where injection breaks? Open an issue. Code contributions and pull requests are welcome too. [DEVELOP.md](DEVELOP.md) has the build and test guide.
+- **🔒 Incognito** ships with everything it needs: no key, no configuration.
+  Runs on Apple Silicon, English only.
+- **☁️ Cloud** asks for your OpenAI API key and stores it in the macOS Keychain.
+  Create one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+  Runs on any Mac, and supports other languages.
