@@ -30,8 +30,10 @@ struct ProductionSurfaceTests {
             "/tmp/unramble-stt-confidence",
             "/tmp/unramble-stt-confidence.log",
             "/tmp/unramble-unit-trace",
+            "/tmp/unramble-tsgap",
             "[[POLISH]]",
             "[[UNIT]]",
+            "[[TSGAP]]",
         ]
         for marker in forbiddenMarkers {
             #expect(!corpus.contains(marker), "Release source contains \(marker)")

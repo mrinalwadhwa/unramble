@@ -797,15 +797,25 @@ import Foundation
                 lastDeviceFrameEndHostTime = max(previousEnd, frameEndHostTime)
             }
 
-            // AVAudioTime host conversion can differ by one sample tick at a
-            // callback boundary. Only classify a discontinuity larger than that
-            // rounding allowance as uncertain capture.
-            let tolerance = AVAudioTime.hostTime(
-                forSeconds: 1 / frame.buffer.format.sampleRate)
+            // A forward GAP (the next buffer starts after the previous ended)
+            // is genuinely missing audio; only a few samples of host-time
+            // rounding jitter is benign. A backward REGRESSION (the next buffer
+            // starts before the previous ended) means the device re-reported an
+            // overlapping timestamp — the tap still delivered every sample in
+            // order, so no forward audio is lost. Real devices emit a recurring
+            // ~200-sample backward overlap; tolerate a generous window there and
+            // fail closed only on a pathological clock reset.
+            let gapTolerance = AVAudioTime.hostTime(
+                forSeconds: 4 / frame.buffer.format.sampleRate)
+            let regressionTolerance = AVAudioTime.hostTime(forSeconds: 0.030)
 
             if frame.startHostTime < previousEnd {
                 let regression = previousEnd - frame.startHostTime
-                guard regression > tolerance else { return }
+                logDeviceTimestampDiscontinuity(
+                    "regression", hostTicks: regression,
+                    sampleRate: frame.buffer.format.sampleRate,
+                    tolerated: regression <= regressionTolerance)
+                guard regression > regressionTolerance else { return }
                 let affectedSeconds = AVAudioTime.seconds(
                     forHostTime: regression)
                 let affectedFrames = max(
@@ -823,10 +833,14 @@ import Foundation
                 return
             }
 
-            guard frame.startHostTime - previousEnd > tolerance else { return }
+            let gap = frame.startHostTime - previousEnd
+            logDeviceTimestampDiscontinuity(
+                "gap", hostTicks: gap,
+                sampleRate: frame.buffer.format.sampleRate,
+                tolerated: gap <= gapTolerance)
+            guard gap > gapTolerance else { return }
 
-            let missingSeconds = AVAudioTime.seconds(
-                forHostTime: frame.startHostTime - previousEnd)
+            let missingSeconds = AVAudioTime.seconds(forHostTime: gap)
             let missingFrames = max(
                 Int((missingSeconds * frame.buffer.format.sampleRate).rounded()),
                 1)
@@ -837,6 +851,28 @@ import Foundation
                     endHostTime: frame.startHostTime,
                     stage: .timestampCoverage),
                 on: activeRoute)
+        }
+
+        /// Debug-only: log the size of a device-timestamp discontinuity so the
+        /// coverage tolerance can be sized from real host-time jitter. Logs only
+        /// divergences beyond a single sample, and only when the diagnostic flag
+        /// file is present. Compiled out of Release builds.
+        private func logDeviceTimestampDiscontinuity(
+            _ kind: String, hostTicks: UInt64, sampleRate: Double,
+            tolerated: Bool
+        ) {
+            #if DEBUG
+                guard FileManager.default.fileExists(
+                    atPath: "/tmp/unramble-tsgap")
+                else { return }
+                let oneSample = AVAudioTime.hostTime(forSeconds: 1 / sampleRate)
+                guard hostTicks > oneSample else { return }
+                let frames = AVAudioTime.seconds(
+                    forHostTime: hostTicks) * sampleRate
+                Log.debug(
+                    "[[TSGAP]] \(kind) frames="
+                    + "\(String(format: "%.2f", frames)) tolerated=\(tolerated)")
+            #endif
         }
 
         private func markDeviceContinuityUnknown(after hostTime: UInt64?) {

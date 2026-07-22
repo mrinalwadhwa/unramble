@@ -552,8 +552,8 @@ struct TimestampedAudioFrameRouterTests {
                     affectedFrameCount: 6))
     }
 
-    @Test("A timestamp regression cannot satisfy the release boundary")
-    func timestampRegressionFailsActiveReleaseDrain() async throws {
+    @Test("A backward timestamp regression is tolerated on the active route")
+    func timestampRegressionToleratedOnActiveRelease() async throws {
         let probe = SinkProbe()
         let router = makeRouter(probe: probe)
         let start = hostTime(seconds: 100)
@@ -568,17 +568,75 @@ struct TimestampedAudioFrameRouterTests {
         let wait = Task { await router.waitUntilReleaseObserved(for: route) }
         #expect(await waitForReleaseWaiter(on: router))
 
+        // The next buffer's timestamp regresses 5 frames (5 ms at 1 kHz) — an
+        // overlapping but still-contiguous device timestamp. No forward audio
+        // is lost, so it must not fail the release drain.
         router.ingest(
             try pcmBuffer(values: Array(10..<20)),
             timestamp: AVAudioTime(hostTime: addingFrames(5, to: start)),
             observedHostTime: addingFrames(15, to: start))
+
+        #expect(await wait.value)
+        #expect(probe.integrityFailure == nil)
+    }
+
+    @Test("A pathological timestamp regression still fails the active route")
+    func largeTimestampRegressionFailsActiveReleaseDrain() async throws {
+        let probe = SinkProbe()
+        let router = makeRouter(probe: probe)
+        let start = hostTime(seconds: 100)
+        let boundary = AudioCaptureReleaseBoundary(pressHostTime: start)
+        let route = try router.promote(releaseBoundary: boundary)
+
+        router.ingest(
+            try pcmBuffer(values: Array(0..<40)),
+            timestamp: AVAudioTime(hostTime: start),
+            observedHostTime: addingFrames(40, to: start))
+        #expect(boundary.publish(releaseHostTime: addingFrames(45, to: start)))
+        let wait = Task { await router.waitUntilReleaseObserved(for: route) }
+        #expect(await waitForReleaseWaiter(on: router))
+
+        // A 35-frame (35 ms) backward jump exceeds the 30 ms regression
+        // allowance — a clock reset that large is treated as uncertain capture.
+        router.ingest(
+            try pcmBuffer(values: Array(40..<80)),
+            timestamp: AVAudioTime(hostTime: addingFrames(5, to: start)),
+            observedHostTime: addingFrames(45, to: start))
 
         #expect(!(await wait.value))
         #expect(
             probe.integrityFailure
                 == AudioCaptureIntegrityFailure(
                     stage: .timestampCoverage,
-                    affectedFrameCount: 5))
+                    affectedFrameCount: 35))
+    }
+
+    @Test("A sub-tolerance timestamp gap does not fail the active route")
+    func smallTimestampGapToleratedOnActiveRelease() async throws {
+        let probe = SinkProbe()
+        let router = makeRouter(probe: probe)
+        let start = hostTime(seconds: 100)
+        let boundary = AudioCaptureReleaseBoundary(pressHostTime: start)
+        let route = try router.promote(releaseBoundary: boundary)
+
+        router.ingest(
+            try pcmBuffer(values: [0, 1, 2, 3]),
+            timestamp: AVAudioTime(hostTime: start),
+            observedHostTime: addingFrames(4, to: start))
+        #expect(boundary.publish(releaseHostTime: addingFrames(7, to: start)))
+        let wait = Task { await router.waitUntilReleaseObserved(for: route) }
+        #expect(await waitForReleaseWaiter(on: router))
+
+        // A two-frame gap (4 -> 6) is within the few-sample rounding allowance
+        // for benign host-time jitter, so it must not be recorded as lost
+        // coverage; the release drain still succeeds.
+        router.ingest(
+            try pcmBuffer(values: [10, 11, 12, 13]),
+            timestamp: AVAudioTime(hostTime: addingFrames(6, to: start)),
+            observedHostTime: addingFrames(10, to: start))
+
+        #expect(await wait.value)
+        #expect(probe.integrityFailure == nil)
     }
 
     @Test("Release wait sees a crossing frame already retained for replay")
