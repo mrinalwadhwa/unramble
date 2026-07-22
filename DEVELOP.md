@@ -15,7 +15,7 @@ Build, test, customize, and understand the Unramble codebase.
     make verify-models   # verify local assets without network access
     make build           # debug build (generates the project if missing)
     make test            # fast tests (~5s)
-    make test-all        # Keychain + slow tests (~90s)
+    make test-all        # add Keychain suites (triggers a login prompt)
     make clean           # clean build output
     make xcode           # open in Xcode
 
