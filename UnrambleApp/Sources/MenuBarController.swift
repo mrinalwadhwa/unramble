@@ -32,8 +32,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Callback invoked when the user clicks "Reset API Key".
     var onResetAPIKey: (() -> Void)?
 
-    /// Callback invoked when the user toggles private mode.
-    var onTogglePrivateMode: (() -> Void)?
+    /// Callback invoked when the user toggles incognito mode.
+    var onToggleIncognitoMode: (() -> Void)?
 
     // MARK: - Onboarding mode
 
@@ -49,8 +49,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // MARK: - Menu items that need dynamic updates
 
     private var pasteItem: NSMenuItem?
-    private var privateModeItem: NSMenuItem?
-    private var privateModeStatusItem: NSMenuItem?
+    private var incognitoModeItem: NSMenuItem?
+    private var incognitoModeStatusItem: NSMenuItem?
     private var micSubmenuItem: NSMenuItem?
     private var languageSubmenuItem: NSMenuItem?
     private var checkForUpdatesItem: NSMenuItem?
@@ -180,23 +180,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
 
-        // --- Private mode toggle (Apple Silicon only) ---
+        // --- Incognito mode toggle (Apple Silicon only) ---
 
         if DictationMode.isLocalAvailable {
-            let privateMode = NSMenuItem(
-                title: "Private Mode",
-                action: #selector(togglePrivateModeAction),
+            let incognitoMode = NSMenuItem(
+                title: "Incognito Mode",
+                action: #selector(toggleIncognitoModeAction),
                 keyEquivalent: ""
             )
-            privateMode.target = self
-            privateMode.image = NSImage(
+            incognitoMode.target = self
+            incognitoMode.image = NSImage(
                 systemSymbolName: "lock.shield",
                 accessibilityDescription: nil)
             if Settings.shared.dictationMode == .local {
-                privateMode.state = .on
+                incognitoMode.state = .on
             }
-            menu.addItem(privateMode)
-            privateModeItem = privateMode
+            menu.addItem(incognitoMode)
+            incognitoModeItem = incognitoMode
 
             let modeStatus = NSMenuItem(
                 title: Settings.shared.dictationMode == .local
@@ -207,7 +207,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             )
             modeStatus.isEnabled = false
             menu.addItem(modeStatus)
-            privateModeStatusItem = modeStatus
+            incognitoModeStatusItem = modeStatus
 
             menu.addItem(.separator())
         }
@@ -690,8 +690,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         onReopenOnboarding?()
     }
 
-    @objc private func togglePrivateModeAction() {
-        onTogglePrivateMode?()
+    @objc private func toggleIncognitoModeAction() {
+        onToggleIncognitoMode?()
     }
 
     /// Keep the checkmark tied to the installed backend while separately
@@ -700,28 +700,28 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         effective: DictationMode,
         requested: DictationMode?
     ) {
-        let isPrivate = effective == .local
-        privateModeItem?.state = isPrivate ? .on : .off
-        privateModeItem?.isEnabled = requested == nil
-        privateModeItem?.title = requested == nil
-            ? "Private Mode"
-            : "Private Mode (switching...)"
+        let isIncognito = effective == .local
+        incognitoModeItem?.state = isIncognito ? .on : .off
+        incognitoModeItem?.isEnabled = requested == nil
+        incognitoModeItem?.title = requested == nil
+            ? "Incognito Mode"
+            : "Incognito Mode (switching...)"
 
         if let requested {
-            privateModeStatusItem?.title = requested == .local
+            incognitoModeStatusItem?.title = requested == .local
                 ? "Switching to on-device transcription..."
                 : "Switching to cloud transcription..."
         } else {
-            privateModeStatusItem?.title = isPrivate
+            incognitoModeStatusItem?.title = isIncognito
                 ? "Transcribing on this Mac"
                 : "Transcribing in the cloud"
         }
     }
 
     /// Compatibility for call sites that only publish an effective mode.
-    func setPrivateMode(_ isPrivate: Bool) {
+    func setIncognitoMode(_ isIncognito: Bool) {
         setDictationMode(
-            effective: isPrivate ? .local : .cloud,
+            effective: isIncognito ? .local : .cloud,
             requested: nil)
     }
 

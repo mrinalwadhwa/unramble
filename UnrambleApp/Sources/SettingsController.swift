@@ -30,7 +30,7 @@ final class SettingsController {
     /// The AppDelegate should use this to re-register the hotkey provider.
     var onHotkeyChanged: (() -> Void)?
 
-    /// Callback invoked after the private-mode shortcut is accepted.
+    /// Callback invoked after the incognito-mode shortcut is accepted.
     /// The AppDelegate should use this to re-register its mode hotkey provider.
     var onModeShortcutChanged: (() -> Void)?
 
@@ -181,7 +181,7 @@ final class SettingsController {
         let handsfreeLabel = Settings.shared.handsfreeShortcutLabel
         let pasteLabel = Settings.shared.pasteShortcutLabel
         let cancelLabel = Settings.shared.cancelShortcutLabel
-        let privateModeLabel = Settings.shared.privateModeShortcutLabel
+        let incognitoModeLabel = Settings.shared.incognitoModeShortcutLabel
 
         bridge.pushSettingsState(
             soundFeedback: soundEnabled,
@@ -190,7 +190,7 @@ final class SettingsController {
                 "handsfree": handsfreeLabel,
                 "paste": pasteLabel,
                 "cancel": cancelLabel,
-                "privateMode": privateModeLabel,
+                "incognitoMode": incognitoModeLabel,
             ],
             language: language,
             languages: languages
@@ -281,14 +281,14 @@ final class SettingsController {
                 return
             }
 
-        case "privateMode":
+        case "incognitoMode":
             guard let binding = shortcutBindingFromData(data, label: label) else {
                 pushCurrentSettingsState()
                 return
             }
-            let previous = settings.privateModeShortcutBinding
-            settings.privateModeShortcutBinding = binding
-            guard settings.privateModeShortcutBinding == binding else {
+            let previous = settings.incognitoModeShortcutBinding
+            settings.incognitoModeShortcutBinding = binding
+            guard settings.incognitoModeShortcutBinding == binding else {
                 pushCurrentSettingsState()
                 return
             }

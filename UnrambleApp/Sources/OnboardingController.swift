@@ -66,7 +66,7 @@ final class OnboardingController {
     // MARK: - Window management
 
     /// Open the onboarding window showing only the API key entry step.
-    /// Used when toggling off private mode without a stored key.
+    /// Used when toggling off incognito mode without a stored key.
     func showAPIKeyEntry() {
         dismissWindow()
         isPreviewWindowSessionActive = true

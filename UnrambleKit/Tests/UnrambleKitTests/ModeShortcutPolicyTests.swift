@@ -13,7 +13,7 @@ struct ModeShortcutPolicyTests {
     @Test("Default is Control Shift M")
     func newDefault() {
         #expect(
-            ShortcutBinding.defaultPrivateMode
+            ShortcutBinding.defaultIncognitoMode
                 == ShortcutBinding(
                     kind: .key,
                     modifierFlags: ShortcutBinding.controlFlag

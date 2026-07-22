@@ -25,7 +25,7 @@ final class HUDViewModel: ObservableObject {
 
     @Published private(set) var visualState: HUDVisualState = .minimized
     @Published private(set) var isHovering: Bool = false
-    @Published var isPrivateMode: Bool = false
+    @Published var isIncognitoMode: Bool = false
     @Published private(set) var isDictationRetryAvailable: Bool = false
 
     /// Current audio input level (0.0 to 1.0) for driving the waveform bars.

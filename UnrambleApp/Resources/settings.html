@@ -573,13 +573,13 @@
                                 Escape
                             </button>
                         </div>
-                        <div class="shortcut-cell" id="private-mode-shortcut" style="display: none">
-                            <div class="shortcut-cell-label">Private mode</div>
+                        <div class="shortcut-cell" id="incognito-mode-shortcut" style="display: none">
+                            <div class="shortcut-cell-label">Incognito mode</div>
                             <div class="shortcut-cell-hint">Transcribe on this Mac</div>
                             <button
                                 type="button"
                                 class="key-recorder"
-                                data-shortcut="privateMode"
+                                data-shortcut="incognitoMode"
                                 data-default="&#x2303;&#x21E7;M"
                                 tabindex="0"
                             >
@@ -872,16 +872,16 @@
                         if (s.handsfree) window._setShortcutLabel("handsfree", s.handsfree);
                         if (s.paste) window._setShortcutLabel("paste", s.paste);
                         if (s.cancel) window._setShortcutLabel("cancel", s.cancel);
-                        if (s.privateMode) window._setShortcutLabel("privateMode", s.privateMode);
+                        if (s.incognitoMode) window._setShortcutLabel("incognitoMode", s.incognitoMode);
                     }
 
-                    // Private mode shortcut (visible when local mode available)
-                    var privateModeShortcut = document.getElementById("private-mode-shortcut");
-                    if (privateModeShortcut) {
+                    // Incognito mode shortcut (visible when local mode available)
+                    var incognitoModeShortcut = document.getElementById("incognito-mode-shortcut");
+                    if (incognitoModeShortcut) {
                         if (data.localModeAvailable) {
-                            privateModeShortcut.style.display = "";
+                            incognitoModeShortcut.style.display = "";
                         } else {
-                            privateModeShortcut.style.display = "none";
+                            incognitoModeShortcut.style.display = "none";
                         }
                     }
 
@@ -1127,7 +1127,7 @@
              *       else. This commits a modifier-only shortcut like
              *       Right Option ⌥.
              *
-             * The private-mode shortcut is stricter: it requires a
+             * The incognito-mode shortcut is stricter: it requires a
              * non-modifier key plus at least two modifier families.
              *
              * Escape always cancels recording and restores the button's
@@ -1522,7 +1522,7 @@
 
                         // Non-modifier key pressed.
                         var shortcutName = activeBtn.getAttribute("data-shortcut");
-                        if (shortcutName === "privateMode") {
+                        if (shortcutName === "incognitoMode") {
                             if (!keyNameFromCode(e.code)) {
                                 rejectRecording(activeBtn, "Use a supported key");
                                 return;
@@ -1582,7 +1582,7 @@
                         }
 
                         if (remaining === 0) {
-                            if (activeBtn.getAttribute("data-shortcut") === "privateMode") {
+                            if (activeBtn.getAttribute("data-shortcut") === "incognitoMode") {
                                 rejectRecording(activeBtn, "Add a key and two modifiers");
                                 return;
                             }

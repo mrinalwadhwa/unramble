@@ -246,10 +246,10 @@ struct SettingsTests {
         // Restore (already reset, so defaults are in effect).
     }
 
-    @Test("privateModeShortcutLabel setter posts settingsDidChange notification")
-    func privateModeShortcutLabelNotification() {
+    @Test("incognitoModeShortcutLabel setter posts settingsDidChange notification")
+    func incognitoModeShortcutLabelNotification() {
         let settings = Settings.shared
-        let original = settings.privateModeShortcutLabel
+        let original = settings.incognitoModeShortcutLabel
 
         var receivedKey: String?
         let observer = NotificationCenter.default.addObserver(
@@ -262,14 +262,14 @@ struct SettingsTests {
             }
         }
 
-        settings.privateModeShortcutLabel = "⌃⌥X"
+        settings.incognitoModeShortcutLabel = "⌃⌥X"
 
         NotificationCenter.default.removeObserver(observer)
 
-        #expect(receivedKey == "privateModeShortcutLabel")
+        #expect(receivedKey == "incognitoModeShortcutLabel")
 
         // Restore.
-        settings.privateModeShortcutLabel = original
+        settings.incognitoModeShortcutLabel = original
     }
 
     @Test("Exact legacy mode shortcut migrates to Control Shift M")
@@ -279,14 +279,14 @@ struct SettingsTests {
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(
-            try JSONEncoder().encode(ShortcutBinding.legacyDefaultPrivateMode),
-            forKey: "privateModeShortcutBinding")
-        defaults.set("⌃⌥P", forKey: "privateModeShortcutLabel")
+            try JSONEncoder().encode(ShortcutBinding.legacyDefaultIncognitoMode),
+            forKey: "incognitoModeShortcutBinding")
+        defaults.set("⌃⌥P", forKey: "incognitoModeShortcutLabel")
 
         let settings = Settings(defaults: defaults)
 
-        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
-        #expect(settings.privateModeShortcutLabel == "⌃⇧M")
+        #expect(settings.incognitoModeShortcutBinding == .defaultIncognitoMode)
+        #expect(settings.incognitoModeShortcutLabel == "⌃⇧M")
     }
 
     @Test("Valid custom mode shortcut survives legacy migration")
@@ -302,11 +302,35 @@ struct SettingsTests {
             label: "⌃⌘L")
         defaults.set(
             try JSONEncoder().encode(custom),
-            forKey: "privateModeShortcutBinding")
+            forKey: "incognitoModeShortcutBinding")
 
         let settings = Settings(defaults: defaults)
 
-        #expect(settings.privateModeShortcutBinding == custom)
+        #expect(settings.incognitoModeShortcutBinding == custom)
+    }
+
+    @Test("Former incognito-mode keys migrate to the renamed keys")
+    func formerIncognitoModeKeysMigrate() throws {
+        let suiteName = "SettingsTests.formerIncognitoModeKeysMigrate"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let custom = ShortcutBinding(
+            modifierFlags: ShortcutBinding.controlFlag
+                | ShortcutBinding.commandFlag,
+            keyCode: 37,
+            label: "⌃⌘L")
+        defaults.set(
+            try JSONEncoder().encode(custom),
+            forKey: "privateModeShortcutBinding")
+        defaults.set("⌃⌘L", forKey: "privateModeShortcutLabel")
+
+        let settings = Settings(defaults: defaults)
+
+        #expect(settings.incognitoModeShortcutBinding == custom)
+        #expect(settings.incognitoModeShortcutLabel == "⌃⌘L")
+        #expect(defaults.data(forKey: "privateModeShortcutBinding") == nil)
+        #expect(defaults.string(forKey: "privateModeShortcutLabel") == nil)
     }
 
     @Test("Missing mode binding repairs around a retained Control dictation key")
@@ -322,12 +346,12 @@ struct SettingsTests {
             forKey: "hotkeyConfiguration")
 
         let settings = Settings(defaults: defaults)
-        let repaired = settings.privateModeShortcutBinding
+        let repaired = settings.incognitoModeShortcutBinding
 
         #expect(repaired.standardModifierCount >= 2)
         #expect(!repaired.hasControl)
         #expect(repaired.keyCode == 46)
-        #expect(settings.privateModeShortcutLabel == repaired.label)
+        #expect(settings.incognitoModeShortcutLabel == repaired.label)
     }
 
     @Test("Legacy mode binding repairs around a retained Shift dictation key")
@@ -342,16 +366,16 @@ struct SettingsTests {
                 HotkeySetting.modifierOnly(.rightShift)),
             forKey: "hotkeyConfiguration")
         defaults.set(
-            try JSONEncoder().encode(ShortcutBinding.legacyDefaultPrivateMode),
-            forKey: "privateModeShortcutBinding")
+            try JSONEncoder().encode(ShortcutBinding.legacyDefaultIncognitoMode),
+            forKey: "incognitoModeShortcutBinding")
 
         let settings = Settings(defaults: defaults)
-        let repaired = settings.privateModeShortcutBinding
+        let repaired = settings.incognitoModeShortcutBinding
 
         #expect(repaired.standardModifierCount >= 2)
         #expect(!repaired.hasShift)
         #expect(repaired.keyCode == 46)
-        #expect(settings.privateModeShortcutLabel == repaired.label)
+        #expect(settings.incognitoModeShortcutLabel == repaired.label)
     }
 
     @Test("Dictation shortcut cannot invalidate retained mode shortcut")
@@ -366,7 +390,7 @@ struct SettingsTests {
         settings.hotkeySetting = .modifierOnly(.leftControl)
 
         #expect(settings.hotkeySetting == original)
-        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+        #expect(settings.incognitoModeShortcutBinding == .defaultIncognitoMode)
     }
 
     @Test("Hands-free shortcut cannot invalidate retained mode shortcut")
@@ -379,11 +403,11 @@ struct SettingsTests {
         let original = settings.handsfreeShortcutBinding
         let originalLabel = settings.handsfreeShortcutLabel
 
-        settings.handsfreeShortcutBinding = .defaultPrivateMode
+        settings.handsfreeShortcutBinding = .defaultIncognitoMode
 
         #expect(settings.handsfreeShortcutBinding == original)
         #expect(settings.handsfreeShortcutLabel == originalLabel)
-        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+        #expect(settings.incognitoModeShortcutBinding == .defaultIncognitoMode)
     }
 
     @Test("Paste shortcut cannot invalidate retained mode shortcut")
@@ -396,11 +420,11 @@ struct SettingsTests {
         let original = settings.pasteShortcutBinding
         let originalLabel = settings.pasteShortcutLabel
 
-        settings.pasteShortcutBinding = .defaultPrivateMode
+        settings.pasteShortcutBinding = .defaultIncognitoMode
 
         #expect(settings.pasteShortcutBinding == original)
         #expect(settings.pasteShortcutLabel == originalLabel)
-        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+        #expect(settings.incognitoModeShortcutBinding == .defaultIncognitoMode)
     }
 
     @Test("Cancel shortcut cannot invalidate retained mode shortcut")
@@ -413,11 +437,11 @@ struct SettingsTests {
         let original = settings.cancelShortcutBinding
         let originalLabel = settings.cancelShortcutLabel
 
-        settings.cancelShortcutBinding = .defaultPrivateMode
+        settings.cancelShortcutBinding = .defaultIncognitoMode
 
         #expect(settings.cancelShortcutBinding == original)
         #expect(settings.cancelShortcutLabel == originalLabel)
-        #expect(settings.privateModeShortcutBinding == .defaultPrivateMode)
+        #expect(settings.incognitoModeShortcutBinding == .defaultIncognitoMode)
     }
 
     // MARK: - Single Source of Truth

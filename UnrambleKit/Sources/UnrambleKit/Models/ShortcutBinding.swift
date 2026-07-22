@@ -171,15 +171,15 @@ public struct ShortcutBinding: Codable, Sendable, Equatable {
         label: "Escape"
     )
 
-    /// Legacy private mode shortcut retained only for exact migration.
-    public static let legacyDefaultPrivateMode = ShortcutBinding(
+    /// Legacy incognito mode shortcut retained only for exact migration.
+    public static let legacyDefaultIncognitoMode = ShortcutBinding(
         modifierFlags: controlFlag | optionFlag,
         keyCode: 35,
         label: "⌃⌥P"
     )
 
-    /// Default private mode shortcut: ⌃⇧M (Control+Shift+M, key code 46).
-    public static let defaultPrivateMode = ShortcutBinding(
+    /// Default incognito mode shortcut: ⌃⇧M (Control+Shift+M, key code 46).
+    public static let defaultIncognitoMode = ShortcutBinding(
         modifierFlags: controlFlag | shiftFlag,
         keyCode: 46,
         label: "⌃⇧M"

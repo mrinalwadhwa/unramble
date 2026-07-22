@@ -30,8 +30,8 @@ public final class Settings: @unchecked Sendable {
         case handsfreeShortcutBinding = "handsfreeShortcutBinding"
         case pasteShortcutBinding = "pasteShortcutBinding"
         case cancelShortcutBinding = "cancelShortcutBinding"
-        case privateModeShortcutLabel = "privateModeShortcutLabel"
-        case privateModeShortcutBinding = "privateModeShortcutBinding"
+        case incognitoModeShortcutLabel = "incognitoModeShortcutLabel"
+        case incognitoModeShortcutBinding = "incognitoModeShortcutBinding"
     }
 
     // MARK: - Init
@@ -46,6 +46,34 @@ public final class Settings: @unchecked Sendable {
         defaults.register(defaults: [
             Key.soundFeedbackEnabled.rawValue: true
         ])
+        migrateFormerModeShortcutKeys()
+    }
+
+    // MARK: - Migration
+
+    /// Copy a mode shortcut stored under the former keys to the current keys.
+    ///
+    /// The on-device dictation toggle changed its persisted key names. Move a
+    /// value a user stored under the former keys once, so a custom shortcut and
+    /// label survive, then remove the former keys so a later reset cannot
+    /// resurrect them.
+    private func migrateFormerModeShortcutKeys() {
+        let formerBindingKey = "privateModeShortcutBinding"
+        let formerLabelKey = "privateModeShortcutLabel"
+        if defaults.data(forKey: Key.incognitoModeShortcutBinding.rawValue) == nil,
+            let formerBinding = defaults.data(forKey: formerBindingKey)
+        {
+            defaults.set(
+                formerBinding, forKey: Key.incognitoModeShortcutBinding.rawValue)
+        }
+        if defaults.string(forKey: Key.incognitoModeShortcutLabel.rawValue) == nil,
+            let formerLabel = defaults.string(forKey: formerLabelKey)
+        {
+            defaults.set(
+                formerLabel, forKey: Key.incognitoModeShortcutLabel.rawValue)
+        }
+        defaults.removeObject(forKey: formerBindingKey)
+        defaults.removeObject(forKey: formerLabelKey)
     }
 
     // MARK: - Sound Feedback
@@ -80,7 +108,7 @@ public final class Settings: @unchecked Sendable {
             return setting
         }
         set {
-            let retainedModeBinding = privateModeShortcutBinding
+            let retainedModeBinding = incognitoModeShortcutBinding
             guard
                 modeShortcutPolicy(dictation: newValue)
                     .validate(retainedModeBinding) == nil
@@ -209,7 +237,7 @@ public final class Settings: @unchecked Sendable {
             return binding
         }
         set {
-            let retainedModeBinding = privateModeShortcutBinding
+            let retainedModeBinding = incognitoModeShortcutBinding
             guard
                 modeShortcutPolicy(handsfree: newValue)
                     .validate(retainedModeBinding) == nil
@@ -234,7 +262,7 @@ public final class Settings: @unchecked Sendable {
             return binding
         }
         set {
-            let retainedModeBinding = privateModeShortcutBinding
+            let retainedModeBinding = incognitoModeShortcutBinding
             guard
                 modeShortcutPolicy(paste: newValue)
                     .validate(retainedModeBinding) == nil
@@ -259,7 +287,7 @@ public final class Settings: @unchecked Sendable {
             return binding
         }
         set {
-            let retainedModeBinding = privateModeShortcutBinding
+            let retainedModeBinding = incognitoModeShortcutBinding
             guard
                 modeShortcutPolicy(cancel: newValue)
                     .validate(retainedModeBinding) == nil
@@ -272,59 +300,59 @@ public final class Settings: @unchecked Sendable {
         }
     }
 
-    /// The display label for the private mode shortcut.
-    public var privateModeShortcutLabel: String {
+    /// The display label for the incognito mode shortcut.
+    public var incognitoModeShortcutLabel: String {
         get {
-            let bindingLabel = privateModeShortcutBinding.label
-            if defaults.string(forKey: Key.privateModeShortcutLabel.rawValue)
+            let bindingLabel = incognitoModeShortcutBinding.label
+            if defaults.string(forKey: Key.incognitoModeShortcutLabel.rawValue)
                 != bindingLabel
             {
                 defaults.set(
                     bindingLabel,
-                    forKey: Key.privateModeShortcutLabel.rawValue)
+                    forKey: Key.incognitoModeShortcutLabel.rawValue)
             }
             return bindingLabel
         }
         set {
-            defaults.set(newValue, forKey: Key.privateModeShortcutLabel.rawValue)
+            defaults.set(newValue, forKey: Key.incognitoModeShortcutLabel.rawValue)
             NotificationCenter.default.post(
                 name: .settingsDidChange,
                 object: self,
-                userInfo: ["key": Key.privateModeShortcutLabel.rawValue]
+                userInfo: ["key": Key.incognitoModeShortcutLabel.rawValue]
             )
         }
     }
 
-    /// The key binding for the private mode toggle shortcut.
+    /// The key binding for the incognito mode toggle shortcut.
     /// Defaults to ⌃⇧M (Control+Shift+M, key code 46).
-    public var privateModeShortcutBinding: ShortcutBinding {
+    public var incognitoModeShortcutBinding: ShortcutBinding {
         get {
-            guard let data = defaults.data(forKey: Key.privateModeShortcutBinding.rawValue),
+            guard let data = defaults.data(forKey: Key.incognitoModeShortcutBinding.rawValue),
                 let binding = try? JSONDecoder().decode(ShortcutBinding.self, from: data)
             else {
-                let repaired = compatibleDefaultPrivateModeShortcut
-                persistPrivateModeShortcut(repaired)
+                let repaired = compatibleDefaultIncognitoModeShortcut
+                persistIncognitoModeShortcut(repaired)
                 return repaired
             }
-            if binding == .legacyDefaultPrivateMode {
-                let repaired = compatibleDefaultPrivateModeShortcut
-                persistPrivateModeShortcut(repaired)
+            if binding == .legacyDefaultIncognitoMode {
+                let repaired = compatibleDefaultIncognitoModeShortcut
+                persistIncognitoModeShortcut(repaired)
                 return repaired
             }
             guard modeShortcutPolicy.validate(binding) == nil else {
-                let repaired = compatibleDefaultPrivateModeShortcut
-                persistPrivateModeShortcut(repaired)
+                let repaired = compatibleDefaultIncognitoModeShortcut
+                persistIncognitoModeShortcut(repaired)
                 return repaired
             }
             return binding
         }
         set {
             guard modeShortcutPolicy.validate(newValue) == nil else { return }
-            persistPrivateModeShortcut(newValue)
+            persistIncognitoModeShortcut(newValue)
             NotificationCenter.default.post(
                 name: .settingsDidChange,
                 object: self,
-                userInfo: ["key": Key.privateModeShortcutBinding.rawValue]
+                userInfo: ["key": Key.incognitoModeShortcutBinding.rawValue]
             )
         }
     }
@@ -336,7 +364,7 @@ public final class Settings: @unchecked Sendable {
     /// Prefer Control+Shift+M, but preserve an older dictation trigger when
     /// that chord would be ambiguous. With one dictation command and three
     /// other exact commands, at least one modifier subset for M is available.
-    private var compatibleDefaultPrivateModeShortcut: ShortcutBinding {
+    private var compatibleDefaultIncognitoModeShortcut: ShortcutBinding {
         let modifierCandidates: [UInt] = [
             ShortcutBinding.controlFlag | ShortcutBinding.shiftFlag,
             ShortcutBinding.controlFlag | ShortcutBinding.optionFlag,
@@ -365,7 +393,7 @@ public final class Settings: @unchecked Sendable {
             }
         }
 
-        preconditionFailure("No valid private-mode shortcut candidate")
+        preconditionFailure("No valid incognito-mode shortcut candidate")
     }
 
     private func modeShortcutLabel(modifierFlags: UInt) -> String {
@@ -390,11 +418,11 @@ public final class Settings: @unchecked Sendable {
             cancel: cancel ?? cancelShortcutBinding)
     }
 
-    private func persistPrivateModeShortcut(_ binding: ShortcutBinding) {
+    private func persistIncognitoModeShortcut(_ binding: ShortcutBinding) {
         if let data = try? JSONEncoder().encode(binding) {
-            defaults.set(data, forKey: Key.privateModeShortcutBinding.rawValue)
+            defaults.set(data, forKey: Key.incognitoModeShortcutBinding.rawValue)
         }
-        defaults.set(binding.label, forKey: Key.privateModeShortcutLabel.rawValue)
+        defaults.set(binding.label, forKey: Key.incognitoModeShortcutLabel.rawValue)
     }
 
     // MARK: - Reset

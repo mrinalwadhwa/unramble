@@ -464,7 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return driver.transferHeldSession(completion)
         }
-        controller.viewModel.isPrivateMode = modeTransition.effectiveMode == .local
+        controller.viewModel.isIncognitoMode = modeTransition.effectiveMode == .local
         hudController = controller
     }
 
@@ -494,15 +494,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.resetAPIKey()
         }
 
-        controller.onTogglePrivateMode = { [weak self] in
-            self?.togglePrivateMode()
+        controller.onToggleIncognitoMode = { [weak self] in
+            self?.toggleIncognitoMode()
         }
 
         updateModePresentation()
     }
 
-    /// Toggle between cloud and private (local) dictation mode.
-    private func togglePrivateMode() {
+    /// Toggle between cloud and incognito (on-device) dictation mode.
+    private func toggleIncognitoMode() {
         let newMode: DictationMode = modeTransition.effectiveMode == .local
             ? .cloud : .local
         requestDictationMode(newMode)
@@ -648,7 +648,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBarController?.setDictationMode(
             effective: modeTransition.effectiveMode,
             requested: modeTransition.requestedMode)
-        hudController?.viewModel.isPrivateMode =
+        hudController?.viewModel.isIncognitoMode =
             modeTransition.effectiveMode == .local
     }
 
@@ -920,7 +920,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !didFenceApplicationTermination else { return }
         guard DictationMode.isLocalAvailable else { return }
         guard pendingSessionRecoveryPipeline == nil else { return }
-        let binding = Settings.shared.privateModeShortcutBinding
+        let binding = Settings.shared.incognitoModeShortcutBinding
         guard registeredModeHotkeyBinding != binding else { return }
 
         unregisterModeHotkey()
@@ -933,7 +933,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 [weak self] event in
                 guard event == .pressed else { return }
                 Task { @MainActor [weak self] in
-                    self?.togglePrivateMode()
+                    self?.toggleIncognitoMode()
                 }
             }
             registeredModeHotkeyBinding = binding

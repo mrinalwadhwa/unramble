@@ -88,18 +88,18 @@ struct HUDContentView: View {
         return 2
     }
 
-    // MARK: - Private mode colors
+    // MARK: - Incognito mode colors
 
-    /// The pill fill color — purple-tinted in private mode.
+    /// The pill fill color — purple-tinted in incognito mode.
     private var pillFillColor: Color {
-        viewModel.isPrivateMode
+        viewModel.isIncognitoMode
             ? Color(red: 0.25, green: 0.1, blue: 0.35)
             : Color.black
     }
 
-    /// The pill border color — green in private mode.
+    /// The pill border color — green in incognito mode.
     private var pillBorderColor: Color {
-        viewModel.isPrivateMode
+        viewModel.isIncognitoMode
             ? Color(red: 0.3, green: 0.8, blue: 0.5)
             : Color.white
     }
@@ -165,11 +165,11 @@ struct HUDContentView: View {
     /// upward.
     private var morphingPill: some View {
         ZStack {
-            // Background fill — purple-tinted in private mode.
+            // Background fill — purple-tinted in incognito mode.
             Capsule()
                 .fill(pillFillColor.opacity(pillFillOpacity))
 
-            // Border — green in private mode.
+            // Border — green in incognito mode.
             Capsule()
                 .strokeBorder(
                     pillBorderColor.opacity(pillBorderOpacity),
