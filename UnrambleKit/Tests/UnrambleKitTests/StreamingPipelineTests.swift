@@ -4233,6 +4233,11 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(afterRetry, .idle)
         XCTAssertEqual(dictation.receivedAudioData, [completeWAV])
         XCTAssertEqual(injector.injectionCount, 0)
+
+        // Admission must be released after the empty reset so a fresh press is
+        // accepted rather than refused with "another session owns admission".
+        let secondSessionID = await pipeline.activate()
+        XCTAssertNotNil(secondSessionID, "Expected admission after empty reset")
     }
 
     func testBothWhitespaceOnlyResultsResetToIdle() async {
@@ -4797,6 +4802,12 @@ final class StreamingPipelineTests: XCTestCase {
         XCTAssertEqual(injector.injectionCount, 0)
         let canRetry = await pipeline.canRetryDictation(sessionID: sessionID)
         XCTAssertFalse(canRetry)
+
+        // Admission must be released after the empty reset so a fresh press is
+        // accepted, rather than refused forever with "another session owns
+        // admission" because the pipeline's active session was left set.
+        let secondSessionID = await pipeline.activate()
+        XCTAssertNotNil(secondSessionID, "Expected admission after empty reset")
     }
 
     // MARK: - Language parameter

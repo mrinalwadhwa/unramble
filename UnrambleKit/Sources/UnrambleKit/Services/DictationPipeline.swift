@@ -2776,7 +2776,7 @@ public actor DictationPipeline: PipelineProviding {
                 // would re-run recognition on the same speechless audio and
                 // return empty again, so nothing is retained.
                 Log.debug("[Pipeline] Local returned no text; resetting to idle")
-                _ = await coordinator.reset(sessionID: sessionID)
+                await resetOwnedSession(sessionID)
                 return nil
             }
             Log.debug(
@@ -3103,7 +3103,7 @@ public actor DictationPipeline: PipelineProviding {
                             result: .empty
                         ))
                 }
-                _ = await coordinator.reset(sessionID: sessionID)
+                await resetOwnedSession(sessionID)
                 return nil
             }
             return text
