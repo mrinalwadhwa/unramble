@@ -37,6 +37,17 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
     private var deviceListListenerBlock: AudioObjectPropertyListenerBlock?
     private var defaultDeviceListenerBlock: AudioObjectPropertyListenerBlock?
 
+    /// Serial queue that coalesces a burst of device-change notifications.
+    private let deviceChangeQueue = DispatchQueue(
+        label: "computer.unramble.coreaudio-device-change")
+    /// Pending debounced rebuild check, cancelled and rescheduled per event.
+    private var pendingDeviceChangeCheck: DispatchWorkItem?
+    /// How long device-change notifications must settle before acting. A churn
+    /// storm (Continuity, virtual devices, Bluetooth flapping) fires many
+    /// notifications in a burst; coalescing them into one decision avoids the
+    /// repeated engine rebuilds that burst otherwise triggers.
+    private static let deviceChangeDebounceSeconds = 0.3
+
     public init() {
         #if canImport(CoreAudio)
             registerListeners()
@@ -404,24 +415,7 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             let devicesBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                 guard let self else { return }
                 Log.debug("[CoreAudioDeviceProvider] Device list changed")
-                let (selectedID, captureProvider): (UInt32?, (any AudioCaptureRebuildSink)?) = self.lock
-                    .withLock {
-                        (self._selectedDeviceID, self._audioCaptureProvider)
-                    }
-                if let selectedID {
-                    let devices = self.listInputDevices()
-                    if !devices.contains(where: { $0.id == selectedID }) {
-                        self.lock.withLock { self._selectedDeviceID = nil }
-                        Log.debug(
-                            "[CoreAudioDeviceProvider] Selected device \(selectedID) disconnected, reverting to default"
-                        )
-                        captureProvider?.markNeedsRebuild()
-                    }
-                    // Selected device still present — skip rebuild.
-                } else {
-                    // Using system default — rebuild to pick up changes.
-                    captureProvider?.markNeedsRebuild()
-                }
+                self.scheduleDeviceChangeCheck()
             }
 
             let devicesStatus = AudioObjectAddPropertyListenerBlock(
@@ -442,14 +436,9 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
             )
 
             let defaultBlock: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+                guard let self else { return }
                 Log.debug("[CoreAudioDeviceProvider] Default input device changed")
-                let (selectedID, captureProvider): (UInt32?, (any AudioCaptureRebuildSink)?) =
-                    self?.lock.withLock {
-                        (self?._selectedDeviceID, self?._audioCaptureProvider)
-                    } ?? (nil, nil)
-                if selectedID == nil {
-                    captureProvider?.markNeedsRebuild()
-                }
+                self.scheduleDeviceChangeCheck()
             }
 
             let defaultStatus = AudioObjectAddPropertyListenerBlock(
@@ -462,6 +451,47 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
                 Log.debug("[CoreAudioDeviceProvider] Failed to register default device listener: \(defaultStatus)")
             }
             defaultDeviceListenerBlock = defaultBlock
+        }
+
+        /// Coalesce device-change notifications: cancel any pending check and
+        /// schedule a fresh one, so a burst of notifications settles into a
+        /// single rebuild decision instead of one rebuild per notification.
+        private func scheduleDeviceChangeCheck() {
+            deviceChangeQueue.async { [weak self] in
+                guard let self else { return }
+                self.pendingDeviceChangeCheck?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    self?.handleDeviceChangeSettled()
+                }
+                self.pendingDeviceChangeCheck = work
+                self.deviceChangeQueue.asyncAfter(
+                    deadline: .now() + Self.deviceChangeDebounceSeconds,
+                    execute: work)
+            }
+        }
+
+        /// Act on a settled device change. If an explicitly selected device is
+        /// gone, revert to auto-detect and rebuild; in auto-detect, rebuild to
+        /// pick up the new default. Runs once per settled burst.
+        private func handleDeviceChangeSettled() {
+            let (selectedID, captureProvider):
+                (UInt32?, (any AudioCaptureRebuildSink)?) = lock.withLock {
+                    (self._selectedDeviceID, self._audioCaptureProvider)
+                }
+            if let selectedID {
+                let devices = listInputDevices()
+                if !devices.contains(where: { $0.id == selectedID }) {
+                    lock.withLock { self._selectedDeviceID = nil }
+                    Log.debug(
+                        "[CoreAudioDeviceProvider] Selected device \(selectedID) disconnected, reverting to default"
+                    )
+                    captureProvider?.markNeedsRebuild()
+                }
+                // Selected device still present — skip rebuild.
+            } else {
+                // Using system default — rebuild to pick up changes.
+                captureProvider?.markNeedsRebuild()
+            }
         }
 
         /// Remove all registered Core Audio listeners.
