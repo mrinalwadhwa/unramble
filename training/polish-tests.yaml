@@ -1,3 +1,84 @@
+- category: asr-backtrack
+  input: Honestly, this is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the wrong. Right call.
+  accepted:
+  - This is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the right call.
+  - Honestly, this is the best architecture decision we've made all year. The microservices approach was killing us with latency. Going back to a monolith for the core services was absolutely the right call.
+- category: asr-backtrack
+  input: Let's use MySQL. Scratch that, PostgreSQL is a better fit. It has better support for JSON columns.
+  accepted:
+  - Let's use PostgreSQL. It has better support for JSON columns.
+  - PostgreSQL is a better fit. It has better support for JSON columns.
+- category: asr-backtrack
+  input: The bug is in the auth service. Wait, no, it's in the gateway. We need to check the request routing logic.
+  accepted:
+  - The bug is in the gateway. We need to check the request routing logic.
+- category: asr-backtrack
+  input: The cache TTL should be five minutes. Actually, make it ten minutes. We don't want to hit the database too often.
+  accepted:
+  - The cache TTL should be 10 minutes. We don't want to hit the database too often.
+- category: asr-backtrack
+  input: We should deploy to staging. Actually no, deploy to production. The hotfix needs to go out immediately.
+  accepted:
+  - We should deploy to production. The hotfix needs to go out immediately.
+  - Deploy to production. The hotfix needs to go out immediately.
+- category: asr-correction
+  input: The timeout is set to thirty seconds. I mean thirty minutes. That's way too long for a health check.
+  accepted:
+  - The timeout is set to 30 minutes. That's way too long for a health check.
+- category: asr-correction
+  input: We deployed to the staging region. Sorry I mean the production region. The latency requirements are different for live traffic.
+  accepted:
+  - We deployed to the production region. The latency requirements are different for live traffic.
+- category: asr-correction
+  input: We had about twelve hundred active users last month. Uh sorry, I mean twelve thousand. Revenue was up fifteen percent compared to Q three. The churn rate stayed. Flat at around three point five percent.
+  accepted:
+  - We had about 12,000 active users last month. Revenue was up 15% compared to Q3. The churn rate stayed flat at around 3.5%.
+- category: asr-correction-long
+  input: The database has about two hundred tables. Sorry I mean two thousand tables. Most of them are legacy and haven't been accessed in months. We need to audit and clean up the unused ones.
+  accepted:
+  - The database has about 2,000 tables. Most of them are legacy and haven't been accessed in months. We need to audit and clean up the unused ones.
+- category: asr-discourse
+  input: Like, the main issue is that the database queries are not optimized. We need to add proper indexing.
+  accepted:
+  - The main issue is that the database queries are not optimized. We need to add proper indexing.
+- category: asr-discourse
+  input: You know, the real problem is that we don't have enough monitoring in place. We need better observability.
+  accepted:
+  - The real problem is that we don't have enough monitoring in place. We need better observability.
+- category: asr-false-start
+  input: We should probably actually know let me think rethink this. The best approach would be to add a retry mechanism with exponential back off. That way we It won't overwhelm the server during peak hours.
+  accepted:
+  - The best approach would be to add a retry mechanism with exponential backoff. That way it won't overwhelm the server during peak hours.
+- category: asr-preserve
+  input: Okay, so here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  accepted:
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Then once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First, we'll deploy the database changes during the maintenance window. Then, once that's stable, we'll push the new API version. Finally, we'll update the client SDK and send out the migration guide.
+  - Here's the plan for tomorrow. First we'll deploy the database changes during the maintenance window. Once that's stable, we'll push the new API version. And finally we'll update the client SDK and send out the migration guide.
+- category: asr-preserve
+  input: The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five minute timeout.
+  accepted:
+  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
+  - The CI pipeline runs in three stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a five-minute timeout.
+  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
+- category: asr-preserve
+  input: The incident response plan has four stages. Detection happens through automated monitoring alerts. Triage determines the severity and assigns the on-call engineer. Mitigation focuses on reducing customer impact as quickly as possible.
+  accepted:
+  - The incident response plan has 4 stages. Detection happens through automated monitoring alerts. Triage determines the severity and assigns the on-call engineer. Mitigation focuses on reducing customer impact as quickly as possible.
+- category: asr-preserve
+  input: The new API gateway handles authentication, rate limiting, and request routing. It supports both REST and GraphQL endpoints. Average latency added by the gateway is under five milliseconds. We've been running it in shadow mode for two weeks with no issues.
+  accepted:
+  - The new API gateway handles authentication, rate limiting, and request routing. It supports both REST and GraphQL endpoints. Average latency added by the gateway is under 5 milliseconds. We've been running it in shadow mode for 2 weeks with no issues.
+- category: asr-preserve
+  input: We migrated from AWS to GCP last quarter. The main drivers were cost savings and better Kubernetes support. Total migration took about six weeks. The only issue was reconfiguring the CDN which added an extra three days.
+  accepted:
+  - We migrated from AWS to GCP last quarter. The main drivers were cost savings and better Kubernetes support. Total migration took about 6 weeks. The only issue was reconfiguring the CDN, which added an extra 3 days.
+- category: asr-punctuation
+  input: Please send the update to the team dash and make sure to CC the project manager. The deadline is Friday, comma. So don't wait until the last minute.
+  accepted:
+  - Please send the update to the team — and make sure to CC the project manager. The deadline is Friday, so don't wait until the last minute.
 - category: backtrack
   input: I'll be there in ten no twenty minutes
   accepted:
@@ -10,6 +91,18 @@
   input: we need three no four developers on this project
   accepted:
   - We need 4 developers on this project.
+- category: backtrack-strict
+  input: Deploy to staging. Actually no, production.
+  accepted:
+  - Deploy to production.
+- category: backtrack-strict
+  input: Thirty no wait sixty seconds.
+  accepted:
+  - 60 seconds.
+- category: backtrack-strict
+  input: Use MySQL. Scratch that, PostgreSQL.
+  accepted:
+  - Use PostgreSQL.
 - category: capitalization
   input: can you ask sarah from the london office about the api changes
   accepted:
@@ -55,10 +148,6 @@
   accepted:
   - Can you review the pull request by end of day?
 - category: clean
-  input: I'll be in the office from 9 AM to 5 PM.
-  accepted:
-  - I'll be in the office from 9 AM to 5 PM.
-- category: clean
   input: Please forward the invoice to the finance team.
   accepted:
   - Please forward the invoice to the finance team.
@@ -67,18 +156,17 @@
   accepted:
   - The deployment went smoothly.
 - category: clean
-  input: The meeting is scheduled for March 15th at 2:30 PM.
-  accepted:
-  - The meeting is scheduled for March 15th at 2:30 PM.
-  - The meeting is scheduled for March 15th at 2:30 p.m.
-- category: clean
-  input: The server responded with a 200 status code.
-  accepted:
-  - The server responded with a 200 status code.
-- category: clean
   input: We shipped the hotfix yesterday afternoon.
   accepted:
   - We shipped the hotfix yesterday afternoon.
+- category: continuation
+  input: Consider using a message queue instead
+  accepted:
+  - consider using a message queue instead.
+- category: continuation
+  input: Latency and throughput are the main concerns
+  accepted:
+  - latency and throughput are the main concerns.
 - category: contraction
   input: I can't believe it doesn't work
   accepted:
@@ -149,11 +237,6 @@
   accepted:
   - The deadline is Monday.
 - category: correction
-  input: the meeting is at 2 sorry 3 PM tomorrow
-  accepted:
-  - The meeting is at 3 PM tomorrow.
-  - The meeting is at 3 p.m. tomorrow.
-- category: correction
   input: the server runs Ubuntu sorry CentOS
   accepted:
   - The server runs CentOS.
@@ -170,6 +253,43 @@
   input: we should use Python actually let's use Rust for this
   accepted:
   - Let's use Rust for this.
+- category: dictated-punctuation-cmd
+  input: Fix the bug exclamation point.
+  accepted:
+  - Fix the bug!
+- category: dictated-punctuation-cmd
+  input: Note colon the deadline is Friday.
+  accepted:
+  - 'Note: the deadline is Friday.'
+  - 'Note: The deadline is Friday.'
+- category: dictated-punctuation-cmd
+  input: Please respond ASAP exclamation point.
+  accepted:
+  - Please respond ASAP!
+- category: dictated-punctuation-cmd
+  input: The items are colon apples and bananas.
+  accepted:
+  - 'The items are: apples and bananas.'
+- category: dictated-punctuation-cmd
+  input: This is urgent exclamation mark.
+  accepted:
+  - This is urgent!
+- category: dictated-punctuation-fp
+  input: The billing period ends on Friday.
+  accepted:
+  - The billing period ends on Friday.
+- category: dictated-punctuation-fp
+  input: The colon cancer screening is Monday.
+  accepted:
+  - The colon cancer screening is Monday.
+- category: dictated-punctuation-fp
+  input: The question mark key is broken.
+  accepted:
+  - The question mark key is broken.
+- category: dictated-punctuation-fp
+  input: Use a comma when listing items.
+  accepted:
+  - Use a comma when listing items.
 - category: discourse
   input: I mean at the end of the day it's about user experience
   accepted:
@@ -202,10 +322,6 @@
   accepted:
   - We should just ship it.
 - category: discourse
-  input: so the thing is we need more budget for Q3
-  accepted:
-  - We need more budget for Q3.
-- category: discourse
   input: to be honest I don't think this will ship on time
   accepted:
   - To be honest, I don't think this will ship on time.
@@ -216,8 +332,7 @@
   - You see, the problem is that we don't have enough test coverage.
   - The problem is that we don't have enough test coverage.
 - category: email
-  input: hey can you um send me the thing we talked about yesterday like the report
-    or whatever
+  input: hey can you um send me the thing we talked about yesterday like the report or whatever
   accepted:
   - Hey, can you send me the report we talked about yesterday?
   - Hi, could you send me the report we discussed yesterday?
@@ -235,11 +350,9 @@
   - LGTM merge it
   - LGTM. Merge it.
 - category: email
-  input: thanks for getting back to me so I wanted to follow up on the proposal we
-    sent last week
+  input: thanks for getting back to me so I wanted to follow up on the proposal we sent last week
   accepted:
-  - Thanks for getting back to me. I wanted to follow up on the proposal we sent last
-    week.
+  - Thanks for getting back to me. I wanted to follow up on the proposal we sent last week.
 - category: emphasis
   input: never ever deploy on a Friday afternoon
   accepted:
@@ -274,11 +387,9 @@
   accepted:
   - We must fix this before release.
 - category: false-start
-  input: I think we should try to hmm actually you know what let me come back to this
-    later
+  input: I think we should try to hmm actually you know what let me come back to this later
   accepted:
-  - I think we should try to... actually, you know what, let me come back to this
-    later.
+  - I think we should try to... actually, you know what, let me come back to this later.
 - category: false-start
   input: I was going to say but never mind the point is we need more testing
   accepted:
@@ -305,13 +416,7 @@
   - I just need to figure out the API rate limits.
   - I need to figure out the API rate limits.
 - category: filler
-  input: okay so basically what happened was the server crashed at 3 AM
-  accepted:
-  - The server crashed at 3 AM.
-  - The server crashed at 3 a.m.
-- category: filler
-  input: so yeah I mean the deployment went fine right but we should still monitor
-    it
+  input: so yeah I mean the deployment went fine right but we should still monitor it
   accepted:
   - The deployment went fine, but we should still monitor it.
 - category: filler
@@ -327,6 +432,26 @@
   input: yeah no totally I agree with that approach
   accepted:
   - I agree with that approach.
+- category: filler-vs-content
+  input: Nah I don't think so.
+  accepted:
+  - Nah, I don't think so.
+- category: filler-vs-content
+  input: Uh the server is down.
+  accepted:
+  - The server is down.
+- category: filler-vs-content
+  input: Uh yeah I think we should deploy today
+  accepted:
+  - Yeah, I think we should deploy today.
+- category: filler-vs-content
+  input: Yeah I saw the PR and it looks good
+  accepted:
+  - Yeah, I saw the PR and it looks good.
+- category: filler-vs-content
+  input: Yeah no that won't work.
+  accepted:
+  - Yeah, no, that won't work.
 - category: keep-tag
   input: I was thinking dot dot dot maybe we should wait
   accepted:
@@ -336,14 +461,6 @@
   input: check the hashtag trending topic
   accepted:
   - 'Check the #trending topic.'
-- category: keep-tag
-  input: the deadline was moved to Friday new paragraph please update your tickets
-    accordingly
-  accepted:
-  - 'The deadline was moved to Friday.
-
-
-    Please update your tickets accordingly.'
 - category: keep-tag
   input: research ampersand development is our focus
   accepted:
@@ -355,24 +472,31 @@
 
     Details are below.'
 - category: keep-tag
-  input: the price is dollar sign fifty with a ten percent sign discount
+  input: the deadline was moved to Friday new paragraph please update your tickets accordingly
   accepted:
-  - The price is $50 with a 10% discount.
-- category: keep-tag
-  input: two plus sign three equals sign five
-  accepted:
-  - 2 + 3 = 5
-  - 2 + 3 = 5.
-  - 2+3=5.
+  - 'The deadline was moved to Friday.
+
+
+    Please update your tickets accordingly.'
 - category: keep-tag
   input: the password is asterisk asterisk asterisk asterisk
   accepted:
   - The password is ****.
   - The password is ****
 - category: keep-tag
+  input: the price is dollar sign fifty with a ten percent sign discount
+  accepted:
+  - The price is $50 with a 10% discount.
+- category: keep-tag
   input: this is asterisk really asterisk important
   accepted:
   - This is *really* important.
+- category: keep-tag
+  input: two plus sign three equals sign five
+  accepted:
+  - 2 + 3 = 5
+  - 2 + 3 = 5.
+  - 2+3=5.
 - category: list
   input: I need to buy eggs and milk
   accepted:
@@ -404,8 +528,7 @@
 
     - Strawberries'
 - category: list
-  input: my focus areas are one refactor the auth module and two improve the error
-    handling
+  input: my focus areas are one refactor the auth module and two improve the error handling
   accepted:
   - 'My focus areas are:
 
@@ -418,8 +541,7 @@
 
     2. Improve the error handling.'
 - category: list
-  input: my focus areas are one refactor the auth module two improve the error handling
-    and three add request logging
+  input: my focus areas are one refactor the auth module two improve the error handling and three add request logging
   accepted:
   - 'My focus areas are:
 
@@ -451,8 +573,7 @@
   - Please review the design and the implementation.
   - Please review the design and implementation.
 - category: list
-  input: step one clone the repo step two install dependencies step three run tests
-    step four deploy
+  input: step one clone the repo step two install dependencies step three run tests step four deploy
   accepted:
   - '1. Clone the repo
 
@@ -476,8 +597,7 @@
 
     Step 4: Deploy'
 - category: list
-  input: the action items from the meeting are update the roadmap schedule a design
-    review and hire two more engineers
+  input: the action items from the meeting are update the roadmap schedule a design review and hire two more engineers
   accepted:
   - 'The action items from the meeting are:
 
@@ -525,8 +645,7 @@
   - The options are upgrade or replace.
   - 'The options are: upgrade or replace.'
 - category: list
-  input: the priorities are first fix the login bug second add caching third write
-    documentation
+  input: the priorities are first fix the login bug second add caching third write documentation
   accepted:
   - 'The priorities are:
 
@@ -543,8 +662,7 @@
 
     3. Write documentation.'
 - category: list
-  input: the tasks for this sprint are first set up the CI pipeline second write the
-    integration tests and third update the deployment scripts
+  input: the tasks for this sprint are first set up the CI pipeline second write the integration tests and third update the deployment scripts
   accepted:
   - 'The tasks for this sprint are:
 
@@ -569,8 +687,7 @@
   accepted:
   - You can use SSH or the web console.
 - category: meeting
-  input: okay so in today's standup um john said the backend API is ready sarah mentioned
-    she's blocked on the design review and mike said he'll finish the tests by tomorrow
+  input: okay so in today's standup um john said the backend API is ready sarah mentioned she's blocked on the design review and mike said he'll finish the tests by tomorrow
   accepted:
   - 'In today''s standup:
 
@@ -587,9 +704,7 @@
 
     - Mike said he''ll finish the tests by tomorrow'
 - category: meeting
-  input: the key takeaways from the meeting are one we need to hire two more engineers
-    two the deadline is moved to April fifteenth and three we should schedule a follow
-    up for next week
+  input: the key takeaways from the meeting are one we need to hire two more engineers two the deadline is moved to April fifteenth and three we should schedule a follow up for next week
   accepted:
   - 'The key takeaways from the meeting are:
 
@@ -643,14 +758,19 @@
 
     3. The load balancer'
 - category: number
-  input: I have eight files to review
+  input: about fifteen percent of requests are failing
   accepted:
-  - I have 8 files to review.
+  - About 15% of requests are failing.
 - category: number
   input: it costs ninety nine dollars and ninety nine cents
   accepted:
   - It costs $99.99
   - It costs $99.99.
+- category: number
+  input: it costs sixty-five dollars per month
+  accepted:
+  - It costs $65 per month.
+  - It costs $65 dollars per month.
 - category: number
   input: it took about thirty seconds to load
   accepted:
@@ -660,17 +780,35 @@
   accepted:
   - My phone number is 555-123-4567.
 - category: number
+  input: nineteen nodes are currently active
+  accepted:
+  - 19 nodes are currently active.
+  - Nineteen nodes are currently active.
+- category: number
   input: she's the twenty first employee
   accepted:
   - She's the 21st employee.
+- category: number
+  input: the CPU usage spiked to ninety percent during the deploy
+  accepted:
+  - The CPU usage spiked to 90% during the deploy.
 - category: number
   input: the budget is five hundred thousand dollars
   accepted:
   - The budget is $500,000.
 - category: number
+  input: the cache hit rate is sixty percent
+  accepted:
+  - The cache hit rate is 60%.
+- category: number
   input: the conversion rate is twenty three point five percent
   accepted:
   - The conversion rate is 23.5%.
+- category: number
+  input: the deadline is January fifteenth, twenty twenty-seven
+  accepted:
+  - The deadline is January 15th, 2027.
+  - The deadline is January 15, 2027.
 - category: number
   input: the disk is eighty five percent full
   accepted:
@@ -694,6 +832,11 @@
   accepted:
   - The ratio is 1:4.
 - category: number
+  input: the salary is ninety thousand dollars per year
+  accepted:
+  - The salary is $90,000 per year.
+  - The salary is $90,000 dollars per year.
+- category: number
   input: the salary range is ninety thousand to one hundred twenty thousand dollars
   accepted:
   - The salary range is $90,000 to $120,000.
@@ -702,9 +845,17 @@
   accepted:
   - The temperature is -40°C.
 - category: number
+  input: there are thirteen thousand records in the table
+  accepted:
+  - There are 13,000 records in the table.
+- category: number
+  input: there are two hundred and fifty nodes in the cluster
+  accepted:
+  - There are 250 nodes in the cluster.
+- category: number
   input: there are two options here
   accepted:
-  - There are 2 options here.
+  - There are two options here.
 - category: number
   input: this is our fifth release this year
   accepted:
@@ -715,138 +866,75 @@
   - Version 3.14.1
   - Version 3.14.1.
 - category: number
-  input: we have twelve million active users
+  input: we have ninety-nine servers running in production
   accepted:
-  - We have 12 million active users.
-  - We have 12,000,000 active users.
-- category: number
-  input: we only have one server left
-  accepted:
-  - We only have 1 server left.
-- category: number
-  input: we processed one point two million requests yesterday
-  accepted:
-  - We processed 1.2 million requests yesterday.
-- category: number
-  input: the latency dropped from two fifty milliseconds to eighty milliseconds
-  accepted:
-  - The latency dropped from 250 milliseconds to 80 milliseconds.
-- category: number
-  input: we need twenty-seven servers for the new cluster
-  accepted:
-  - We need 27 servers for the new cluster.
-- category: number
-  input: the response time is forty-five milliseconds on average
-  accepted:
-  - The response time is 45 milliseconds on average.
-- category: number
-  input: there were ninety-nine failures in the last batch
-  accepted:
-  - There were 99 failures in the last batch.
-- category: number
-  input: the cache hit rate is sixty percent
-  accepted:
-  - The cache hit rate is 60%.
-- category: number
-  input: we have fifty active connections right now
-  accepted:
-  - We have 50 active connections right now.
-- category: number
-  input: the timeout is set to thirty seconds
-  accepted:
-  - The timeout is set to 30 seconds.
-- category: number
-  input: the CPU usage spiked to ninety percent during the deploy
-  accepted:
-  - The CPU usage spiked to 90% during the deploy.
+  - We have 99 servers running in production.
 - category: number
   input: we have thirteen servers in the cluster
   accepted:
   - We have 13 servers in the cluster.
 - category: number
-  input: about fifteen percent of requests are failing
+  input: we have twelve million active users
   accepted:
-  - About 15% of requests are failing.
+  - We have 12 million active users.
+  - We have 12,000,000 active users.
 - category: number
-  input: the build takes seventeen minutes to complete
+  input: we need twenty-seven servers for the new cluster
   accepted:
-  - The build takes 17 minutes to complete.
+  - We need 27 servers for the new cluster.
 - category: number
-  input: nineteen nodes are currently active
+  input: we only have one server left
   accepted:
-  - 19 nodes are currently active.
-  - Nineteen nodes are currently active.
+  - We only have one server left.
 - category: number
-  input: we have fifteen million active users
+  input: we processed one point two million requests yesterday
   accepted:
-  - We have 15 million active users.
-- category: number
-  input: there are thirteen thousand records in the table
+  - We processed 1.2 million requests yesterday.
+- category: paragraph-cmd
+  input: First point. New line. Second point.
   accepted:
-  - There are 13,000 records in the table.
-- category: preserve
-  input: One of the servers is down and we need to restart it.
+  - 'First point.
+
+    Second point.'
+- category: paragraph-cmd
+  input: Send the report. New paragraph. Let me know if questions.
   accepted:
-  - One of the servers is down and we need to restart it.
-  - One of the servers is down, and we need to restart it.
-- category: preserve
-  input: That's one approach we could take.
+  - 'Send the report.
+
+
+    Let me know if questions.'
+  - 'Send the report.
+
+
+    Let me know if you have questions.'
+- category: paragraph-cmd
+  input: The deadline is Friday. New paragraph. Please update tickets.
   accepted:
-  - That's one approach we could take.
-- category: number
-  input: we have ninety-nine servers running in production
+  - 'The deadline is Friday.
+
+
+    Please update tickets.'
+  - 'The deadline is Friday.
+
+
+    Please update your tickets.'
+- category: paragraph-command
+  input: We discussed the new paragraph structure in the document
   accepted:
-  - We have 99 servers running in production.
-- category: number
-  input: the error rate is twenty-three percent
+  - We discussed the new paragraph structure in the document.
+- category: paragraph-fp
+  input: Add a new line at the end of the file.
   accepted:
-  - The error rate is 23%.
-- category: number
-  input: the cluster has forty-eight nodes
+  - Add a new line at the end of the file.
+- category: paragraph-fp
+  input: Start a new paragraph after the intro.
   accepted:
-  - The cluster has 48 nodes.
-- category: number
-  input: it costs sixty-five dollars per month
+  - Start a new paragraph after the intro.
+  - Start a new paragraph after the introduction.
+- category: paragraph-fp
+  input: We discussed the new paragraph structure.
   accepted:
-  - It costs $65 per month.
-  - It costs $65 dollars per month.
-- category: number
-  input: the deadline is January fifteenth, twenty twenty-seven
-  accepted:
-  - The deadline is January 15th, 2027.
-  - The deadline is January 15, 2027.
-- category: number
-  input: the response time is eighty milliseconds
-  accepted:
-  - The response time is 80 milliseconds.
-  - The response time is 80 ms.
-- category: number
-  input: we need thirty more days
-  accepted:
-  - We need 30 more days.
-- category: number
-  input: the cache TTL is sixty seconds
-  accepted:
-  - The cache TTL is 60 seconds.
-- category: number
-  input: she's the twenty-first employee we hired this year
-  accepted:
-  - She's the 21st employee we hired this year.
-  - She's the twenty-first employee we hired this year.
-- category: number
-  input: there are two hundred and fifty nodes in the cluster
-  accepted:
-  - There are 250 nodes in the cluster.
-- category: number
-  input: the salary is ninety thousand dollars per year
-  accepted:
-  - The salary is $90,000 per year.
-  - The salary is $90,000 dollars per year.
-- category: number
-  input: the latency dropped from 250 milliseconds to eighty milliseconds
-  accepted:
-  - The latency dropped from 250 milliseconds to 80 milliseconds.
-  - The latency dropped from 250 ms to 80 ms.
+  - We discussed the new paragraph structure.
 - category: preserve
   input: First we deploy the changes then we run the tests.
   accepted:
@@ -867,13 +955,18 @@
   accepted:
   - I wanted to grab some coffee before the meeting.
 - category: preserve
-  input: I wanted to grab some coffee before the meeting.
+  input: One of the servers is down and we need to restart it.
   accepted:
-  - I wanted to grab some coffee before the meeting.
+  - One of the servers is down and we need to restart it.
+  - One of the servers is down, and we need to restart it.
 - category: preserve
   input: She's gonna present the demo tomorrow.
   accepted:
   - She's gonna present the demo tomorrow.
+- category: preserve
+  input: That's one approach we could take.
+  accepted:
+  - That's one approach we could take.
 - category: preserve
   input: The thing is kinda broken.
   accepted:
@@ -882,18 +975,574 @@
   input: We gotta finish this before the deadline.
   accepted:
   - We gotta finish this before the deadline.
-- category: preserve
-  input: he mentioned that the deadline might slip
+- category: preserve-clean
+  input: Add a note.
   accepted:
-  - He mentioned that the deadline might slip.
-- category: preserve
-  input: she's gonna present the demo tomorrow
+  - Add a note.
+- category: preserve-clean
+  input: 'Add a note.
+
+    Then add the details.
+
+    '
   accepted:
-  - She's gonna present the demo tomorrow.
-- category: preserve
-  input: the thing is kinda broken
+  - 'Add a note.
+
+    Then add the details.
+
+    '
+- category: preserve-clean
+  input: All tests passed on the CI pipeline.
   accepted:
-  - The thing is kinda broken.
+  - All tests passed on the CI pipeline.
+- category: preserve-clean
+  input: Alright, so here's the update on the release. We fixed the login bug yesterday. The QA team is running regression tests now.
+  accepted:
+  - Here's the update on the release. We fixed the login bug yesterday. The QA team is running regression tests now.
+- category: preserve-clean
+  input: And then… it just stopped working.
+  accepted:
+  - And then… it just stopped working.
+- category: preserve-clean
+  input: Can we get the staging environment reset by tomorrow? The QA team needs a clean database to run their regression tests. I can handle the deployment if you take care of the database. Yeah.
+  accepted:
+  - Can we get the staging environment reset by tomorrow? The QA team needs a clean database to run their regression tests. I can handle the deployment if you take care of the database.
+- category: preserve-clean
+  input: Casey said the release is on track.
+  accepted:
+  - Casey said the release is on track.
+- category: preserve-clean
+  input: Check its configuration file.
+  accepted:
+  - Check its configuration file.
+- category: preserve-clean
+  input: Check the config/settings page.
+  accepted:
+  - Check the config/settings page.
+- category: preserve-clean
+  input: Check the function (user ID) for errors.
+  accepted:
+  - Check the function (user ID) for errors.
+- category: preserve-clean
+  input: Dear team.
+  accepted:
+  - Dear team.
+- category: preserve-clean
+  input: 'Dear team.
+
+
+    Please review the attached proposal.
+
+    '
+  accepted:
+  - 'Dear team.
+
+
+    Please review the attached proposal.
+
+    '
+- category: preserve-clean
+  input: Don't give the test any new context. We want it to run the same way it ran before and see if the results have changed because of the changed input. And the current config.
+  accepted:
+  - Don't give the test any new context. We want it to run the same way it ran before and see if the results have changed because of the changed input. And the current config.
+- category: preserve-clean
+  input: Drew will handle the code review.
+  accepted:
+  - Drew will handle the code review.
+- category: preserve-clean
+  input: During that period we saw significant growth.
+  accepted:
+  - During that period we saw significant growth.
+- category: preserve-clean
+  input: 'First, pull the latest changes from the main branch, then run the migration script to update the database schema. After that, restart the services and check the health endpoints. Mm.
+
+    '
+  accepted:
+  - 'First, pull the latest changes from the main branch. Then run the migration script to update the database schema. After that, restart the services and check the health endpoints.
+
+    '
+- category: preserve-clean
+  input: I dunno if that's the right approach.
+  accepted:
+  - I dunno if that's the right approach.
+- category: preserve-clean
+  input: I like your suggestion. But I think data pipelines has a slightly different meaning than our storage and query layer. It implies expertise in actual pipelines beyond the tooling.
+  accepted:
+  - I like your suggestion. But I think data pipelines has a slightly different meaning than our storage and query layer. It implies expertise in actual pipelines beyond the tooling.
+- category: preserve-clean
+  input: I picked the labels so I can change them. Suggest how we could phrase it to have the same impact.
+  accepted:
+  - I picked the labels so I can change them. Suggest how we could phrase it to have the same impact.
+- category: preserve-clean
+  input: 'I talked to Sam from the DevOps team yesterday. She mentioned that the Kubernetes cluster needs an upgrade before we can deploy the new Redis cache.
+
+    '
+  accepted:
+  - 'I talked to Sam from the DevOps team yesterday. She mentioned that the Kubernetes cluster needs an upgrade before we can deploy the new Redis cache.
+
+    '
+- category: preserve-clean
+  input: I think we should uh take option A, but add the fact that the material has the form of markdown files.
+  accepted:
+  - I think we should take option A, but add the fact that the material has the form of markdown files.
+- category: preserve-clean
+  input: I wanna make sure it works first.
+  accepted:
+  - I wanna make sure it works first.
+- category: preserve-clean
+  input: I want to go to the meeting.
+  accepted:
+  - I want to go to the meeting.
+- category: preserve-clean
+  input: I was thinking… maybe we should wait.
+  accepted:
+  - I was thinking… maybe we should wait.
+- category: preserve-clean
+  input: I'd rather not refactor right now.
+  accepted:
+  - I'd rather not refactor right now.
+- category: preserve-clean
+  input: I'll send the pull request after lunch.
+  accepted:
+  - I'll send the pull request after lunch.
+- category: preserve-clean
+  input: 'I''m not entirely sure this is the right approach. Maybe we should get a second opinion from the security team. The risk of a data breach is too high to just wing it.
+
+    '
+  accepted:
+  - 'I''m not entirely sure this is the right approach. Maybe we should get a second opinion from the security team. The risk of a data breach is too high to just wing it.
+
+    '
+- category: preserve-clean
+  input: I'm not sure async is necessary in addition to concurrent. Do you think it is?
+  accepted:
+  - I'm not sure async is necessary in addition to concurrent. Do you think it is?
+- category: preserve-clean
+  input: 'I''ve been debugging this for hours and I can''t figure out what''s wrong. The logs don''t show any errors but the response is definitely malformed.
+
+    '
+  accepted:
+  - 'I''ve been debugging this for hours and I can''t figure out what''s wrong. The logs don''t show any errors, but the response is definitely malformed.
+
+    '
+- category: preserve-clean
+  input: 'If the build pass is in CI, we can merge it today, otherwise we''ll need to fix the failing tests first. Either way, the feature should shift by the end of the week.
+
+    '
+  accepted:
+  - 'If the build passes on CI, we can merge it today. Otherwise, we''ll need to fix the failing tests first. Either way, the feature should shift by end of week.
+
+    '
+- category: preserve-clean
+  input: Introduction to the project.
+  accepted:
+  - Introduction to the project.
+- category: preserve-clean
+  input: 'Introduction to the project.
+
+
+    The main goals are clear.
+
+    '
+  accepted:
+  - 'Introduction to the project.
+
+
+    The main goals are clear.
+
+    '
+- category: preserve-clean
+  input: It ain't gonna fix itself.
+  accepted:
+  - It ain't gonna fix itself.
+- category: preserve-clean
+  input: It's a bit hacky but it works.
+  accepted:
+  - It's a bit hacky but it works.
+- category: preserve-clean
+  input: It's a personal decision.
+  accepted:
+  - It's a personal decision.
+- category: preserve-clean
+  input: Its configuration is correct.
+  accepted:
+  - Its configuration is correct.
+- category: preserve-clean
+  input: Jamie set up the monitoring dashboard.
+  accepted:
+  - Jamie set up the monitoring dashboard.
+- category: preserve-clean
+  input: Jordan updated the documentation yesterday.
+  accepted:
+  - Jordan updated the documentation yesterday.
+- category: preserve-clean
+  input: Keep personal information private.
+  accepted:
+  - Keep personal information private.
+- category: preserve-clean
+  input: Lemme check on that real quick.
+  accepted:
+  - Lemme check on that real quick.
+- category: preserve-clean
+  input: Let's circle back on this tomorrow.
+  accepted:
+  - Let's circle back on this tomorrow.
+- category: preserve-clean
+  input: Let's drop the intro paragraph from the Overview section.
+  accepted:
+  - Let's drop the intro paragraph from the Overview section.
+- category: preserve-clean
+  input: Migrate from EKS to GKE.
+  accepted:
+  - Migrate from EKS to GKE.
+- category: preserve-clean
+  input: Morgan will present at the all-hands.
+  accepted:
+  - Morgan will present at the all-hands.
+- category: preserve-clean
+  input: Move the summary next to the intro.
+  accepted:
+  - Move the summary next to the intro.
+- category: preserve-clean
+  input: No it is not.
+  accepted:
+  - No, it is not.
+- category: preserve-clean
+  input: Okay, let's try to assemble the sentence.
+  accepted:
+  - Let's try to assemble the sentence.
+- category: preserve-clean
+  input: One more thing before we wrap up.
+  accepted:
+  - One more thing before we wrap up.
+- category: preserve-clean
+  input: One of the servers is down.
+  accepted:
+  - One of the servers is down.
+- category: preserve-clean
+  input: 'Please review the pull request when you get a chance.
+
+    '
+  accepted:
+  - 'Please review the pull request when you get a chance.
+
+    '
+- category: preserve-clean
+  input: Research & development is our focus.
+  accepted:
+  - Research & development is our focus.
+- category: preserve-clean
+  input: Right here is where the crash happens.
+  accepted:
+  - Right here is where the crash happens.
+- category: preserve-clean
+  input: Right now we need to focus on stability.
+  accepted:
+  - Right now we need to focus on stability.
+- category: preserve-clean
+  input: Show me how these options will fit with the first part of that sentence.
+  accepted:
+  - Show me how these options will fit with the first part of that sentence.
+- category: preserve-clean
+  input: So be it we'll go with plan B.
+  accepted:
+  - So be it, we'll go with plan B.
+- category: preserve-clean
+  input: So far the migration is going smoothly.
+  accepted:
+  - So far the migration is going smoothly.
+- category: preserve-clean
+  input: So much for launching early.
+  accepted:
+  - So much for launching early.
+- category: preserve-clean
+  input: So we had this meeting with the product team and uh um they um want us to add dark mode by next sprint. I told them that's pretty aggressive. but they said the competitors already have it. Anyway I think we can do it if we cut scope on the dashboard redesign.
+  accepted:
+  - We had this meeting with the product team and they want us to add dark mode by next sprint. I told them that's pretty aggressive, but they said the competitors already have it. Anyway, I think we can do it if we cut scope on the dashboard redesign.
+- category: preserve-clean
+  input: That's a good one.
+  accepted:
+  - That's a good one.
+- category: preserve-clean
+  input: That's a personal preference.
+  accepted:
+  - That's a personal preference.
+- category: preserve-clean
+  input: That's how we've always done it.
+  accepted:
+  - That's how we've always done it.
+- category: preserve-clean
+  input: The API documentation needs updating.
+  accepted:
+  - The API documentation needs updating.
+- category: preserve-clean
+  input: The Jenkins pipeline is green.
+  accepted:
+  - The Jenkins pipeline is green.
+- category: preserve-clean
+  input: The app lost its state after the crash.
+  accepted:
+  - The app lost its state after the crash.
+- category: preserve-clean
+  input: The chart is not on slide two, it's on slide one. That label is wrong. And it still fits.
+  accepted:
+  - The chart is not on slide two, it's on slide one. That label is wrong. And it still fits.
+- category: preserve-clean
+  input: The cluster runs on GKE in us-central.
+  accepted:
+  - The cluster runs on GKE in us-central.
+- category: preserve-clean
+  input: The database migration completed successfully.
+  accepted:
+  - The database migration completed successfully.
+- category: preserve-clean
+  input: 'The deployment went smoothly last night. Did anyone notice any errors in the logs this morning? I checked the dashboard and everything looks green. Let''s keep monitoring for the rest of the day.
+
+    '
+  accepted:
+  - 'The deployment went smoothly last night. Did anyone notice any errors in the logs this morning? I checked the dashboard and everything looks green. Let''s keep monitoring for the rest of the day.
+
+    '
+- category: preserve-clean
+  input: The fix is pretty straightforward.
+  accepted:
+  - The fix is pretty straightforward.
+- category: preserve-clean
+  input: The load balancer is configured correctly.
+  accepted:
+  - The load balancer is configured correctly.
+- category: preserve-clean
+  input: The point here is not that we iterated on the design, it's that we took lessons from a specific pilot project and applied them to the general product. This is the standard rollout approach and I want to hint at that in this um paragraph, but I agree with not using vendor terms, so what can we use in place of lessons?
+  accepted:
+  - The point here is not that we iterated on the design, it's that we took lessons from a specific pilot project and applied them to the general product. This is the standard rollout approach and I want to hint at that in this paragraph, but I agree with not using vendor terms, so what can we use in place of lessons?
+- category: preserve-clean
+  input: The point is that you need deep understanding of how rendering rendering works to use the browser APIs well and pull off complex user interfaces on top.
+  accepted:
+  - The point is that you need deep understanding of how rendering works to use the browser APIs well and pull off complex user interfaces on top.
+- category: preserve-clean
+  input: The probation period ends next month.
+  accepted:
+  - The probation period ends next month.
+- category: preserve-clean
+  input: 'The pull request has been approved and merged into the main branch.
+
+    '
+  accepted:
+  - 'The pull request has been approved and merged into the main branch.
+
+    '
+- category: preserve-clean
+  input: The results were… interesting.
+  accepted:
+  - The results were… interesting.
+- category: preserve-clean
+  input: The server (production) is down.
+  accepted:
+  - The server (production) is down.
+- category: preserve-clean
+  input: The service is sorta flaky.
+  accepted:
+  - The service is sorta flaky.
+- category: preserve-clean
+  input: 'The team is working on pattern matching for the new search feature. We should have a prototype ready by next week.
+
+    '
+  accepted:
+  - 'The team is working on pattern matching for the new search feature. We should have a prototype ready by next week.
+
+    '
+- category: preserve-clean
+  input: The trial period ends next month.
+  accepted:
+  - The trial period ends next month.
+- category: preserve-clean
+  input: The variable is max_retry_count.
+  accepted:
+  - The variable is max_retry_count.
+- category: preserve-clean
+  input: There are three things blocking the release. The login page has a rendering bug on Safari. The password reset flow doesn't send the confirmation email. the admin dashboard crashes when your fi when you filter by date range.
+  accepted:
+  - There are 3 things blocking the release. The login page has a rendering bug on Safari. The password reset flow doesn't send the confirmation email. The admin dashboard crashes when you filter by date range.
+- category: preserve-clean
+  input: This one is better.
+  accepted:
+  - This one is better.
+- category: preserve-clean
+  input: 'Uh API documentation needs updating, especially the authentication section. Most of the endpoints are correct, but the examples are outdated and some of them don''t.
+
+    '
+  accepted:
+  - 'The API documentation needs updating, especially the authentication section. Most of the endpoints are correct, but the examples are outdated and some of them don''t.
+
+    '
+- category: preserve-clean
+  input: Um Let's go with trusted communication.
+  accepted:
+  - Let's go with trusted communication.
+- category: preserve-clean
+  input: 'Use the #backend channel for updates.'
+  accepted:
+  - 'Use the #backend channel for updates.'
+- category: preserve-clean
+  input: Use the * wildcard for matching.
+  accepted:
+  - Use the * wildcard for matching.
+- category: preserve-clean
+  input: Wait… I need to think about this.
+  accepted:
+  - Wait… I need to think about this.
+- category: preserve-clean
+  input: We need to update the config (see below) before deploying.
+  accepted:
+  - We need to update the config (see below) before deploying.
+- category: preserve-clean
+  input: 'We need to update the documentation before the release. The API reference is completely out of date. Half the endpoints listed there don''t even exist anymore.
+
+    '
+  accepted:
+  - 'We need to update the documentation before the release. The API reference is completely out of date. Half the endpoints listed there don''t even exist anymore.
+
+    '
+- category: preserve-clean
+  input: 'We processed about fifteen thousand requests yesterday. That''s roughly a twenty percent increase over last week.
+
+    '
+  accepted:
+  - 'We processed about 15,000 requests yesterday. That''s roughly a 20% increase over last week.
+
+    '
+- category: preserve-clean
+  input: Well done on closing the deal.
+  accepted:
+  - Well done on closing the deal.
+- category: preserve-clean
+  input: Well known frameworks like React and Angular.
+  accepted:
+  - Well-known frameworks like React and Angular.
+- category: preserve-clean
+  input: Y'all need to update your dependencies.
+  accepted:
+  - Y'all need to update your dependencies.
+- category: preserve-multi-sentence
+  input: Fine, let's capitalize them. Um not a big deal.
+  accepted:
+  - Fine, let's capitalize them. Not a big deal.
+- category: preserve-multi-sentence
+  input: I like the short title, but I don't like managed as a word from a branding standpoint.
+  accepted:
+  - I like the short title, but I don't like "managed" as a word from a branding standpoint.
+- category: preserve-multi-sentence
+  input: I like the suggestion of flipping around the tone, but I don't specifically like the way the suggestion is phrased, suggest alternatives.
+  accepted:
+  - I like the suggestion of flipping around the tone, but I don't specifically like the way the suggestion is phrased. Suggest alternatives.
+- category: preserve-multi-sentence
+  input: 'Last week we had a major incident with the payment service. The root cause was a misconfigured load balancer that was sending all traffic to a single instance. It took us about four hours to Diagnose because the monitoring alerts were going to the wrong Slack channel. We''ve since fixed the routing and added redundant health checks. The postmortem is scheduled. for this Thursday at two PM
+
+    '
+  accepted:
+  - 'Last week we had a major incident with the payment service. The root cause was a misconfigured load balancer that was sending all traffic to a single instance. It took us about 4 hours to diagnose because the monitoring alerts were going to the wrong Slack channel. We''ve since fixed the routing and added redundant health checks. The postmortem is scheduled for this Thursday at 2 PM.
+
+    '
+- category: preserve-multi-sentence
+  input: Let me come back to this in the summary bullet. Let's rethink the order a bit.
+  accepted:
+  - Let me come back to this in the summary bullet. Let's rethink the order a bit.
+- category: preserve-multi-sentence
+  input: Maybe it's worth mentioning the native audio API like WebAudio and MediaStream. Reality is that was doing this work even before those APIs were ready, available or mature. Some of it was inside the plugin runtime using its low level buffer access. and obviously uh the plugin's ability to process complex audio.
+  accepted:
+  - Maybe it's worth mentioning the native audio API like WebAudio and MediaStream. Reality is that was doing this work even before those APIs were ready, available, or mature. Some of it was inside the plugin runtime using its low-level buffer access, and obviously the plugin's ability to process complex audio.
+- category: preserve-multi-sentence
+  input: Right, I think we need to land that context.
+  accepted:
+  - I think we need to land that context.
+- category: preserve-multi-sentence
+  input: So the real context here is that I have been thinking about this problem now for thirteen or so years. My earlier project gave me the sense that scheduling in a distributed system of network uh of workers and queues is a really hard problem.
+  accepted:
+  - So the real context here is that I have been thinking about this problem now for 13 or so years. My earlier project gave me the sense that scheduling in a distributed system of network of workers and queues is a really hard problem.
+- category: preserve-multi-sentence
+  input: Suggest what we can do. I don't think we we is uh I don't think we should say I.
+  accepted:
+  - Suggest what we can do. I don't think we should say "I".
+- category: preserve-multi-sentence
+  input: Yes, skip it. What else is left unaddressed from the evals?
+  accepted:
+  - Yes, skip it. What else is left unaddressed from the evals?
+- category: preserve-words
+  input: He didn't finish the report but she'll cover for him.
+  accepted:
+  - He didn't finish the report but she'll cover for him.
+- category: preserve-words
+  input: He said I'll be there by noon.
+  accepted:
+  - He said, "I'll be there by noon."
+- category: preserve-words
+  input: He said “I'll handle it”.
+  accepted:
+  - He said, “I'll handle it.”
+- category: preserve-words
+  input: He'd assumed it'd be easier to deploy.
+  accepted:
+  - He'd assumed it'd be easier to deploy.
+- category: preserve-words
+  input: He'd rather wait but she'd prefer to ship now.
+  accepted:
+  - He'd rather wait but she'd prefer to ship now.
+- category: preserve-words
+  input: I can't promise it'll be done today but I'll try.
+  accepted:
+  - I can't promise it'll be done today but I'll try.
+- category: preserve-words
+  input: I wouldn't recommend it but you'd know better than me.
+  accepted:
+  - I wouldn't recommend it but you'd know better than me.
+- category: preserve-words
+  input: I'll send it tomorrow and we'll review it Monday.
+  accepted:
+  - I'll send it tomorrow and we'll review it Monday.
+- category: preserve-words
+  input: It shouldn't take long and we'll have the results by Friday.
+  accepted:
+  - It shouldn't take long and we'll have the results by Friday.
+- category: preserve-words
+  input: It won't compile right now but it'll work after the patch.
+  accepted:
+  - It won't compile right now but it'll work after the patch.
+- category: preserve-words
+  input: She won't accept it but he'll probably agree.
+  accepted:
+  - She won't accept it but he'll probably agree.
+- category: preserve-words
+  input: They won't approve the budget but we'll find another way.
+  accepted:
+  - They won't approve the budget but we'll find another way.
+- category: preserve-words
+  input: They'd already deployed when we'd barely started testing.
+  accepted:
+  - They'd already deployed when we'd barely started testing.
+- category: preserve-words
+  input: We can't delay it any further or they'll miss the window.
+  accepted:
+  - We can't delay it any further or they'll miss the window.
+- category: preserve-words
+  input: We couldn't have done it without the team's support.
+  accepted:
+  - We couldn't have done it without the team's support.
+- category: preserve-words
+  input: We're deploying on GKE with istio.
+  accepted:
+  - We're deploying on GKE with Istio.
+- category: preserve-words
+  input: You shouldn't merge that yet but I'll let you decide.
+  accepted:
+  - You shouldn't merge that yet but I'll let you decide.
+- category: preserve-words
+  input: You'd expect it'd be faster after the upgrade.
+  accepted:
+  - You'd expect it'd be faster after the upgrade.
+- category: preserve-words
+  input: You'd think they'd have fixed that by now.
+  accepted:
+  - You'd think they'd have fixed that by now.
 - category: punctuation
   input: add a note new line then add the details
   accepted:
@@ -918,14 +1567,6 @@
   input: dear team comma I wanted to follow up on this period
   accepted:
   - Dear team, I wanted to follow up on this.
-- category: punctuation
-  input: we shipped the release on Monday new paragraph the rollout went smoothly
-    with no incidents
-  accepted:
-  - 'We shipped the release on Monday.
-
-
-    The rollout went smoothly with no incidents.'
 - category: punctuation
   input: he said open quote I'll be there close quote
   accepted:
@@ -984,6 +1625,25 @@
   accepted:
   - Water boils at 100°C.
   - Water boils at 100 °C.
+- category: punctuation
+  input: we shipped the release on Monday new paragraph the rollout went smoothly with no incidents
+  accepted:
+  - 'We shipped the release on Monday.
+
+
+    The rollout went smoothly with no incidents.'
+- category: punctuation-false-positive
+  input: She ran the third period of practice
+  accepted:
+  - She ran the 3rd period of practice.
+- category: punctuation-false-positive
+  input: The doctor said he has a healthy colon
+  accepted:
+  - The doctor said he has a healthy colon.
+- category: punctuation-false-positive
+  input: We need to discuss the Oxford comma in our style guide
+  accepted:
+  - We need to discuss the Oxford comma in our style guide.
 - category: repetition
   input: I think I think we should fix the the login bug
   accepted:
@@ -1024,42 +1684,271 @@
   accepted:
   - We should update the documentation.
 - category: run-on
-  input: I talked to the client and they want the feature by next week and also they
-    asked about pricing and I told them we'd send a proposal
+  input: I talked to the client and they want the feature by next week and also they asked about pricing and I told them we'd send a proposal
   accepted:
-  - I talked to the client. They want the feature by next week. They also asked about
-    pricing, and I told them we'd send a proposal.
-  - I talked to the client and they want the feature by next week. Also, they asked
-    about pricing. I told them we'd send a proposal.
-  - I talked to the client, and they want the feature by next week. They also asked
-    about pricing, and I told them we'd send a proposal.
+  - I talked to the client. They want the feature by next week. They also asked about pricing, and I told them we'd send a proposal.
+  - I talked to the client and they want the feature by next week. Also, they asked about pricing. I told them we'd send a proposal.
+  - I talked to the client, and they want the feature by next week. They also asked about pricing, and I told them we'd send a proposal.
+  - I talked to the client. They want the feature by next week. They also asked about pricing. I told them we'd send a proposal.
 - category: run-on
-  input: so the thing is we tried to deploy on Friday but the tests failed and then
-    we had to roll back and then on Monday we fixed the issue and redeployed and it
-    worked
+  input: so the thing is we tried to deploy on Friday but the tests failed and then we had to roll back and then on Monday we fixed the issue and redeployed and it worked
   accepted:
-  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday
-    we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday,
-    we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed and we had to roll back. On
-    Monday we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed, so we had to roll back. On
-    Monday, we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed. We had to roll back. On Monday,
-    we fixed the issue and redeployed, and it worked.
-  - We tried to deploy on Friday, but the tests failed. We had to roll back and then
-    on Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday but the tests failed. We had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed and we had to roll back. On Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed, so we had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back. On Monday, we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back and then on Monday we fixed the issue and redeployed, and it worked.
+  - We tried to deploy on Friday. But the tests failed. We had to roll back. On Monday we fixed the issue and redeployed. It worked.
+  - We tried to deploy on Friday, but the tests failed. We had to roll back. On Monday we fixed the issue and redeployed, and it worked.
 - category: run-on
-  input: we need to update the database and then run the migrations and then restart
-    the service and then verify that everything is working and then notify the team
+  input: we need to update the database and then run the migrations and then restart the service and then verify that everything is working and then notify the team
   accepted:
-  - We need to update the database, run the migrations, and restart the service. Then
-    verify that everything is working and notify the team.
-  - We need to update the database, run the migrations, restart the service, verify
-    that everything is working, and notify the team.
-  - We need to update the database, then run the migrations, then restart the service,
-    then verify that everything is working, and then notify the team.
+  - We need to update the database, run the migrations, and restart the service. Then verify that everything is working and notify the team.
+  - We need to update the database, run the migrations, restart the service, verify that everything is working, and notify the team.
+  - We need to update the database, then run the migrations, then restart the service, then verify that everything is working, and then notify the team.
+- category: seg-L3
+  input: Quick Numbers update before the meeting we bought the average response time down from about nine hundred milliseconds to just under two hundred. The monthly cost dropped from around twelve thousand dollars to roughly seven thousand five hundred. We're now on version four point two in production and version five point one in staging. The stand up is at nine forty five and the review is at three thirty and we processed about two point five million requests over the weekend without a single incident
+  accepted:
+  - Quick numbers update before the meeting. We brought the average response time down from about 900 milliseconds to just under 200. The monthly cost dropped from around $12,000 to roughly $7,500. We're now on version 4.2 in production and version 5.1 in staging. The standup is at 9:45 and the review is at 3:30. We processed about 2.5 million requests over the weekend without a single incident.
+- category: segmentation
+  input: A few things to note um the license expires next month the vendor has not responded to our renewal request and we do not have a fallback option so this needs to be escalated.
+  accepted:
+  - A few things to note. The license expires next month. The vendor has not responded to our renewal request. We do not have a fallback option. So this needs to be escalated.
+  - A few things to note. The license expires next month. The vendor has not responded to our renewal request. We do not have a fallback option. This needs to be escalated.
+- category: segmentation
+  input: A lot of what we built last quarter is um actually still relevant the auth system works fine the API layer needs refactoring and the frontend is ready for the redesign.
+  accepted:
+  - A lot of what we built last quarter is actually still relevant. The auth system works fine. The API layer needs refactoring. The frontend is ready for the redesign.
+- category: segmentation
+  input: Alright, and this is going to be a bit of a long one, so bear with me. We had one quarterly review yesterday and I want to capture everything while it's fresh overall the tone was positive, leadership seemed happy with the direction, and there was real appreciation for how the team handled the migration under pressure. The main concerns raised were around hiring velocity since we're behind on a couple of key roles and around the analytics rewrite which has slipped twice now and is starting to block other work. We agreed to bring in a contractor to unblock analytics to prioritize the two open senior roles and to revisit the roadmap in two weeks once we have more clarity on capacity. I left feeling good about where we are but aware there's a lot to execute on
+  accepted:
+  - This is going to be a bit of a long one. So bear with me. We had one quarterly review yesterday. I want to capture everything while it's fresh. Overall, the tone was positive, leadership seemed happy with the direction, and there was real appreciation for how the team handled the migration under pressure. The main concerns raised were around hiring velocity, since we're behind on a couple of key roles, and around the analytics rewrite, which has slipped twice now and is starting to block other work. We agreed to bring in a contractor to unblock analytics, to prioritize the two open senior roles, and to revisit the roadmap in two weeks once we have more clarity on capacity. I left feeling good about where we are but aware there's a lot to execute on.
+  - This is going to be a bit of a long one. Bear with me. We had one quarterly review yesterday. I want to capture everything while it's fresh. Overall, the tone was positive, leadership seemed happy with the direction, and there was real appreciation for how the team handled the migration under pressure. The main concerns raised were around hiring velocity, since we're behind on a couple of key roles, and around the analytics rewrite, which has slipped twice now and is starting to block other work. We agreed to bring in a contractor to unblock analytics, to prioritize the two open senior roles, and to revisit the roadmap in two weeks once we have more clarity on capacity. I left feeling good about where we are but aware there's a lot to execute on.
+  - Alright, this is going to be a bit of a long one, so bear with me. We had our quarterly review yesterday, and I want to capture everything while it's fresh. Overall, the tone was positive, leadership seemed happy with the direction, and there was real appreciation for how the team handled the migration under pressure. The main concerns raised were around hiring velocity, since we're behind on a couple of key roles, and around the analytics rewrite, which has slipped twice now and is starting to block other work. We agreed to bring in a contractor to unblock analytics, to prioritize the two open senior roles, and to revisit the roadmap in two weeks once we have more clarity on capacity. I left feeling good about where we are but aware there's a lot to execute on.
+- category: segmentation
+  input: Before we do that um we should consider whether the current architecture can handle the load the existing service handles about ten thousand requests per second and the new feature would roughly double that.
+  accepted:
+  - Before we do that, we should consider whether the current architecture can handle the load. The existing service handles about 10,000 requests per second. The new feature would roughly double that.
+- category: segmentation
+  input: Before we move on I want to mention that the tests are passing the deployment pipeline is green and we got sign off from the security team so we are good to merge.
+  accepted:
+  - Before we move on, I want to mention that the tests are passing, the deployment pipeline is green, and we got sign-off from the security team. So we are good to merge.
+  - Before we move on, I want to mention that the tests are passing, the deployment pipeline is green, and we got sign-off from the security team. We are good to merge.
+- category: segmentation
+  input: Chasing one idea makes it feel like that was the objective. It wasn't the objective and the tool was to solve the problem of having fast, reliable data pipelines for our users to solve it. It turned out that the current pipeline tooling did not handle scale very well so we had to build it. Uh the thesis and the chasing really started with the first prototype where I realized that well if we had to build it Everyone building large data systems will need a way to move data reliably at scale. That was the first prototype. And at the time of building the first prototype, it wasn't obvious what would be the shape or the form of future data systems. There were early glimpses of that in streaming and batch. batch early batch jobs running nightly. It wasn't obvious that we will have real time streaming everywhere. That happened later. But when it did happen, it was obvious that there should exist a place to run distributed data flows that has scheduling monitoring. recovery built-in. These
+    are realizations people are having right now as they try to build pipelines inside an enterprise.
+  accepted:
+  - Chasing one idea makes it feel like that was the objective. It wasn't the objective. The tool was to solve the problem of having fast, reliable data pipelines for our users to solve it. It turned out that the current pipeline tooling did not handle scale very well. So we had to build it. The thesis and the chasing really started with the first prototype where I realized that if we had to build it, everyone building large data systems will need a way to move data reliably at scale. That was the first prototype. At the time of building the first prototype, it wasn't obvious what would be the shape or the form of future data systems. There were early glimpses of that in streaming and batch. batch early batch jobs running nightly. It wasn't obvious that we will have real time streaming everywhere. That happened later. But when it did happen, it was obvious that there should exist a place to run distributed data flows that has scheduling monitoring recovery built-in. These are realizations
+    people are having right now as they try to build pipelines inside an enterprise.
+- category: segmentation
+  input: First we need to upgrade the database and then update the schema and then run migrations and then test everything.
+  accepted:
+  - First we need to upgrade the database, update the schema, and run migrations. Then test everything.
+- category: segmentation
+  input: I dunno all the details but here is what I gathered the server crashed the database got corrupted and the backup was three hours old so we lost some recent data
+  accepted:
+  - I dunno all the details, but here is what I gathered. The server crashed. The database got corrupted. The backup was 3 hours old. So we lost some recent data.
+  - I dunno all the details, but here is what I gathered. The server crashed. The database got corrupted. The backup was 3 hours old. We lost some recent data.
+- category: segmentation
+  input: I looked at the numbers from this release and the signup rate went up by eight percent the support tickets dropped and the average page load time improved by about two hundred milliseconds
+  accepted:
+  - I looked at the numbers from this release. The signup rate went up by 8%. The support tickets dropped. The average page load time improved by about 200 milliseconds.
+- category: segmentation
+  input: I need to flag something the database connection pool keeps running out the error rate has been climbing all week and users are starting to notice we should look into this before the weekend
+  accepted:
+  - I need to flag something. The database connection pool keeps running out. The error rate has been climbing all week. Users are starting to notice. We should look into this before the weekend.
+- category: segmentation
+  input: I need to share a few updates the on call rotation has been updated the runbook for the payment service is done the new monitoring alerts are live and the incident response process has been documented so we are in better shape now
+  accepted:
+  - I need to share a few updates. The on-call rotation has been updated. The runbook for the payment service is done. The new monitoring alerts are live. The incident response process has been documented. So we are in better shape now.
+  - I need to share a few updates. The on-call rotation has been updated. The runbook for the payment service is done. The new monitoring alerts are live. The incident response process has been documented. We are in better shape now.
+- category: segmentation
+  input: I reviewed the code and found three bugs and fixed two of them and the third one needs input from the backend team and I'll follow up tomorrow.
+  accepted:
+  - I reviewed the code and found 3 bugs. I fixed 2 of them. The third needs input from the backend team. I'll follow up tomorrow.
+- category: segmentation
+  input: I think the approach is solid the design doc covers the edge cases the implementation plan is realistic and the timeline accounts for testing so I would say we are ready to start.
+  accepted:
+  - I think the approach is solid. The design doc covers the edge cases. The implementation plan is realistic. The timeline accounts for testing. So I would say we are ready to start.
+  - I think the approach is solid. The design doc covers the edge cases. The implementation plan is realistic. The timeline accounts for testing. I would say we are ready to start.
+- category: segmentation
+  input: I want to flag something the CI pipeline has been flaky for the past week about one in five runs fails with a timeout and it is slowing down the whole team we should prioritize fixing it.
+  accepted:
+  - I want to flag something. The CI pipeline has been flaky for the past week. About 1 in 5 runs fails with a timeout. It is slowing down the whole team. We should prioritize fixing it.
+- category: segmentation
+  input: I wanted to bring up a few things the sprint velocity has dropped the backlog is growing and we have not had a retro in three weeks we should schedule one this Friday
+  accepted:
+  - I wanted to bring up a few things. The sprint velocity has dropped. The backlog is growing. We have not had a retro in 3 weeks. We should schedule one this Friday.
+- category: segmentation
+  input: I wanted to flag a couple of things the SSL certificate expires in two weeks the API rate limits need adjusting and the monitoring dashboard has stale data so we should tackle these before the release
+  accepted:
+  - I wanted to flag a couple of things. The SSL certificate expires in 2 weeks. The API rate limits need adjusting. The monitoring dashboard has stale data. So we should tackle these before the release.
+  - I wanted to flag a couple of things. The SSL certificate expires in 2 weeks. The API rate limits need adjusting. The monitoring dashboard has stale data. We should tackle these before the release.
+- category: segmentation
+  input: Let me walk through the quarter one area at a time on the product side. Onboarding is live and converse conversion is slowly improving though not as fast as we hoped on the infrastructure or on infrastructure the migration is done and the system has been rock solid since on the team we made three hires and everyone has ramped up well on the roadmap I think we should be a little more conservative next quarter and really focus on quality over quantity
+  accepted:
+  - Let me walk through the quarter one area at a time. On the product side, onboarding is live. Conversion is slowly improving, though not as fast as we hoped. On the infrastructure, the migration is done. The system has been rock solid since. On the team, we made three hires. Everyone has ramped up well. On the roadmap, I think we should be a little more conservative next quarter and really focus on quality over quantity.
+  - Let me walk through the quarter one area at a time. On the product side, onboarding is live and conversion is slowly improving, though not as fast as we hoped. On the infrastructure, the migration is done and the system has been rock solid since. On the team, we made three hires and everyone has ramped up well. On the roadmap, I think we should be a little more conservative next quarter and really focus on quality over quantity.
+- category: segmentation
+  input: Okay so here is the context we migrated the database on Friday the migration went smoothly but we noticed some slow queries on Monday and by Tuesday the alerts started firing.
+  accepted:
+  - Here is the context. We migrated the database on Friday. The migration went smoothly. But we noticed some slow queries on Monday. By Tuesday the alerts started firing.
+  - Here is the context. We migrated the database on Friday. The migration went smoothly, but we noticed some slow queries on Monday. By Tuesday the alerts started firing.
+- category: segmentation
+  input: Okay, so here's the full picture on where we are. We finish the migration last week and everything is stable now. The new pipeline is processing about twice the volume it used to and the latency is down significantly we did hit a couple of snags with the caching layer that took a few days to sort out, but that's behind us now. The team is in good shape. Morale is high and I think we're well positioned for next quarter as long as we don't take too much at once and stay focused on the core roadmap
+  accepted:
+  - Here's the full picture on where we are. We finish the migration last week. Everything is stable now. The new pipeline is processing about twice the volume it used to. The latency is down significantly. We did hit a couple of snags with the caching layer that took a few days to sort out. But that's behind us now. The team is in good shape. Morale is high. I think we're well positioned for next quarter as long as we don't take too much at once and stay focused on the core roadmap.
+  - Here's the full picture on where we are. We finish the migration last week. Everything is stable now. The new pipeline is processing about twice the volume it used to. The latency is down significantly. We did hit a couple of snags with the caching layer that took a few days to sort out, but that's behind us now. The team is in good shape. Morale is high. I think we're well positioned for next quarter as long as we don't take too much at once and stay focused on the core roadmap.
+  - Okay, so here's the full picture on where we are. We finished the migration last week and everything is stable now. The new pipeline is processing about twice the volume it used to, and the latency is down significantly. We hit a couple of snags with the caching layer that took a few days to sort out, but that's behind us now. The team is in good shape. Morale is high, and I think we're well positioned for next quarter as long as we don't take too much at once and stay focused on the core roadmap.
+- category: segmentation
+  input: So I was looking at the metrics from last week and the conversion rate is up by twelve percent the bounce rate dropped and the average session duration increased by about thirty seconds which is a good sign.
+  accepted:
+  - I was looking at the metrics from last week. The conversion rate is up by 12%. The bounce rate dropped. The average session duration increased by about 30 seconds, which is a good sign.
+- category: segmentation
+  input: So the thing is um we tried three different approaches the first one worked but was too slow the second one had bugs and the third one is what we ended up shipping.
+  accepted:
+  - The thing is, we tried 3 different approaches. The first one worked but was too slow. The second one had bugs. The third one is what we ended up shipping.
+- category: segmentation
+  input: The results from the benchmark are um really promising the throughput increased by forty percent memory usage dropped by twenty percent and the cold start time went from eight seconds to under two.
+  accepted:
+  - The results from the benchmark are really promising. The throughput increased by 40%. Memory usage dropped by 20%. The cold start time went from 8 seconds to under 2.
+- category: segmentation
+  input: The short version is we tried to upgrade the cluster on Thursday it broke two downstream services we rolled back within an hour and nobody lost data but we need a better migration plan.
+  accepted:
+  - The short version is we tried to upgrade the cluster on Thursday. It broke 2 downstream services. We rolled back within 1 hour. Nobody lost data. But we need a better migration plan.
+  - The short version is we tried to upgrade the cluster on Thursday. It broke 2 downstream services. We rolled back within 1 hour. Nobody lost data, but we need a better migration plan.
+- category: segmentation
+  input: The user clicks the button and the form submits and then the server validates the input and returns a response and the UI updates.
+  accepted:
+  - The user clicks the button. The form submits. The server validates the input and returns a response. The UI updates.
+- category: segmentation
+  input: The user signs up and then we send a confirmation email and then they verify their account and then they can start using the app.
+  accepted:
+  - The user signs up. Then we send a confirmation email. They verify their account. Then they can start using the app.
+- category: segmentation
+  input: The way I see it we have two options either we rewrite the module from scratch which would take about three weeks or we patch the existing code and live with some tech debt for now I think the patch makes more sense given the deadline.
+  accepted:
+  - The way I see it, we have 2 options. Either we rewrite the module from scratch, which would take about 3 weeks, or we patch the existing code and live with some tech debt for now. I think the patch makes more sense given the deadline.
+- category: segmentation
+  input: There's a whole list of things I want to flag from testing this week. The search is slow when you have a lot of results. The filters don't persist when you navigate away and come back. The export sometimes times out on large data sets the mobile layout breaks on smaller screens. The error messages are still too vague to be useful. Notifications O occasionally fire twice and the settings page doesn't save your preferences reliably, so there's a fair amount of cleanup we need to prioritize before we call this done
+  accepted:
+  - There's a whole list of things I want to flag from testing this week. The search is slow when you have a lot of results. The filters don't persist when you navigate away and come back. The export sometimes times out on large data sets. The mobile layout breaks on smaller screens. The error messages are still too vague to be useful. Notifications occasionally fire twice. The settings page doesn't save your preferences reliably. So there's a fair amount of cleanup we need to prioritize before we call this done.
+  - There's a whole list of things I want to flag from testing this week. The search is slow when you have a lot of results. The filters don't persist when you navigate away and come back. The export sometimes times out on large data sets. The mobile layout breaks on smaller screens. The error messages are still too vague to be useful. Notifications occasionally fire twice. The settings page doesn't save your preferences reliably. There's a fair amount of cleanup we need to prioritize before we call this done.
+  - There's a whole list of things I want to flag from testing this week. The search is slow when you have a lot of results. The filters don't persist when you navigate away and come back. The export sometimes times out on large data sets. The mobile layout breaks on smaller screens. The error messages are still too vague to be useful. Notifications occasionally fire twice. And the settings page doesn't save your preferences reliably, so there's a fair amount of cleanup we need to prioritize before we call this done.
+- category: segmentation
+  input: Um a couple of updates from my side I finished the PR for the auth flow I started looking into the caching issue and I also reviewed Sams pull request on the dashboard.
+  accepted:
+  - A couple of updates from my side. I finished the PR for the auth flow. I started looking into the caching issue. I also reviewed Sam's pull request on the dashboard.
+- category: segmentation
+  input: We deployed on Friday and the tests failed and we rolled back and then on Monday we fixed it and redeployed.
+  accepted:
+  - We deployed on Friday. The tests failed. We rolled back. On Monday we fixed it and redeployed.
+  - We deployed on Friday, and the tests failed. We rolled back. On Monday we fixed it and redeployed.
+- category: segmentation
+  input: What happened was the deploy script ran fine but the health check timed out so the rollback triggered automatically and then we found out the health check endpoint had a bug in it.
+  accepted:
+  - What happened was the deploy script ran fine. But the health check timed out. So the rollback triggered automatically. Then we found out the health check endpoint had a bug in it.
+- category: segmentation
+  input: Yeah so I had a call with the client this morning they are happy with the progress but they want us to add a dark mode option and they also asked about the mobile app timeline.
+  accepted:
+  - I had a call with the client this morning. They are happy with the progress. But they want us to add a dark mode option. They also asked about the mobile app timeline.
+  - I had a call with the client this morning. They are happy with the progress, but they want us to add a dark mode option. They also asked about the mobile app timeline.
+- category: segmentation
+  input: a quick summary the frontend tests pass the backend tests have two flaky failures the integration tests are green and the performance tests exceeded the targets
+  accepted:
+  - A quick summary. The frontend tests pass. The backend tests have 2 flaky failures. The integration tests are green. The performance tests exceeded the targets.
+- category: segmentation
+  input: here is the rundown the outage started at two AM it affected about ten thousand users the root cause was a memory leak in the connection pool and the fix took roughly ninety minutes to deploy
+  accepted:
+  - Here is the rundown. The outage started at 2 AM. It affected about 10,000 users. The root cause was a memory leak in the connection pool. The fix took roughly 90 minutes to deploy.
+- category: segmentation
+  input: here is what happened the build server ran out of disk space the pipeline stopped working and no one noticed for three hours so we need to add disk monitoring
+  accepted:
+  - Here is what happened. The build server ran out of disk space. The pipeline stopped working. No one noticed for 3 hours. So we need to add disk monitoring.
+  - Here is what happened. The build server ran out of disk space. The pipeline stopped working. No one noticed for 3 hours. We need to add disk monitoring.
+- category: segmentation
+  input: let me explain the situation the vendor changed their API without notice our integration broke and we had to scramble to fix it so we need a better alerting setup for external dependencies
+  accepted:
+  - Let me explain the situation. The vendor changed their API without notice. Our integration broke. We had to scramble to fix it. So we need a better alerting setup for external dependencies.
+  - Let me explain the situation. The vendor changed their API without notice. Our integration broke. We had to scramble to fix it. We need a better alerting setup for external dependencies.
+- category: segmentation
+  input: let me share what we found the load balancer was misconfigured the health checks were hitting the wrong port and the SSL certificate had expired three days ago
+  accepted:
+  - Let me share what we found. The load balancer was misconfigured. The health checks were hitting the wrong port. The SSL certificate had expired 3 days ago.
+- category: segmentation
+  input: one thing to mention the deployment window was too short the rollout started at eleven PM but the health checks took longer than expected and then we hit a configuration error so the whole thing took four hours instead of one
+  accepted:
+  - One thing to mention. The deployment window was too short. The rollout started at 11 PM. But the health checks took longer than expected. Then we hit a configuration error. So the whole thing took 4 hours instead of 1.
+  - One thing to mention. The deployment window was too short. The rollout started at 11 PM, but the health checks took longer than expected. Then we hit a configuration error. The whole thing took 4 hours instead of 1.
+- category: segmentation
+  input: so be it the timeline is what it is the frontend is done the backend needs two more days and we cannot ship without the security review so Friday is the earliest we can release
+  accepted:
+  - So be it, the timeline is what it is. The frontend is done. The backend needs 2 more days. We cannot ship without the security review. So Friday is the earliest we can release.
+- category: segmentation
+  input: so here is the situation the cache server went down on Monday we switched to the backup instance and by Wednesday traffic was back to normal
+  accepted:
+  - Here is the situation. The cache server went down on Monday. We switched to the backup instance. By Wednesday traffic was back to normal.
+- category: segmentation
+  input: so the bottom line is the service is stable the error rate is back to normal and the root cause has been identified
+  accepted:
+  - The bottom line is the service is stable. The error rate is back to normal. The root cause has been identified.
+- category: segmentation
+  input: so what happened is the cache expired the requests started hitting the database directly and the response times spiked to over three seconds
+  accepted:
+  - What happened is the cache expired. The requests started hitting the database directly. The response times spiked to over 3 seconds.
+- category: segmentation
+  input: the database backup completed at midnight the restore test passed and then we ran the integrity checks everything looks good
+  accepted:
+  - The database backup completed at midnight. The restore test passed. Then we ran the integrity checks. Everything looks good.
+- category: segmentation
+  input: the issue was the migration script ran correctly but the index rebuild took longer than expected so the service was slow for about an hour and then we realized the connection pool was too small
+  accepted:
+  - The issue was the migration script ran correctly. But the index rebuild took longer than expected. So the service was slow for about an hour. Then we realized the connection pool was too small.
+  - The issue was the migration script ran correctly, but the index rebuild took longer than expected. The service was slow for about an hour. Then we realized the connection pool was too small.
+- category: segmentation
+  input: the refactoring went well we reduced the code by about thirty percent the test coverage went up to ninety two percent and then we noticed the build time actually decreased by forty percent which was a nice bonus
+  accepted:
+  - The refactoring went well. We reduced the code by about 30%. The test coverage went up to 92%. Then we noticed the build time actually decreased by 40%, which was a nice bonus.
+- category: segmentation
+  input: the results from the benchmark are um really promising the throughput increased by forty percent memory usage dropped by twenty percent and the cold start time went from eight seconds to under
+  accepted:
+  - The results from the benchmark are really promising. The throughput increased by 40%. Memory usage dropped by 20%. The cold start time went from 8 seconds to under.
+- category: segmentation
+  input: the staging environment is ready the feature branch has been merged and all the regression tests pass can we go ahead and deploy to production
+  accepted:
+  - The staging environment is ready. The feature branch has been merged. All the regression tests pass. Can we go ahead and deploy to production?
+- category: segmentation
+  input: the test suite ran for forty five minutes it found three critical bugs we fixed two of them and the third one needs more investigation
+  accepted:
+  - The test suite ran for 45 minutes. It found 3 critical bugs. We fixed 2 of them. The third one needs more investigation.
+- category: segmentation
+  input: the update went well the new version is deployed the old endpoints are deprecated and all the clients have been migrated so we can decommission the legacy server next week
+  accepted:
+  - The update went well. The new version is deployed. The old endpoints are deprecated. All the clients have been migrated. So we can decommission the legacy server next week.
+  - The update went well. The new version is deployed. The old endpoints are deprecated. All the clients have been migrated. We can decommission the legacy server next week.
+- category: segmentation
+  input: um a quick update from me I merged the logging fix I set up the staging environment and I paired with Riley on the API redesign
+  accepted:
+  - A quick update from me. I merged the logging fix. I set up the staging environment. I paired with Riley on the API redesign.
+- category: segmentation
+  input: we are gonna need more capacity the traffic is growing by about twenty percent month over month the current setup handles fifty thousand requests per second and we are already at seventy percent utilization so we need to scale before next quarter
+  accepted:
+  - We are gonna need more capacity. The traffic is growing by about 20% month over month. The current setup handles 50,000 requests per second. We are already at 70% utilization. So we need to scale before next quarter.
+  - We are gonna need more capacity. The traffic is growing by about 20% month over month. The current setup handles 50,000 requests per second. We are already at 70% utilization. We need to scale before next quarter.
+- category: segmentation
+  input: we deployed the hotfix on Tuesday it reduced the error rate from five percent to under one percent and then the product team confirmed the issue was resolved
+  accepted:
+  - We deployed the hotfix on Tuesday. It reduced the error rate from 5% to under 1%. Then the product team confirmed the issue was resolved.
+- category: segmentation
+  input: we shipped the feature on Wednesday it got positive feedback from beta testers the crash rate stayed flat and we saw a fifteen percent increase in engagement
+  accepted:
+  - We shipped the feature on Wednesday. It got positive feedback from beta testers. The crash rate stayed flat. We saw a 15% increase in engagement.
+- category: segmentation
+  input: yeah so we tried to deploy on Monday but the build failed so we fixed it and redeployed on Tuesday and everything went smoothly
+  accepted:
+  - We tried to deploy on Monday. But the build failed. We fixed it and redeployed on Tuesday. Everything went smoothly.
+  - We tried to deploy on Monday, but the build failed. We fixed it and redeployed on Tuesday. Everything went smoothly.
 - category: small-number
   input: we need three developers on this
   accepted:
@@ -1098,10 +1987,6 @@
   - The error only happens in production.
   - Right, the error only happens in production.
 - category: thinking
-  input: uh huh so the meeting is at 3
-  accepted:
-  - The meeting is at 3.
-- category: thinking
   input: uh let me think okay yes the config file is wrong
   accepted:
   - The config file is wrong.
@@ -1118,10 +2003,6 @@
   accepted:
   - Send it to john@example.com
   - Send it to john@example.com.
-- category: url
-  input: the API endpoint is slash API slash v2 slash users
-  accepted:
-  - The API endpoint is /api/v2/users.
 - category: vocab
   input: the bug was reported by priya from the bangalore team
   accepted:
@@ -1147,263 +2028,6 @@
   input: we're switching from redis to memcached for session storage
   accepted:
   - We're switching from Redis to Memcached for session storage.
-- category: asr-backtrack
-  input: The deployment is scheduled for Thursday. No wait Friday at 3 p.m. Please
-    make sure all the tests pass before then.
-  accepted:
-  - The deployment is scheduled for Friday at 3 PM. Please make sure all the tests
-    pass before then.
-  - The deployment is scheduled for Friday at 3 p.m. Please make sure all the tests
-    pass before then.
-- category: asr-preserve
-  input: The CI pipeline runs in three stages. First, it compiles the code, then it
-    runs the test suite, and finally it deploys to staging. Each stage has a five
-    minute timeout.
-  accepted:
-  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the
-    test suite, and finally it deploys to staging. Each stage has a 5-minute timeout.
-  - The CI pipeline runs in three stages. First, it compiles the code, then it runs
-    the test suite, and finally it deploys to staging. Each stage has a five-minute
-    timeout.
-  - The CI pipeline runs in 3 stages. First, it compiles the code, then it runs the
-    test suite, and finally it deploys to staging. Each stage has a 5 minute timeout.
-- category: asr-false-start
-  input: We should probably actually know let me think rethink this. The best approach
-    would be to add a retry mechanism with exponential back off. That way we It won't
-    overwhelm the server during peak hours.
-  accepted:
-  - The best approach would be to add a retry mechanism with exponential backoff.
-    That way it won't overwhelm the server during peak hours.
-- category: asr-backtrack
-  input: The timeout should be set to 30 uh no 60 seconds and we should add a health
-    check-in point that runs every five minutes.
-  accepted:
-  - The timeout should be set to 60 seconds. We should add a health check-in point
-    that runs every 5 minutes.
-  - The timeout should be set to 60 seconds, and we should add a health check-in point
-    that runs every 5 minutes.
-  - The timeout should be set to 60 seconds and we should add a health check-in point
-    that runs every 5 minutes.
-- category: asr-correction
-  input: The sour response time is about 500 milliseconds. Um I mean five seconds.
-    That's way too slow for a real-time application. We need to get it under two hundred
-    milliseconds.
-  accepted:
-  - The sour response time is about 5 seconds. That's way too slow for a real-time
-    application. We need to get it under 200 milliseconds.
-- category: asr-preserve
-  input: The monitoring dashboard shows three critical alerts. The primary database
-    is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%.
-    Two of the application servers are returning 500 errors on the checkout endpoint.
-    I've already page the on-call engineer and they're looking into it.
-  accepted:
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running
-    at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the
-    application servers are returning 500 errors on the checkout endpoint. I've already
-    paged the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows three critical alerts. The primary database is
-    running at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two
-    of the application servers are returning 500 errors on the checkout endpoint.
-    I've already paged the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running
-    at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application
-    servers are returning 500 errors on the checkout endpoint. I've already paged
-    the on-call engineer, and they're looking into it.
-- category: asr-correction
-  input: We had about twelve hundred active users last month. Uh sorry, I mean twelve
-    thousand. Revenue was up fifteen percent compared to Q three. The churn rate stayed.
-    Flat at around three point five percent.
-  accepted:
-  - We had about 12,000 active users last month. Revenue was up 15% compared to Q3.
-    The churn rate stayed flat at around 3.5%.
-- category: asr-backtrack
-  input: Honestly, this is the best architecture decision we've made all year. The
-    microservices approach was killing us with latency. Going back to a monolith for
-    the core services was absolutely the wrong. Right call.
-  accepted:
-  - This is the best architecture decision we've made all year. The microservices
-    approach was killing us with latency. Going back to a monolith for the core services
-    was absolutely the right call.
-  - Honestly, this is the best architecture decision we've made all year. The microservices
-    approach was killing us with latency. Going back to a monolith for the core services
-    was absolutely the right call.
-- category: asr-punctuation
-  input: Please send the update to the team dash and make sure to CC the project manager.
-    The deadline is Friday, comma. So don't wait until the last minute.
-  accepted:
-  - Please send the update to the team — and make sure to CC the project manager.
-    The deadline is Friday, so don't wait until the last minute.
-- category: asr-preserve
-  input: Okay, so here's the plan for tomorrow. First we'll deploy the database changes
-    during the maintenance window. Then once that's stable, we'll push the new API
-    version. And finally we'll update the client SDK and send out the migration guide.
-  accepted:
-  - Here's the plan for tomorrow. First, we'll deploy the database changes during
-    the maintenance window. Then once that's stable, we'll push the new API version.
-    Finally, we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First we'll deploy the database changes during the
-    maintenance window. Then once that's stable, we'll push the new API version. And
-    finally we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First, we'll deploy the database changes during
-    the maintenance window. Once that's stable, we'll push the new API version. Finally,
-    we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First, we'll deploy the database changes during
-    the maintenance window. Then, once that's stable, we'll push the new API version.
-    Finally, we'll update the client SDK and send out the migration guide.
-  - Here's the plan for tomorrow. First we'll deploy the database changes during the
-    maintenance window. Once that's stable, we'll push the new API version. And finally
-    we'll update the client SDK and send out the migration guide.
-- category: asr-preserve
-  input: The monitoring dashboard shows three critical alerts. The primary database
-    is running at 95% CPU usage. The redis cash hit rate dropped from 98% to 62%.
-    Two of the application servers are returning 500 errors on the checkout endpoint.
-    I've already page the on-call engineer and they're looking into it.
-  accepted:
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running
-    at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the
-    application servers are returning 500 errors on the checkout endpoint. I've already
-    paged the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running
-    at 95% CPU usage. The Redis cash hit rate dropped from 98% to 62%. Two of the
-    application servers are returning 500 errors on the checkout endpoint. I've already
-    page the on-call engineer and they're looking into it.
-  - The monitoring dashboard shows 3 critical alerts. The primary database is running
-    at 95% CPU usage. The Redis cache hit rate dropped from 98% to 62%. 2 of the application
-    servers are returning 500 errors on the checkout endpoint. I already paged the
-    on-call engineer, and they're looking into it.
-- category: asr-backtrack
-  input: We should deploy to staging. Actually no, deploy to production. The hotfix
-    needs to go out immediately.
-  accepted:
-  - We should deploy to production. The hotfix needs to go out immediately.
-  - Deploy to production. The hotfix needs to go out immediately.
-- category: asr-preserve
-  input: The database cluster has five nodes across three availability zones. Two
-    are configured as primaries and three as read replicas. The replication lag is
-    consistently under 50 milliseconds. We can handle an automated failover in under
-    ten seconds.
-  accepted:
-  - The database cluster has 5 nodes across 3 availability zones. Two are configured
-    as primaries and 3 as read replicas. The replication lag is consistently under
-    50 milliseconds. We can handle an automated failover in under 10 seconds.
-- category: asr-ampm
-  input: The meeting is at 3 p.m. sharp in the main conference room.
-  accepted:
-  - The meeting is at 3 PM sharp in the main conference room.
-- category: asr-ampm
-  input: The maintenance window starts at 2 a.m. tomorrow and ends at 6 a.m. We should
-    have the migration done by then.
-  accepted:
-  - The maintenance window starts at 2 AM tomorrow and ends at 6 AM. We should have
-    the migration done by then.
-- category: asr-ampm
-  input: The deploy went out at 4 p.m. yesterday. We started seeing errors around
-    5 p.m. The rollback was complete by 6 p.m.
-  accepted:
-  - The deploy went out at 4 PM yesterday. We started seeing errors around 5 PM. The
-    rollback was complete by 6 PM.
-- category: asr-backtrack
-  input: The bug is in the auth service. Wait, no, it's in the gateway. We need to
-    check the request routing logic.
-  accepted:
-  - The bug is in the gateway. We need to check the request routing logic.
-- category: asr-backtrack
-  input: Let's use MySQL. Scratch that, PostgreSQL is a better fit. It has better
-    support for JSON columns.
-  accepted:
-  - Let's use PostgreSQL. It has better support for JSON columns.
-  - PostgreSQL is a better fit. It has better support for JSON columns.
-- category: asr-backtrack
-  input: The cache TTL should be five minutes. Actually, make it ten minutes. We don't
-    want to hit the database too often.
-  accepted:
-  - The cache TTL should be 10 minutes. We don't want to hit the database too often.
-- category: asr-preserve
-  input: The incident response plan has four stages. Detection happens through automated
-    monitoring alerts. Triage determines the severity and assigns the on-call engineer.
-    Mitigation focuses on reducing customer impact as quickly as possible.
-  accepted:
-  - The incident response plan has 4 stages. Detection happens through automated monitoring
-    alerts. Triage determines the severity and assigns the on-call engineer. Mitigation
-    focuses on reducing customer impact as quickly as possible.
-- category: asr-preserve
-  input: The new API gateway handles authentication, rate limiting, and request routing.
-    It supports both REST and GraphQL endpoints. Average latency added by the gateway
-    is under five milliseconds. We've been running it in shadow mode for two weeks
-    with no issues.
-  accepted:
-  - The new API gateway handles authentication, rate limiting, and request routing.
-    It supports both REST and GraphQL endpoints. Average latency added by the gateway
-    is under 5 milliseconds. We've been running it in shadow mode for 2 weeks with
-    no issues.
-- category: asr-preserve
-  input: We migrated from AWS to GCP last quarter. The main drivers were cost savings
-    and better Kubernetes support. Total migration took about six weeks. The only
-    issue was reconfiguring the CDN which added an extra three days.
-  accepted:
-  - We migrated from AWS to GCP last quarter. The main drivers were cost savings and
-    better Kubernetes support. Total migration took about 6 weeks. The only issue
-    was reconfiguring the CDN, which added an extra 3 days.
-- category: asr-ampm
-  input: The on-call rotation starts at 9 a.m. Monday and ends at 9 a.m. the following
-    Monday.
-  accepted:
-  - The on-call rotation starts at 9 AM Monday and ends at 9 AM the following Monday.
-- category: asr-ampm
-  input: We noticed the CPU spike at 11 p.m. last night. By 1 a.m. the service had
-    fully recovered.
-  accepted:
-  - We noticed the CPU spike at 11 PM last night. By 1 AM the service had fully recovered.
-  - We noticed the CPU spike at 11 PM last night. By 1 AM, the service had fully recovered.
-- category: asr-ampm
-  input: The batch job runs at 4 a.m. daily and processes about fifty thousand records.
-  accepted:
-  - The batch job runs at 4 AM daily and processes about 50,000 records.
-- category: asr-correction
-  input: The timeout is set to thirty seconds. I mean thirty minutes. That's way too
-    long for a health check.
-  accepted:
-  - The timeout is set to 30 minutes. That's way too long for a health check.
-- category: asr-correction
-  input: We deployed to the staging region. Sorry I mean the production region. The
-    latency requirements are different for live traffic.
-  accepted:
-  - We deployed to the production region. The latency requirements are different for
-    live traffic.
-- category: asr-discourse
-  input: Like, the main issue is that the database queries are not optimized. We need
-    to add proper indexing.
-  accepted:
-  - The main issue is that the database queries are not optimized. We need to add
-    proper indexing.
-- category: asr-discourse
-  input: So basically, the authentication flow is broken because the token refresh
-    endpoint returns a 500 error.
-  accepted:
-  - The authentication flow is broken because the token refresh endpoint returns a
-    500 error.
-- category: asr-discourse
-  input: You know, the real problem is that we don't have enough monitoring in place.
-    We need better observability.
-  accepted:
-  - The real problem is that we don't have enough monitoring in place. We need better
-    observability.
-- category: asr-correction-long
-  input: The cluster has eight nodes. I mean sixteen nodes. We doubled the capacity
-    after the holiday traffic spike. The auto scaling policy triggers at 70% memory
-    utilization.
-  accepted:
-  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike.
-    The auto scaling policy triggers at 70% memory utilization.
-  - The cluster has 16 nodes. We doubled the capacity after the holiday traffic spike.
-    The auto-scaling policy triggers at 70% memory utilization.
-- category: asr-correction-long
-  input: The database has about two hundred tables. Sorry I mean two thousand tables.
-    Most of them are legacy and haven't been accessed in months. We need to audit
-    and clean up the unused ones.
-  accepted:
-  - The database has about 2,000 tables. Most of them are legacy and haven't been
-    accessed in months. We need to audit and clean up the unused ones.
 - category: word-boundary
   input: Deploy two staging and run the tests
   accepted:
@@ -1412,147 +2036,3 @@
   input: The Q depth is growing too fast
   accepted:
   - The queue depth is growing too fast.
-- category: punctuation-false-positive
-  input: We need to discuss the Oxford comma in our style guide
-  accepted:
-  - We need to discuss the Oxford comma in our style guide.
-- category: punctuation-false-positive
-  input: The doctor said he has a healthy colon
-  accepted:
-  - The doctor said he has a healthy colon.
-- category: punctuation-false-positive
-  input: She ran the third period of practice
-  accepted:
-  - She ran the 3rd period of practice.
-- category: paragraph-command
-  input: The deadline was moved to Friday new paragraph please update your tickets
-    accordingly
-  accepted:
-  - 'The deadline was moved to Friday.
-
-
-    Please update your tickets accordingly.'
-- category: paragraph-command
-  input: We discussed the new paragraph structure in the document
-  accepted:
-  - We discussed the new paragraph structure in the document.
-- category: continuation
-  input: Latency and throughput are the main concerns
-  precedingText: The main concerns are
-  accepted:
-  - latency and throughput are the main concerns.
-- category: continuation
-  input: Consider using a message queue instead
-  precedingText: I think we should
-  accepted:
-  - consider using a message queue instead.
-- category: filler-vs-content
-  input: Yeah I saw the PR and it looks good
-  accepted:
-  - Yeah, I saw the PR and it looks good.
-- category: filler-vs-content
-  input: Uh yeah I think we should deploy today
-  accepted:
-  - Yeah, I think we should deploy today.
-- category: dictated-punctuation-cmd
-  input: Fix the bug exclamation point.
-  accepted:
-  - Fix the bug!
-- category: dictated-punctuation-cmd
-  input: This is urgent exclamation mark.
-  accepted:
-  - This is urgent!
-- category: dictated-punctuation-cmd
-  input: The items are colon apples and bananas.
-  accepted:
-  - 'The items are: apples and bananas.'
-- category: dictated-punctuation-cmd
-  input: Please respond ASAP exclamation point.
-  accepted:
-  - Please respond ASAP!
-- category: dictated-punctuation-cmd
-  input: Note colon the deadline is Friday.
-  accepted:
-  - 'Note: the deadline is Friday.'
-  - 'Note: The deadline is Friday.'
-- category: dictated-punctuation-fp
-  input: The billing period ends on Friday.
-  accepted:
-  - The billing period ends on Friday.
-- category: dictated-punctuation-fp
-  input: The colon cancer screening is Monday.
-  accepted:
-  - The colon cancer screening is Monday.
-- category: dictated-punctuation-fp
-  input: She ran the 3rd period of practice.
-  accepted:
-  - She ran the 3rd period of practice.
-- category: dictated-punctuation-fp
-  input: The question mark key is broken.
-  accepted:
-  - The question mark key is broken.
-- category: dictated-punctuation-fp
-  input: Use a comma when listing items.
-  accepted:
-  - Use a comma when listing items.
-- category: paragraph-cmd
-  input: The deadline is Friday. New paragraph. Please update tickets.
-  accepted:
-  - 'The deadline is Friday.
-
-
-    Please update tickets.'
-  - 'The deadline is Friday.
-
-
-    Please update your tickets.'
-- category: paragraph-cmd
-  input: First point. New line. Second point.
-  accepted:
-  - 'First point.
-
-    Second point.'
-- category: paragraph-cmd
-  input: Send the report. New paragraph. Let me know if questions.
-  accepted:
-  - 'Send the report.
-
-
-    Let me know if questions.'
-  - 'Send the report.
-
-
-    Let me know if you have questions.'
-- category: paragraph-fp
-  input: We discussed the new paragraph structure.
-  accepted:
-  - We discussed the new paragraph structure.
-- category: paragraph-fp
-  input: Add a new line at the end of the file.
-  accepted:
-  - Add a new line at the end of the file.
-- category: paragraph-fp
-  input: Start a new paragraph after the intro.
-  accepted:
-  - Start a new paragraph after the intro.
-  - Start a new paragraph after the introduction.
-- category: backtrack-strict
-  input: Thirty no wait sixty seconds.
-  accepted:
-  - 60 seconds.
-- category: backtrack-strict
-  input: Deploy to staging. Actually no, production.
-  accepted:
-  - Deploy to production.
-- category: backtrack-strict
-  input: The timeout is 5. No make that 10 minutes.
-  accepted:
-  - The timeout is 10 minutes.
-- category: backtrack-strict
-  input: Use MySQL. Scratch that, PostgreSQL.
-  accepted:
-  - Use PostgreSQL.
-- category: backtrack-strict
-  input: We need 3. Actually 5 servers.
-  accepted:
-  - We need 5 servers.

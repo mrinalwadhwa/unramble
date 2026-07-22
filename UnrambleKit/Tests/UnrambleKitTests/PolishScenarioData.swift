@@ -4,8 +4,7 @@ import Foundation
 
 // ---------------------------------------------------------------------------
 // Shared test data for all polish scenario tests. Scenarios are loaded from
-// polish-tests.json (the single source of truth shared with the Python
-// training data generator).
+// polish-tests.json, generated from polish-tests.yaml by generate_test_data.py.
 //
 // Each scenario has a category, raw dictation input, and one or more
 // acceptable polished outputs. Optional style and preceding_text fields
@@ -64,16 +63,6 @@ struct PolishScenario {
 /// source file.
 let allScenarios: [PolishScenario] = loadScenarios(from: "polish-tests.json")
 
-/// All training scenarios loaded from polish-training-eval.json.
-///
-/// Used to evaluate the model against its own training data
-/// through the full Swift pipeline (preprocessing → model → postprocessing).
-let allTrainingScenarios: [PolishScenario] = loadScenarios(from: "polish-training-eval.json")
-
-/// P1 eval scenarios — curated set of cases that must be 100% correct.
-/// Covers: don't lose content, pass through clean input, handle ASR artifacts.
-let allP1Scenarios: [PolishScenario] = loadScenarios(from: "p1-eval-set.json")
-
 /// Load scenarios from a JSON file, applying environment-based filters.
 ///
 /// - `UNRAMBLE_TEST_CATEGORIES=list,meeting` — run only these categories
@@ -106,11 +95,10 @@ private func loadScenarios(from filename: String) -> [PolishScenario] {
     return scenarios
 }
 
-/// Choose between test and training scenarios based on environment.
+/// Choose which scenario set the model eval harness runs over.
 ///
-/// When `UNRAMBLE_TEST_TRAINING=1` is set (env var or flag file),
-/// return training scenarios. Otherwise return test scenarios. Applies
-/// the same category and casual filters.
+/// Pointed at a file via `UNRAMBLE_EVAL_FILE`, load that set; otherwise run
+/// over the full scenario set.
 func evalScenarios() -> [PolishScenario] {
     // Load an arbitrary eval set (ScenarioEntry JSON) when pointed at a file.
     if let path = flagFileOrEnv(
@@ -119,14 +107,6 @@ func evalScenarios() -> [PolishScenario] {
         let entries = try? JSONDecoder().decode([ScenarioEntry].self, from: data)
     {
         return entries.map(scenarioFromEntry)
-    }
-    if ProcessInfo.processInfo.environment["UNRAMBLE_TEST_P1"] == "1"
-        || FileManager.default.fileExists(atPath: "/tmp/unramble-test-p1") {
-        return allP1Scenarios
-    }
-    if ProcessInfo.processInfo.environment["UNRAMBLE_TEST_TRAINING"] == "1"
-        || FileManager.default.fileExists(atPath: "/tmp/unramble-test-training") {
-        return allTrainingScenarios
     }
     return allScenarios
 }

@@ -47,7 +47,7 @@ The default selection includes corpus-backed polish scenario tests and expects t
 cd training
 python3 -m venv ../.scratch/polish-data-venv
 ../.scratch/polish-data-venv/bin/pip install 'pyyaml>=6.0'
-../.scratch/polish-data-venv/bin/python generate_training_data.py --no-casual --split
+../.scratch/polish-data-venv/bin/python generate_test_data.py
 ```
 
 **Environment variable gates:**

@@ -52,9 +52,8 @@ verify-models: $(MODEL_TOOL)
 verify-app-models: $(MODEL_TOOL)
 	@"$(MODEL_TOOL)" verify "$(APP_PATH)/Contents/Resources/models"
 
-# Generate training data from YAML, then train a LoRA adapter
+# Train the LoRA adapter for the on-device polish model.
 train:
-	@cd training && python3 generate_training_data.py --no-casual --split
 	@cd training && python3 -u -m mlx_lm.lora --config lora-config.yaml
 
 # Build the app after an offline model-pack verification.
