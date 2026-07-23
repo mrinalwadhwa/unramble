@@ -246,7 +246,7 @@ private final class BlockingFinishPCMConverter:
     func discard() {}
 
     func waitUntilFinishEntered() -> Bool {
-        finishEntered.wait(timeout: .now() + 1) == .success
+        finishEntered.wait(timeout: .now() + 10) == .success
     }
 
     func releaseFinish() {

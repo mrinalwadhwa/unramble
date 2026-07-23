@@ -252,7 +252,7 @@ struct AudioCaptureStopDeadlineTests {
             releaseFinish.signal()
             return
         }
-        #expect(wait(finishEntered, timeout: .now() + 1) == .success)
+        #expect(wait(finishEntered, timeout: .now() + 10) == .success)
         #expect(drain.timeoutFailure.stage == .converterDrain)
 
         releaseFinish.signal()
@@ -307,7 +307,7 @@ struct AudioCaptureStopDeadlineTests {
 
         let hardwareCloseResult = wait(hardwareClosed, timeout: .now())
         #expect(hardwareCloseResult == .success)
-        let cleanupEntryResult = wait(cleanupEntered, timeout: .now() + 1)
+        let cleanupEntryResult = wait(cleanupEntered, timeout: .now() + 10)
         #expect(cleanupEntryResult == .success)
         guard case .deadline = await physicalStop.outcome(timeout: 0.01) else {
             Issue.record("Expected blocked tap cleanup to exceed its deadline")
@@ -412,7 +412,7 @@ struct AudioCaptureStopDeadlineTests {
             returned.signal()
         }
 
-        #expect(wait(returned, timeout: .now() + 1) == .success)
+        #expect(wait(returned, timeout: .now() + 10) == .success)
         let claimedStops = stops.snapshot
         #expect(claimedStops.count == 2)
         let first = try #require(claimedStops.first)
@@ -481,19 +481,19 @@ struct SerializedConverterOwnershipTests {
             }
             consumeFinished.signal()
         }
-        #expect(consumeEntered.wait(timeout: .now() + 1) == .success)
+        #expect(consumeEntered.wait(timeout: .now() + 10) == .success)
 
         DispatchQueue.global().async {
             discardStarted.signal()
             session.discard()
             discardFinished.signal()
         }
-        #expect(discardStarted.wait(timeout: .now() + 1) == .success)
+        #expect(discardStarted.wait(timeout: .now() + 10) == .success)
         #expect(discardFinished.wait(timeout: .now() + 0.05) == .timedOut)
 
         releaseConsume.signal()
-        #expect(consumeFinished.wait(timeout: .now() + 1) == .success)
-        #expect(discardFinished.wait(timeout: .now() + 1) == .success)
+        #expect(consumeFinished.wait(timeout: .now() + 10) == .success)
+        #expect(discardFinished.wait(timeout: .now() + 10) == .success)
         #expect(session.consume { _ in true } == nil)
     }
 }

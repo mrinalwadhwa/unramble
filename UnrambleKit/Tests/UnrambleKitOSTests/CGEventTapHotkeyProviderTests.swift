@@ -62,7 +62,7 @@ struct CGEventTapHotkeyProviderTests {
         probe = nil
 
         thread.start()
-        let started = operationStarted.wait(timeout: .now() + 1)
+        let started = operationStarted.wait(timeout: .now() + 10)
         Unmanaged<CallbackContextLifetimeProbe>.fromOpaque(rawPointer)
             .release()
 

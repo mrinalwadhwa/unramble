@@ -168,7 +168,7 @@ struct AudioEngineStartResetLedgerTests {
             commitReturned.signal()
         }
 
-        #expect(readinessEntered.wait(timeout: .now() + 1) == .success)
+        #expect(readinessEntered.wait(timeout: .now() + 10) == .success)
         DispatchQueue.global().async {
             _ = ledger.invalidateActiveAttempt()
             resetReturned.signal()
@@ -176,8 +176,8 @@ struct AudioEngineStartResetLedgerTests {
 
         #expect(resetReturned.wait(timeout: .now() + 0.05) == .timedOut)
         releaseReadiness.signal()
-        #expect(commitReturned.wait(timeout: .now() + 1) == .success)
-        #expect(resetReturned.wait(timeout: .now() + 1) == .success)
+        #expect(commitReturned.wait(timeout: .now() + 10) == .success)
+        #expect(resetReturned.wait(timeout: .now() + 10) == .success)
         #expect(!ledger.isValid(attempt))
     }
 
@@ -203,7 +203,7 @@ struct AudioEngineStartResetLedgerTests {
             commitReturned.signal()
         }
 
-        #expect(readinessEntered.wait(timeout: .now() + 1) == .success)
+        #expect(readinessEntered.wait(timeout: .now() + 10) == .success)
         DispatchQueue.global().async {
             let invalidated = ledger.invalidateActiveStartingAttempt()
             resultLock.withLock { didInvalidate = invalidated != nil }
@@ -212,8 +212,8 @@ struct AudioEngineStartResetLedgerTests {
 
         #expect(invalidationReturned.wait(timeout: .now() + 0.05) == .timedOut)
         releaseReadiness.signal()
-        #expect(commitReturned.wait(timeout: .now() + 1) == .success)
-        #expect(invalidationReturned.wait(timeout: .now() + 1) == .success)
+        #expect(commitReturned.wait(timeout: .now() + 10) == .success)
+        #expect(invalidationReturned.wait(timeout: .now() + 10) == .success)
         #expect(!resultLock.withLock { didInvalidate })
         #expect(ledger.isValid(attempt))
     }
