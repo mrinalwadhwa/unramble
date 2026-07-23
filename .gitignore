@@ -24,10 +24,12 @@ xcuserdata/
 # Swift Package Manager
 .build/
 Packages/
-# Derived resolution: it flip-flops between package (swift build/test) and app
-# (xcodebuild) resolutions. Versions are exact-pinned in Package.swift and
-# project.yml, so this is redundant — keep it untracked.
+# Ignore resolved files by default, but track the SwiftPM package's so the
+# offline test lane (swift test --disable-automatic-resolution) has a pinned
+# resolved file to read. Xcode can rewrite it during a build; commit only the
+# swift-test form that CI reads.
 Package.resolved
+!UnrambleKit/Package.resolved
 
 # CocoaPods
 Pods/
