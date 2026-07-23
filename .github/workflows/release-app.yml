@@ -7,35 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: macos-26
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
-      TEST_LOG_DIR: ${{ github.workspace }}/unramble-test-runs
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          persist-credentials: false
-
-      - name: Report Swift toolchain
-        run: swift --version
-
-      - name: Generate polish scenario data
-        run: make test-data
-
-      - name: Run tests
-        run: make test-ci
-
-      - name: Print full test logs
-        if: always()
-        run: scripts/print-test-logs.sh
-
+  # Package tests run in tests.yml, not as a release gate.
   build-and-release:
-    needs: test
     runs-on: macos-26
     environment: release
     permissions:
