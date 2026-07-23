@@ -47,22 +47,4 @@ jobs:
 
       - name: Print full test logs
         if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! -d "$TEST_LOG_DIR" ]]; then
-            printf 'No test log directory was created.\n'
-            exit 0
-          fi
-
-          found=0
-          while IFS= read -r log; do
-            found=1
-            printf '::group::%s\n' "$log"
-            cat "$log"
-            printf '::endgroup::\n'
-          done < <(find "$TEST_LOG_DIR" -type f -name swift-test.log -print | sort)
-
-          if (( found == 0 )); then
-            printf 'No Swift test logs were created.\n'
-          fi
+        run: scripts/print-test-logs.sh

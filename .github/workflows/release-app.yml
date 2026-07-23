@@ -32,25 +32,7 @@ jobs:
 
       - name: Print full test logs
         if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! -d "$TEST_LOG_DIR" ]]; then
-            printf 'No test log directory was created.\n'
-            exit 0
-          fi
-
-          found=0
-          while IFS= read -r log; do
-            found=1
-            printf '::group::%s\n' "$log"
-            cat "$log"
-            printf '::endgroup::\n'
-          done < <(find "$TEST_LOG_DIR" -type f -name swift-test.log -print | sort)
-
-          if (( found == 0 )); then
-            printf 'No Swift test logs were created.\n'
-          fi
+        run: scripts/print-test-logs.sh
 
   build-and-release:
     needs: test
@@ -89,28 +71,7 @@ jobs:
         env:
           DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
           DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
-          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          CERT_PATH="$RUNNER_TEMP/certificate.p12"
-          echo "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
-          security import "$CERT_PATH" \
-            -k "$KEYCHAIN_PATH" \
-            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security
-          rm -f "$CERT_PATH"
-
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
-
-          echo "KEYCHAIN_PATH=${KEYCHAIN_PATH}" >> "$GITHUB_ENV"
+        run: scripts/ci-import-cert.sh
 
       - name: Archive release build
         run: make archive KEYCHAIN="$KEYCHAIN_PATH"
@@ -126,16 +87,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: |
-          API_KEY_PATH="$RUNNER_TEMP/api-key.p8"
-          echo "$APPLE_API_KEY" | base64 --decode > "$API_KEY_PATH"
-
-          xcrun notarytool store-credentials "unramble-notarize" \
-            --key "$API_KEY_PATH" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID"
-
-          rm -f "$API_KEY_PATH"
+        run: scripts/ci-store-notary-credentials.sh
 
       - name: Notarize DMG
         run: make notarize
@@ -150,18 +102,7 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ steps.meta.outputs.tag }}"
-          PRERELEASE_FLAG=""
-          if [[ "$TAG" == *-rc.* ]]; then
-            PRERELEASE_FLAG="--prerelease"
-          fi
-          gh release create "$TAG" \
-            --title "Unramble ${TAG#v}" \
-            --generate-notes \
-            $PRERELEASE_FLAG \
-            releases/Unramble.dmg \
-            releases/appcast.xml
+        run: scripts/ci-publish-release.sh "${{ steps.meta.outputs.tag }}"
 
       - name: Clean up keychain
         if: always()
