@@ -229,3 +229,8 @@ endif
 # Print the version from Info.plist (used by CI)
 version:
 	@/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" UnrambleApp/Info.plist
+
+# Update the Homebrew cask after a release is published. Run once the GitHub
+# release and its DMG exist; uses your gh/git credentials for both repos.
+bump-cask:
+	@scripts/bump-cask.sh

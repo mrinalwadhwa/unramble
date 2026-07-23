@@ -130,6 +130,32 @@ dictation pipeline state machine, even the Realtime protocol message
 construction. The test suite covers every provider and pipeline stage so
 regressions are caught quickly.
 
+## Releasing
+
+Releases are cut by tag. The tag triggers signing, notarization, and the GitHub
+release; the Homebrew cask follows in a second step. Do all of this as someone
+with write access to both `mrinalwadhwa/unramble` and the tap.
+
+1. Bump the version in `UnrambleApp/Info.plist` (`CFBundleShortVersionString` and
+   `CFBundleVersion`), commit, and push.
+2. Tag and push the tag:
+
+       git tag v0.2.0
+       git push origin v0.2.0
+
+   The release workflow builds, signs with the Developer ID, notarizes and
+   staples the DMG, generates the Sparkle appcast, and creates the GitHub
+   release with the DMG and appcast attached.
+3. Once the release is published, update the Homebrew cask:
+
+       make bump-cask
+
+   This downloads the released DMG, computes its sha256, and pushes the new
+   version to the `homebrew-unramble` tap.
+
+The update feed at `unramble.computer/appcast.xml` proxies the latest release's
+appcast automatically, so there is no separate step for it.
+
 ## App icon
 
 The app icon is a 6-bar waveform squircle. The source SVG is
