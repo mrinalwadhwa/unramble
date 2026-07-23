@@ -110,8 +110,9 @@ $(PROJECT): project.yml
 # Release pipeline: archive → sign → dmg → notarize → staple → appcast
 # ---------------------------------------------------------------------------
 
-# Full release pipeline. Sub-makes preserve this order even under `make -j`.
-release:
+# Build a signed, notarized DMG + appcast locally (for debugging; releases are
+# built in CI). Sub-makes preserve this order even under `make -j`.
+build-dmg:
 	@$(MAKE) archive
 	@$(MAKE) sign
 	@$(MAKE) dmg
@@ -119,7 +120,7 @@ release:
 	@$(MAKE) appcast
 	@echo ""
 	@echo "══════════════════════════════════════════════════"
-	@echo "  Release complete!"
+	@echo "  Local DMG built"
 	@echo "  DMG:     $(DMG_PATH)"
 	@echo "  Appcast: $(RELEASE_DIR)/appcast.xml"
 	@echo "══════════════════════════════════════════════════"
@@ -234,3 +235,14 @@ version:
 # release and its DMG exist; uses your gh/git credentials for both repos.
 bump-cask:
 	@scripts/bump-cask.sh
+
+# Cut a release candidate: set the version (VERSION=x.y.z to change it), bump the
+# build number, and push a v<version>-rc.<n> tag so CI builds the signed,
+# notarized prerelease to test.
+release-candidate:
+	@VERSION="$(VERSION)" scripts/release-candidate.sh
+
+# Ship the tested candidate: promote its exact DMG to a v<version> release and
+# update the Homebrew tap. Errors if there is no candidate.
+release:
+	@scripts/release.sh

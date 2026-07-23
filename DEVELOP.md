@@ -132,26 +132,26 @@ regressions are caught quickly.
 
 ## Releasing
 
-Releases are cut by tag. The tag triggers signing, notarization, and the GitHub
-release; the Homebrew cask follows in a second step. Do all of this as someone
-with write access to both `mrinalwadhwa/unramble` and the tap.
+Two commands, run as someone with write access to both `mrinalwadhwa/unramble`
+and the tap. You ship the exact binary you tested.
 
-1. Bump the version in `UnrambleApp/Info.plist` (`CFBundleShortVersionString` and
-   `CFBundleVersion`), commit, and push.
-2. Tag and push the tag:
+1. **Cut a release candidate:**
 
-       git tag v0.2.0
-       git push origin v0.2.0
+       make release-candidate                 # keeps the current version
+       make release-candidate VERSION=0.2.0   # sets a new version
 
-   The release workflow builds, signs with the Developer ID, notarizes and
-   staples the DMG, generates the Sparkle appcast, and creates the GitHub
-   release with the DMG and appcast attached.
-3. Once the release is published, update the Homebrew cask:
+   This bumps the build number and pushes a `v<version>-rc.<n>` tag. CI builds
+   the signed, notarized DMG and publishes it as a prerelease.
 
-       make bump-cask
+2. **Download and test that prerelease DMG** on real hardware.
 
-   This downloads the released DMG, computes its sha256, and pushes the new
-   version to the `homebrew-unramble` tap.
+3. **Ship it:**
+
+       make release
+
+   This promotes the tested candidate: it publishes the same DMG as the
+   `v<version>` release (no rebuild), regenerates the appcast, retires the
+   prerelease, and updates the Homebrew cask.
 
 The update feed at `unramble.computer/appcast.xml` proxies the latest release's
 appcast automatically, so there is no separate step for it.
