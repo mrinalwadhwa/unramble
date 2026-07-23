@@ -17,7 +17,9 @@ in the cloud. So every word you dictate, whether to an agent, an email, or a
 terminal, first goes to someone else's servers.
 
 That's changed. Small, open-weight models are now good enough, and fast.
-Unramble runs them locally, so your voice never leaves your machine.
+Unramble runs them locally on your Mac: NVIDIA's 0.6B Nemotron transcribes your
+speech, and a fine-tuned 0.6B Qwen3 cleans it up. Your voice never leaves your
+machine.
 
 <!-- Demo: recorded walkthrough — to be added -->
 
