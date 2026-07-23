@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/hud-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/hud-light.gif">
+    <img alt="Unramble dictation HUD — idle, then listening" src=".github/assets/hud-light.gif" width="100%">
+  </picture>
+</p>
+
 # Unramble — dictate incognito
 
 Press a hotkey, speak, and cleaned-up text lands at your cursor, in any app.
