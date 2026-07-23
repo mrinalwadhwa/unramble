@@ -10,8 +10,8 @@
 
 Press a hotkey, speak, and cleaned-up text lands at your cursor, in any app.
 
-More and more, we get things done by instructing agents. Speaking is the most
-direct way to hand agents what you mean at full fidelity. But turning voice into
+More and more, we get things done by instructing agents and speaking is the
+most direct way to tell them exactly what you mean. But turning voice into
 filler-free, polished text has so far needed models too big to run anywhere but
 in the cloud. So every word you dictate, whether to an agent, an email, or a
 terminal, first goes to someone else's servers.
@@ -35,8 +35,8 @@ Requires macOS 14 or later.
 
     brew install mrinalwadhwa/unramble/unramble
 
-On first launch, Unramble walks you through setup: pick a mode, grant
-Accessibility and Microphone permissions, and try a dictation. If you pick
-Cloud, you'll add your OpenAI API key — create one at
-[platform.openai.com/api-keys](https://platform.openai.com/api-keys) — and
-Unramble keeps it in the macOS Keychain.
+On first launch, Unramble walks you through setup: pick a mode, give it
+permission to hear you and type into any app, and try a dictation. If you pick
+Cloud, Unramble will ask you for your OpenAI API key and store it in your macOS
+Keychain. You'll need to [get one](https://platform.openai.com/api-keys) from
+OpenAI first.
