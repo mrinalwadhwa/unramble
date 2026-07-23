@@ -5,7 +5,8 @@
 # Finds the latest v<version>-rc.* prerelease for the current Info.plist
 # version and promotes its exact DMG to a v<version> release — no rebuild, no
 # re-sign, no re-notarize (the ticket is already stapled). Regenerates the
-# appcast for the final URL and updates the Homebrew cask.
+# appcast for the final URL, carries the in-app message, and updates the
+# Homebrew cask.
 #
 # Errors if there is no candidate to release.
 set -euo pipefail
@@ -44,7 +45,7 @@ echo "── Creating the v${VERSION} release"
 gh release create "v${VERSION}" --repo "$REPO" \
     --title "Unramble ${VERSION}" \
     --generate-notes \
-    releases/Unramble.dmg releases/appcast.xml
+    releases/Unramble.dmg releases/appcast.xml scripts/messages.json
 
 echo "── Retiring ${CAND}"
 gh release delete "$CAND" --repo "$REPO" --yes --cleanup-tag || true
