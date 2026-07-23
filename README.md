@@ -21,17 +21,11 @@ Unramble runs them locally, so your voice never leaves your machine.
 
 <!-- Demo: recorded walkthrough — to be added -->
 
-## Two modes
-
-You pick a mode when you set up Unramble, and switch between them anytime by
-pressing ⌃⇧M (Control-Shift-M).
-
-|                    | 🔒 Incognito          | ☁️ Cloud            |
-|--------------------|-----------------------|---------------------|
-| Your voice         | stays on your machine | goes to OpenAI      |
-| API key            | none                  | your own            |
-| Offline            | yes                   | no                  |
-| Cost               | free                  | OpenAI's API rates  |
+Incognito is the default and does everything on your machine — no API key, no
+connection, no cost — but it needs Apple Silicon and works only in English.
+Cloud sends your audio to OpenAI instead: it needs your own API key, a
+connection, and OpenAI's per-use rates, and in return runs on any Mac and in
+other languages. Press `Ctrl + Shift + M` to switch anytime.
 
 ## Install
 
@@ -42,10 +36,7 @@ Requires macOS 14 or later.
     brew install mrinalwadhwa/unramble/unramble
 
 On first launch, Unramble walks you through setup: pick a mode, grant
-Accessibility and Microphone permissions, and try a dictation.
-
-- **🔒 Incognito** ships with everything it needs: no key, no configuration.
-  Runs on Apple Silicon, English only.
-- **☁️ Cloud** asks for your OpenAI API key and stores it in the macOS Keychain.
-  Create one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
-  Runs on any Mac, and supports other languages.
+Accessibility and Microphone permissions, and try a dictation. If you pick
+Cloud, you'll add your OpenAI API key — create one at
+[platform.openai.com/api-keys](https://platform.openai.com/api-keys) — and
+Unramble keeps it in the macOS Keychain.
