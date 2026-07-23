@@ -23,12 +23,16 @@ machine.
 
 <!-- Demo: recorded walkthrough — to be added -->
 
+## How it works
+
 Unramble runs in two modes. Incognito, the default mode, does everything on
 your machine. It needs no API key, works offline, and costs nothing, but it
 runs only on Apple Silicon and only supports English. Cloud mode sends your
 audio to OpenAI instead. It works on any Mac and supports more languages, but
 it needs an internet connection and your own OpenAI API key, and you pay
-OpenAI's usage rates. Press `Ctrl + Shift + M` to switch anytime.
+OpenAI's usage rates.
+
+Press `Ctrl + Shift + M` to switch between modes at any time.
 
 ## Install
 
