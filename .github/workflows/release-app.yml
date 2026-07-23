@@ -24,6 +24,9 @@ jobs:
       - name: Report Swift toolchain
         run: swift --version
 
+      - name: Generate polish scenario data
+        run: make test-data
+
       - name: Run tests
         run: make test-ci
 

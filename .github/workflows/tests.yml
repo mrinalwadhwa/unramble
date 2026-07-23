@@ -27,6 +27,9 @@ jobs:
       - name: Report Swift toolchain
         run: swift --version
 
+      - name: Generate polish scenario data
+        run: make test-data
+
       - name: Install ShellCheck
         run: brew install shellcheck
 

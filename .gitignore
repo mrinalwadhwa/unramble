@@ -61,6 +61,9 @@ training/polish-tests.json
 __pycache__/
 *.py[cod]
 
+# Python virtualenv
+.venv/
+
 # Environment
 .env
 .env.*
