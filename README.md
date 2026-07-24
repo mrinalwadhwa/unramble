@@ -23,8 +23,9 @@ machine.
 
 ## Demo (sound on 🔊)
 
-You'll hear a drawing described aloud. Watch Unramble turn it into text
-at the cursor, and the agent render it as ASCII art.
+You'll hear a coding agent instructed out loud, with Unramble turning
+speech into clean text at the cursor — all on-device. Your voice never
+leaves the Mac.
 
 https://github.com/user-attachments/assets/05f74a08-c986-4c6d-a4f9-951bb300efd2
 
