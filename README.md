@@ -21,7 +21,12 @@ Unramble runs them locally on your Mac: NVIDIA's 0.6B Nemotron transcribes your
 speech, and a fine-tuned 0.6B Qwen3 cleans it up. Your voice never leaves your
 machine.
 
-<!-- Demo: recorded walkthrough — to be added -->
+## Demo (sound on 🔊)
+
+You'll hear a drawing described aloud. Watch Unramble turn it into text
+at the cursor, and the agent render it as ASCII art.
+
+https://github.com/user-attachments/assets/05f74a08-c986-4c6d-a4f9-951bb300efd2
 
 ## How it works
 
