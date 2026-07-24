@@ -55,3 +55,19 @@ permission to hear you and type into any app, and try a dictation. If you pick
 Cloud, Unramble will ask you for your OpenAI API key and store it in your macOS
 Keychain. You'll need to [get one](https://platform.openai.com/api-keys) from
 OpenAI first.
+
+## Contribute
+
+Jump in, we'd love your help.
+
+The single most useful contribution right now is
+[mic compatibility data](https://github.com/mrinalwadhwa/unramble/issues/2).
+Unramble works well with built-in mics and AirPods, but every USB mic, headset,
+and audio interface is different. The "Contribute Mic Data" menu item generates
+a one-click diagnostic report that helps us improve dictation accuracy for
+everyone.
+
+Want to add or improve support for a language?
+[Here's how](https://github.com/mrinalwadhwa/unramble/issues/1). Found an app
+where text injection breaks? Open an issue. Code contributions and pull requests
+are welcome too — [DEVELOP.md](DEVELOP.md) has the build and test guide.
