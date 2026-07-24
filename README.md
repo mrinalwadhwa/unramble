@@ -23,9 +23,9 @@ machine.
 
 ## Demo (sound on 🔊)
 
-You'll hear a coding agent instructed out loud, with Unramble turning
-speech into clean text at the cursor — all on-device. Your voice never
-leaves the Mac.
+Watch this short video. You instruct a coding agent out loud, and
+Unramble turns your speech into clean text at the cursor. It all
+runs on your Mac, with nothing sent to the cloud.
 
 https://github.com/user-attachments/assets/05f74a08-c986-4c6d-a4f9-951bb300efd2
 
