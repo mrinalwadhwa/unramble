@@ -34,6 +34,14 @@ OpenAI's usage rates.
 
 Press `Ctrl + Shift + M` to switch between modes at any time.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/how-it-works-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/how-it-works-light.png">
+    <img alt="How Unramble works: hold Right Option and speak; Incognito (on-device Nemotron Speech and Qwen3) or Cloud (OpenAI); text lands at your cursor" src=".github/assets/how-it-works-light.png" width="680">
+  </picture>
+</p>
+
 ## Install
 
 Install with [Homebrew](https://brew.sh) or
