@@ -3362,6 +3362,16 @@ public actor DictationPipeline: PipelineProviding {
     private func resolveDictationFailure(
         sessionID: DictationSessionID
     ) async {
+        // A cancel that raced an in-flight setup already cleared this
+        // session and left the pipeline idle. A failure arriving after
+        // that must not resurrect `.dictationFailed` over the clean
+        // `.idle` — like `notifySessionExpired` and `retainRecovery`,
+        // only act on a session still owned.
+        guard ownsSession(sessionID) else {
+            Log.debug(
+                "[Pipeline] dropping failure for a cancelled session")
+            return
+        }
         if callSessionIDs.contains(sessionID) {
             Log.debug(
                 "[Pipeline] call turn failed; resetting for a fresh session")
