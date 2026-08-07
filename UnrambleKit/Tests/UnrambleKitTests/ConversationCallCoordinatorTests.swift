@@ -40,6 +40,58 @@ struct ConversationCallCoordinatorTests {
             }
             hub.publish(signal, for: sessionID)
         }
+
+        /// Publish a strong-speech signal and return only once the
+        /// waiting loop has consumed it. Signals and watch events reach
+        /// the loop through separate forwarders, so plain `publish`
+        /// followed by a `watcher.emit` races: under load the reply can
+        /// be processed before the speech is seen, and the coordinator
+        /// speaks instead of holding. Awaiting the consumption removes
+        /// the race without changing product behavior. Only
+        /// strong/emphatic speech is observed by the loop's hook, so
+        /// this is for those signals.
+        func publishAwaitingObservation(_ signal: TurnSignal) async {
+            guard let sessionID = pipeline.activatedSessionIDs.last else {
+                return
+            }
+            let gate = SignalGate(expected: signal)
+            await coordinator.setWaitingSignalObserver { gate.observe($0) }
+            hub.publish(signal, for: sessionID)
+            await withCheckedContinuation { gate.arm($0) }
+            await coordinator.setWaitingSignalObserver(nil)
+        }
+    }
+
+    /// One-shot bridge that resumes a continuation the first time the
+    /// coordinator's waiting loop consumes the expected signal.
+    private final class SignalGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private let expected: TurnSignal
+        private var fired = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(expected: TurnSignal) { self.expected = expected }
+
+        func observe(_ signal: TurnSignal) {
+            guard signal == expected else { return }
+            let waiting: CheckedContinuation<Void, Never>? = lock.withLock {
+                if fired { return nil }
+                fired = true
+                let c = continuation
+                continuation = nil
+                return c
+            }
+            waiting?.resume()
+        }
+
+        func arm(_ continuation: CheckedContinuation<Void, Never>) {
+            let alreadyFired: Bool = lock.withLock {
+                if fired { return true }
+                self.continuation = continuation
+                return false
+            }
+            if alreadyFired { continuation.resume() }
+        }
     }
 
     private func agentSession() -> ResolvedAgentSession {
@@ -830,7 +882,7 @@ struct ConversationCallCoordinatorTests {
         // The user is mid-utterance when the response lands: progress
         // drops, but the answer itself queues — it must not vanish
         // behind the send.
-        harness.publish(.strongSpeech)
+        await harness.publishAwaitingObservation(.strongSpeech)
         harness.watcher.emit(.interimMessage(markdown: "Progress."))
         harness.watcher.emit(.completed(markdown: "The answer."))
         await settle()
@@ -1251,7 +1303,7 @@ struct ConversationCallCoordinatorTests {
 
         // The user is mid-utterance in the waiting mic; the reply
         // must not take the floor from them.
-        harness.publish(.strongSpeech)
+        await harness.publishAwaitingObservation(.strongSpeech)
         harness.watcher.emit(.response(markdown: "Held back."))
         await settle()
         #expect(harness.synthesizer.spokenTexts.isEmpty)
@@ -1278,7 +1330,7 @@ struct ConversationCallCoordinatorTests {
             harness.pipeline.activatedSessionIDs.count == 2
         }
 
-        harness.publish(.strongSpeech)
+        await harness.publishAwaitingObservation(.strongSpeech)
         harness.watcher.emit(.interimMessage(markdown: "Stale progress."))
         harness.publish(.pause)
         await eventually { harness.watcher.armed.count == 2 }

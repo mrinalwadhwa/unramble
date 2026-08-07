@@ -189,6 +189,22 @@ public actor ConversationCallCoordinator {
     /// ages out of the recognizer's rolling window undecoded.
     private var pendingBargeText: String?
 
+    #if DEBUG
+        /// Test-only hook fired as the waiting loop dequeues a turn
+        /// signal. Each signal's state effect is applied synchronously
+        /// before the loop next suspends, so a test that resumes on this
+        /// hook is guaranteed the effect has landed before its follow-up
+        /// event is processed — making signal-vs-watch ordering
+        /// deterministic under load. Nil and unused in production.
+        var waitingSignalObserver: (@Sendable (TurnSignal) -> Void)?
+
+        func setWaitingSignalObserver(
+            _ observer: (@Sendable (TurnSignal) -> Void)?
+        ) {
+            waitingSignalObserver = observer
+        }
+    #endif
+
     /// Pre-roll carried ahead of the barge's emphatic signal, which
     /// fires a sustained run after the voice's true onset. Too little
     /// clips the sentence opening — the original absorb-only design
@@ -768,6 +784,11 @@ public actor ConversationCallCoordinator {
                 switch turnEvent {
                 case .signal(.strongSpeech), .signal(.emphaticSpeech):
                     sawStrongSpeech = true
+                    #if DEBUG
+                        if case .signal(let s) = turnEvent {
+                            waitingSignalObserver?(s)
+                        }
+                    #endif
                     if pendingPause {
                         if let outcome = await resolveSend() {
                             return outcome
