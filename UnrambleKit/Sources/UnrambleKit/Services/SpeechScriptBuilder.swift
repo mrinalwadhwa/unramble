@@ -14,10 +14,10 @@ public struct SpeechScriptBuilder: Sendable {
     public func script(for content: ReadableContent) -> String {
         var lines: [String] = []
         if let attribution = content.attribution, !attribution.isEmpty {
-            lines.append("\(Self.normalizeForSpeech(attribution)).")
+            lines.append(Self.spokenSentence(attribution))
         }
         if let title = content.title, !title.isEmpty {
-            lines.append("\(Self.normalizeForSpeech(title)).")
+            lines.append(Self.spokenSentence(title))
         }
         for segment in content.segments {
             switch segment.kind {
@@ -28,14 +28,9 @@ public struct SpeechScriptBuilder: Sendable {
                 // between items; agents rarely punctuate list items,
                 // and unbroken items run together as one rushed
                 // sentence.
-                let spoken = Self.normalizeForSpeech(segment.text)
-                let punctuated =
-                    spoken.hasSuffix(".") || spoken.hasSuffix("!")
-                        || spoken.hasSuffix("?") || spoken.hasSuffix(":")
-                    ? spoken : spoken + "."
-                lines.append(punctuated)
+                lines.append(Self.spokenSentence(segment.text))
             case .heading:
-                lines.append("\(Self.normalizeForSpeech(segment.text)).")
+                lines.append(Self.spokenSentence(segment.text))
             case .code:
                 // Agents fence prose too — option lists and behavior
                 // clauses arrive as text blocks. A block that reads as
@@ -55,8 +50,31 @@ public struct SpeechScriptBuilder: Sendable {
                 }
             }
         }
-        return lines.joined(separator: "\n")
+        let script = lines.joined(separator: "\n\n")
+        let paragraphs = script.components(separatedBy: "\n\n")
+        let withBoundaries = paragraphs.enumerated().map { index, paragraph in
+            // Preserve the existing wording of the final prose block while
+            // making every boundary before it audible to the synthesizer.
+            index + 1 == paragraphs.count
+                ? paragraph
+                : Self.ensureTerminalPunctuation(paragraph)
+        }
+        return withBoundaries.joined(separator: "\n\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func spokenSentence(_ text: String) -> String {
+        ensureTerminalPunctuation(normalizeForSpeech(text))
+    }
+
+    /// Add punctuation at a block boundary when the source omitted it. TTS
+    /// engines commonly treat a line break as ordinary whitespace; terminal
+    /// punctuation keeps adjacent paragraphs from running together.
+    private static func ensureTerminalPunctuation(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = trimmed.last else { return "" }
+        let terminal = ".!?;:".contains(last)
+        return terminal ? trimmed : trimmed + "."
     }
 
     /// Whether fenced text reads as prose: agents fence option

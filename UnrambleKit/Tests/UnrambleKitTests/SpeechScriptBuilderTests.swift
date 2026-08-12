@@ -15,7 +15,7 @@ struct SpeechScriptBuilderTests {
             segments: [.init(kind: .prose, text: "Done.")])
         #expect(
             builder.script(for: content)
-                == "Claude Code in unramble.\nFix the resampler.\nDone.")
+                == "Claude Code in unramble.\n\nFix the resampler.\n\nDone.")
     }
 
     @Test("UI glyphs are spoken as words")
@@ -86,7 +86,7 @@ struct SpeechScriptBuilderTests {
         ])
         #expect(
             builder.script(for: content)
-                == "Here is the change.\nCode block, 3 lines, skipped.")
+                == "Here is the change.\n\nCode block, 3 lines, skipped.")
     }
 
     @Test("A single code line is announced in the singular")
@@ -103,12 +103,37 @@ struct SpeechScriptBuilderTests {
             .init(kind: .heading, text: "What changed"),
             .init(kind: .listItem, text: "the resampler"),
         ])
-        #expect(builder.script(for: content) == "What changed.\nthe resampler.")
+        #expect(
+            builder.script(for: content)
+                == "What changed.\n\nthe resampler.")
     }
 
     @Test("Empty content yields an empty script")
     func emptyContentYieldsEmptyScript() {
         #expect(builder.script(for: ReadableContent(segments: [])) == "")
+    }
+
+    @Test("Paragraphs keep a spoken boundary")
+    func paragraphsKeepASpokenBoundary() {
+        let content = ReadableContent(segments: [
+            .init(kind: .prose, text: "First paragraph"),
+            .init(kind: .prose, text: "Second paragraph"),
+        ])
+
+        #expect(
+            builder.script(for: content)
+                == "First paragraph.\n\nSecond paragraph")
+    }
+
+    @Test("Blank lines inside a selection keep paragraph boundaries")
+    func blankLinesInsideSelectionKeepParagraphBoundaries() {
+        let content = ReadableContent(segments: [
+            .init(kind: .prose, text: "First paragraph\n\nSecond paragraph")
+        ])
+
+        #expect(
+            builder.script(for: content)
+                == "First paragraph.\n\nSecond paragraph")
     }
 }
 

@@ -49,6 +49,13 @@ public enum MarkdownSegmenter {
                 continue
             }
 
+            if trimmed.isEmpty {
+                // Keep blank lines as paragraph boundaries instead of
+                // folding adjacent prose paragraphs into one segment.
+                flushProse()
+                continue
+            }
+
             if let heading = headingText(of: trimmed) {
                 flushProse()
                 segments.append(.init(kind: .heading, text: heading))

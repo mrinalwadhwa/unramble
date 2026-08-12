@@ -16,6 +16,16 @@ struct MarkdownSegmenterTests {
         ])
     }
 
+    @Test("Blank lines separate prose paragraphs")
+    func blankLinesSeparateProseParagraphs() {
+        let segments = MarkdownSegmenter.segments(
+            from: "First paragraph.\n\nSecond paragraph.")
+        #expect(segments == [
+            .init(kind: .prose, text: "First paragraph."),
+            .init(kind: .prose, text: "Second paragraph."),
+        ])
+    }
+
     @Test("Fenced code splits surrounding prose")
     func fencedCodeSplitsProse() {
         let markdown = """
