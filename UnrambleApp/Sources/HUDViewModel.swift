@@ -28,6 +28,7 @@ final class HUDViewModel: ObservableObject {
     @Published var isIncognitoMode: Bool = false
     @Published private(set) var isDictationRetryAvailable: Bool = false
     @Published private(set) var dictationReadiness: HUDDictationReadiness = .ready
+    @Published private(set) var isPreparationIndicatorVisible = false
 
     /// Current audio input level (0.0 to 1.0) for driving the waveform bars.
     /// Smoothed to avoid jittery animation. Reset to 0 when not recording.
@@ -164,6 +165,7 @@ final class HUDViewModel: ObservableObject {
 
     private var hoverGraceTask: Task<Void, Never>?
     private var micCalloutTask: Task<Void, Never>?
+    private var preparationIndicatorTask: Task<Void, Never>?
 
     // MARK: - Observation
 
@@ -179,14 +181,20 @@ final class HUDViewModel: ObservableObject {
     /// Duration the no-content guidance stays visible before auto-dismissing.
     private let readingGuidanceDuration: TimeInterval
 
+    /// Preparation must last this long before the HUD adds a visual signal.
+    /// Short setup completes directly into listening without a transient flash.
+    private let preparationIndicatorDelay: TimeInterval
+
     init(
         shortcuts: ShortcutConfiguration = .default,
         micCalloutDuration: TimeInterval = 3.0,
-        readingGuidanceDuration: TimeInterval = 6.0
+        readingGuidanceDuration: TimeInterval = 6.0,
+        preparationIndicatorDelay: TimeInterval = 0.3
     ) {
         self.shortcuts = shortcuts
         self.micCalloutDuration = micCalloutDuration
         self.readingGuidanceDuration = readingGuidanceDuration
+        self.preparationIndicatorDelay = preparationIndicatorDelay
     }
 
     // MARK: - Observation lifecycle
@@ -275,6 +283,9 @@ final class HUDViewModel: ObservableObject {
         hoverGraceTask = nil
         micCalloutTask?.cancel()
         micCalloutTask = nil
+        preparationIndicatorTask?.cancel()
+        preparationIndicatorTask = nil
+        isPreparationIndicatorVisible = false
         stopAudioLevelObservation()
         pipelineState = .idle
         sessionReady = true
@@ -323,10 +334,12 @@ final class HUDViewModel: ObservableObject {
     }
 
     /// Update the startup resources required before a new dictation can be
-    /// admitted. While not ready, the HUD remains expanded and descriptive.
+    /// admitted. A short delay keeps fast readiness changes from flashing a
+    /// preparation state in the HUD.
     func setDictationReadiness(_ readiness: HUDDictationReadiness) {
         guard dictationReadiness != readiness else { return }
         dictationReadiness = readiness
+        updatePreparationPresentation()
         recalculate()
     }
 
@@ -350,6 +363,7 @@ final class HUDViewModel: ObservableObject {
         sessionReady = update.sessionReady
         dictationFailure = state == .dictationFailed ? update.failure : nil
         pipelineSessionID = state == .idle ? nil : update.sessionID
+        updatePreparationPresentation()
         let t = CFAbsoluteTimeGetCurrent()
         Log.debug("[HUD] State changed: \(previous) → \(state) at \(t)")
 
@@ -549,6 +563,43 @@ final class HUDViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Preparation presentation
+
+    /// Whether a startup or active-session resource is still pending.
+    private var preparationIsPending: Bool {
+        dictationReadiness != .ready
+            || (pipelineState == .recording && !sessionReady)
+    }
+
+    /// Keep fast preparation invisible. If it crosses the grace period, show
+    /// the compact breathing pulse used by the later processing state.
+    private func updatePreparationPresentation() {
+        guard preparationIsPending else {
+            preparationIndicatorTask?.cancel()
+            preparationIndicatorTask = nil
+            isPreparationIndicatorVisible = false
+            return
+        }
+
+        guard !isPreparationIndicatorVisible,
+            preparationIndicatorTask == nil
+        else { return }
+
+        let delay = preparationIndicatorDelay
+        preparationIndicatorTask = Task { [weak self] in
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, self.preparationIsPending else { return }
+            self.preparationIndicatorTask = nil
+            self.isPreparationIndicatorVisible = true
+            self.recalculate()
+        }
+    }
+
     // MARK: - State derivation
 
     /// Recompute `visualState` from all inputs.
@@ -641,8 +692,7 @@ final class HUDViewModel: ObservableObject {
         }
     }
 
-    /// Text shown while either app-wide resources or the active dictation
-    /// session is preparing.
+    /// Accessibility label for the compact preparation pulse.
     var dictationPreparationMessage: String {
         if pipelineState == .recording, !sessionReady {
             return "Preparing transcription…"

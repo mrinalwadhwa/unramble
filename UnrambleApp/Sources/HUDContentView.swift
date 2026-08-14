@@ -144,6 +144,8 @@ struct HUDContentView: View {
     /// Whether the pill shows the minimized-size breathing pulse.
     private var isBreathing: Bool {
         viewModel.visualState == .processingBreathing
+            || (viewModel.visualState == .dictationPreparing
+                && viewModel.isPreparationIndicatorVisible)
             || viewModel.visualState == .readingProcessing
     }
 
@@ -186,6 +188,7 @@ struct HUDContentView: View {
                 viewModel.visualState == .minimized
                     || viewModel.visualState == .processingCollapsing
                     || viewModel.visualState == .processingBreathing
+                    || viewModel.visualState == .dictationPreparing
                     || viewModel.visualState == .readingProcessing
                     ? .easeOut(duration: 0.15)
                     : .spring(response: 0.18, dampingFraction: 0.82, blendDuration: 0),
@@ -211,7 +214,9 @@ struct HUDContentView: View {
                 .fill(pillFillColor.opacity(pillFillOpacity))
                 .padding(pillBorderWidth)
 
-            // Breathing pulse overlay while processing or acquiring a read.
+            // Breathing pulse overlay while preparing, processing, or
+            // acquiring a read. Preparation deliberately reuses the
+            // processing pulse so work in progress has one visual language.
             if isBreathing {
                 BreathingPillOverlay()
                     .clipShape(Capsule())
@@ -601,12 +606,11 @@ struct HUDContentView: View {
 
     // MARK: - Dictation Preparation
 
-    /// A dictation is waiting for startup or per-session resources to be
-    /// ready. The compact pill uses motion instead of a transient text label,
-    /// so readiness never causes a flash or a width jump.
+    /// Accessibility-only content for the compact preparation pulse. The
+    /// visible pulse is the same breathing language used after dictation.
     private var dictationPreparingContent: some View {
-        PreparingIndicatorView()
-            .frame(width: 28, height: 8)
+        Color.clear
+            .frame(width: 1, height: 1)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(viewModel.dictationPreparationMessage)
     }
@@ -851,19 +855,14 @@ struct WaveformBarsView: View {
     }
 }
 
-// MARK: - Breathing bar (processing animation)
+// MARK: - Work-in-progress pulse
 
-/// A single horizontal bar that gently pulses its width and opacity to
-/// signal that the app is processing (thinking), not listening.
+/// A gentle breathing pulse for preparation and processing.
 ///
-/// Visually distinct from the waveform bars: one continuous shape instead
-/// of discrete bars, with a slow calm rhythm instead of reactive movement.
-/// When Reduce Motion is enabled, only opacity pulses.
-/// A gentle breathing pulse overlay for the minimized pill during processing.
-///
-/// Pulses the pill's opacity between dim and bright on a slow 1.6s cycle,
-/// signaling that the app is thinking without expanding the pill. Visually
-/// subtle — just enough to distinguish "processing" from "idle minimized".
+/// The same calm motion appears before listening when setup is genuinely slow
+/// and after listening while transcription is finishing. Preparation does not
+/// add the later processing scale pulse, so the two states share a language
+/// without looking like the same transition.
 struct BreathingPillOverlay: View {
 
     @State private var isAnimating = false
@@ -877,53 +876,6 @@ struct BreathingPillOverlay: View {
             )
             .onAppear { isAnimating = true }
             .onDisappear { isAnimating = false }
-    }
-}
-
-/// A compact visual readiness signal for startup and per-session preparation.
-///
-/// The moving crest uses the same small-bar vocabulary as the listening HUD,
-/// but it is autonomous rather than driven by microphone audio. That makes it
-/// clear that the app is getting ready without displaying a message that can
-/// flash during a quick transition.
-struct PreparingIndicatorView: View {
-
-    private let barCount = 5
-    private let barWidth: CGFloat = 3
-    private let period: TimeInterval = 1.4
-
-    private var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            let time = context.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<barCount, id: \.self) { index in
-                    let lift = barLift(at: time, index: index)
-                    RoundedRectangle(cornerRadius: barWidth / 2)
-                        .fill(Color.white.opacity(0.55 + 0.4 * lift))
-                        .frame(
-                            width: barWidth,
-                            height: 2 + (reduceMotion ? 0 : 4 * lift))
-                }
-            }
-            .frame(width: 28, height: 8)
-        }
-    }
-
-    private func barLift(at time: TimeInterval, index: Int) -> CGFloat {
-        if reduceMotion {
-            let pulse = 0.5 + 0.5 * sin(time * 2 * .pi / 2.4)
-            return CGFloat(pulse) * 0.35
-        }
-
-        let phase = time.truncatingRemainder(dividingBy: period) / period
-        let crest = phase * Double(barCount + 2) - 1
-        let distance = abs(crest - Double(index))
-        guard distance < 1.5 else { return 0 }
-        return CGFloat(max(0, 1 - distance / 1.5))
     }
 }
 

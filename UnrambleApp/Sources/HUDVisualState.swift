@@ -58,7 +58,8 @@ enum HUDVisualState: Equatable {
     case processingSlow
 
     /// A new dictation is waiting for startup or per-session resources to be
-    /// prepared. The HUD shows a compact animated readiness signal.
+    /// prepared. After a short grace period, the HUD shows the compact
+    /// breathing pulse used by the processing state.
     case dictationPreparing
 
     /// Injection failed — no focused text field. Shows paste-shortcut hint and ✕ dismiss.
