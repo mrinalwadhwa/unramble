@@ -27,6 +27,7 @@ final class HUDViewModel: ObservableObject {
     @Published private(set) var isHovering: Bool = false
     @Published var isIncognitoMode: Bool = false
     @Published private(set) var isDictationRetryAvailable: Bool = false
+    @Published private(set) var dictationReadiness: HUDDictationReadiness = .ready
 
     /// Current audio input level (0.0 to 1.0) for driving the waveform bars.
     /// Smoothed to avoid jittery animation. Reset to 0 when not recording.
@@ -272,6 +273,7 @@ final class HUDViewModel: ObservableObject {
         stopAudioLevelObservation()
         pipelineState = .idle
         pipelineSessionID = nil
+        dictationReadiness = .ready
         readAloudState = .idle
         readingProcessingFired = false
         breathingFired = false
@@ -310,6 +312,14 @@ final class HUDViewModel: ObservableObject {
     /// Called when the user clicks the minimized HUD to start hands-free dictation.
     func clickedToStartHandsFree() {
         isHandsFree = true
+        recalculate()
+    }
+
+    /// Update the startup resources required before a new dictation can be
+    /// admitted. While not ready, the HUD remains expanded and descriptive.
+    func setDictationReadiness(_ readiness: HUDDictationReadiness) {
+        guard dictationReadiness != readiness else { return }
+        dictationReadiness = readiness
         recalculate()
     }
 
@@ -568,6 +578,9 @@ final class HUDViewModel: ObservableObject {
                 return .readingNoContent
             case .idle:
                 break
+            }
+            if dictationReadiness != .ready {
+                return .dictationPreparing
             }
             if isHovering {
                 return .ready

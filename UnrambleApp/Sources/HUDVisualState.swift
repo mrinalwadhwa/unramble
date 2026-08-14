@@ -1,5 +1,23 @@
 import Foundation
 
+/// Readiness of the resources needed before a new dictation can start.
+enum HUDDictationReadiness: Equatable {
+    case ready
+    case preparingMicrophone
+    case loadingLocalModels
+
+    var message: String {
+        switch self {
+        case .ready:
+            return "Ready"
+        case .preparingMicrophone:
+            return "Preparing microphone…"
+        case .loadingLocalModels:
+            return "Loading local models…"
+        }
+    }
+}
+
 /// Visual states for the HUD overlay.
 ///
 /// Derived from `RecordingState` (pipeline) combined with UI-local signals:
@@ -38,6 +56,10 @@ enum HUDVisualState: Equatable {
     /// STT in flight, slow path (threshold exceeded). Shows reassurance message
     /// and ✕ cancel affordance.
     case processingSlow
+
+    /// A new dictation is temporarily unavailable while startup resources are
+    /// prepared. The HUD shows the specific resource still being prepared.
+    case dictationPreparing
 
     /// Injection failed — no focused text field. Shows paste-shortcut hint and ✕ dismiss.
     case noTarget
@@ -103,7 +125,7 @@ enum HUDVisualState: Equatable {
             .callNoAgent:
             return true
         case .listeningHeld, .processingCollapsing, .processingBreathing,
-            .readingProcessing:
+            .readingProcessing, .dictationPreparing:
             return false
         }
     }
@@ -119,7 +141,7 @@ enum HUDVisualState: Equatable {
             .readingProcessing:
             return false
         case .listeningHeld, .listeningHandsFree, .processingSlow, .noTarget,
-            .sessionExpired, .dictationFailed, .readingSpeaking,
+            .sessionExpired, .dictationFailed, .dictationPreparing, .readingSpeaking,
             .readingNoContent, .callListening, .callWaiting, .callSpeaking,
             .callNoAgent:
             return true

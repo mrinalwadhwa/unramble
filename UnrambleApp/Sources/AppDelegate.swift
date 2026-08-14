@@ -219,6 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingSessionRecoveryPipeline: DictationPipeline?
     private var localModelRuntime: LocalModelRuntime?
     private var localModelPreloadTask: Task<Void, Never>?
+    private var localModelsReady = true
+    private var captureTransportReady = false
+    private var captureTransportPreparationTask: Task<Void, Never>?
     private let pipelineRebuildQueue = AsyncLatestOperationQueue()
     private var pipelineRebuildTask: Task<Void, Never>?
     private var modeTransition = DictationModeTransition(
@@ -261,13 +264,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBarState()
         determineLaunchFlow()
 
-        // Building the capture transport takes seconds when voice
-        // processing is enabled; prepare it now so the first recording
-        // starts without that delay.
-        let captureProvider = audioProvider
-        Task.detached(priority: .utility) {
-            await captureProvider.prepareTransport()
-        }
+        // Building the capture transport takes seconds when voice processing
+        // is enabled. Prepare it before admitting the first dictation so the
+        // opening words are not spoken while the mic is still starting.
+        prepareCaptureTransport()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -323,6 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyReRegistrationGeneration &+= 1
         hotkeyReRegistrationTask?.cancel()
         localModelPreloadTask?.cancel()
+        captureTransportPreparationTask?.cancel()
         unregisterHotkey()
         unregisterModeHotkey()
         unregisterReadAloudHotkey()
@@ -605,6 +606,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             })
 
     private func setupPipeline(mode: DictationMode) {
+        localModelsReady = mode != .local
+        updateDictationReadiness()
         audioProvider.setAudioDeviceProvider(audioDeviceProvider)
         audioProvider.setSoundFeedbackProvider(soundFeedbackProvider)
         audioDeviceProvider.setAudioCaptureProvider(audioProvider)
@@ -672,6 +675,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.localModelRuntime === runtime
                 else { return }
                 Log.debug("[AppDelegate] Required local preload complete")
+                self.localModelsReady = true
+                self.updateDictationReadiness()
+                self.publishDictationHotkeyIfReady()
             } catch {
                 guard !Task.isCancelled, let self,
                     self.localModelRuntime === runtime
@@ -685,6 +691,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Prepare the physical capture transport before publishing the dictation
+    /// hotkey. The preparation may finish before permissions are granted, so
+    /// it is repeated from the permission callback as well.
+    private func prepareCaptureTransport() {
+        captureTransportPreparationTask?.cancel()
+        captureTransportReady = false
+        suspendDictationHotkeyAdmission()
+        updateDictationReadiness()
+
+        let captureProvider = audioProvider
+        captureTransportPreparationTask = Task { @MainActor [weak self] in
+            await captureProvider.prepareTransport()
+            guard !Task.isCancelled, let self else { return }
+            self.captureTransportReady = true
+            self.updateDictationReadiness()
+            self.publishDictationHotkeyIfReady()
+        }
+    }
+
+    private var dictationReadiness: HUDDictationReadiness {
+        if modeTransition.effectiveMode == .local, !localModelsReady {
+            return .loadingLocalModels
+        }
+        if !captureTransportReady {
+            return .preparingMicrophone
+        }
+        return .ready
+    }
+
+    private func updateDictationReadiness() {
+        hudController?.setDictationReadiness(dictationReadiness)
+    }
+
     // MARK: - HUD
 
     private func setupHUD() {
@@ -695,6 +734,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             audioProvider: audioProvider,
             messageService: inAppMessageService
         )
+        controller.setDictationReadiness(dictationReadiness)
         controller.onSessionExpired = { [weak self] in
             self?.beginSessionRecovery()
         }
@@ -1141,6 +1181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !didFenceApplicationTermination else { return }
         let controller = PermissionController(permissionProvider: permissionProvider)
         controller.onPermissionsGranted = { [weak self] in
+            self?.prepareCaptureTransport()
             self?.registerHotkey()
         }
         permissionController = controller
@@ -1298,14 +1339,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func publishDictationHotkeyIfReady() {
         guard !didFenceApplicationTermination else { return }
         guard dictationHotkeyPublicationRequested else { return }
+        guard let pipeline else {
+            Log.debug("[AppDelegate] Pipeline not initialized, cannot register hotkey")
+            return
+        }
+
+        // Build the HUD before the readiness check so the user can see why
+        // the dictation shortcut is temporarily unavailable.
+        if hudController == nil {
+            setupHUD()
+        }
+        let readiness = dictationReadiness
+        hudController?.setDictationReadiness(readiness)
+        guard readiness == .ready else {
+            menuBarController?.setHotkeyRegistered(false)
+            Log.debug(
+                "[AppDelegate] Dictation hotkey waiting for "
+                    + readiness.message)
+            return
+        }
+
         guard dictationHotkeyMaintenanceIDs.isEmpty else {
             suspendDictationHotkeyAdmission()
             Log.debug(
                 "[AppDelegate] Dictation hotkey waiting for microphone maintenance")
-            return
-        }
-        guard let pipeline else {
-            Log.debug("[AppDelegate] Pipeline not initialized, cannot register hotkey")
             return
         }
         let pipelineIdentity = ObjectIdentifier(pipeline)
@@ -1319,11 +1376,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             unpublishDictationHotkey()
-        }
-
-        // Create the HUD on first hotkey registration.
-        if hudController == nil {
-            setupHUD()
         }
 
         let pipelineRef = pipeline

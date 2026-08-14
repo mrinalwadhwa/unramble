@@ -38,6 +38,8 @@ struct HUDContentView: View {
             return 46
         case .processingSlow:
             return 180
+        case .dictationPreparing:
+            return 210
         case .noTarget:
             return 260
         case .sessionExpired:
@@ -66,7 +68,7 @@ struct HUDContentView: View {
         case .processingCollapsing, .processingBreathing, .readingProcessing:
             return 8
         case .listeningHeld, .listeningHandsFree,
-            .processingSlow, .noTarget, .sessionExpired,
+            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
             .dictationFailed, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 32
@@ -79,7 +81,7 @@ struct HUDContentView: View {
             .readingProcessing:
             return 0.3
         case .ready, .listeningHeld, .listeningHandsFree,
-            .processingSlow, .noTarget, .sessionExpired,
+            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
             .dictationFailed, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 0.5
@@ -92,7 +94,7 @@ struct HUDContentView: View {
             .readingProcessing:
             return 0.45
         case .ready, .listeningHeld, .listeningHandsFree,
-            .processingSlow, .noTarget, .sessionExpired,
+            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
             .dictationFailed, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 0.7
@@ -126,7 +128,7 @@ struct HUDContentView: View {
             .readingProcessing:
             return false
         case .listeningHeld, .listeningHandsFree,
-            .processingSlow, .noTarget, .sessionExpired,
+            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
             .dictationFailed, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return true
@@ -268,6 +270,9 @@ struct HUDContentView: View {
                 .transition(.opacity)
         case .processingSlow:
             processingSlowContent
+                .transition(.opacity)
+        case .dictationPreparing:
+            dictationPreparingContent
                 .transition(.opacity)
         case .noTarget:
             noTargetContent
@@ -586,6 +591,23 @@ struct HUDContentView: View {
     }
 
     // MARK: - Dictation Failed
+
+    /// A new dictation is blocked until the startup resources are ready.
+    private var dictationPreparingContent: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(.white.opacity(0.85))
+
+            Text(viewModel.dictationReadiness.message)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(viewModel.dictationReadiness.message)
+    }
 
     /// Dictation failed — all transcription paths exhausted. Retry or dismiss.
     private var dictationFailedContent: some View {

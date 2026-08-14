@@ -356,6 +356,11 @@ final class HUDController {
         }
     }
 
+    /// Show whether a new dictation can be admitted yet.
+    func setDictationReadiness(_ readiness: HUDDictationReadiness) {
+        viewModel.setDictationReadiness(readiness)
+    }
+
     /// Cancel the current pipeline operation. Called from ✕ buttons and Escape.
     func cancelPipeline() {
         guard let pipeline else { return }
@@ -563,6 +568,12 @@ final class HUDController {
 
     /// Start hands-free dictation from a click on the minimized/ready HUD.
     private func startHandsFreeFromClick() {
+        guard viewModel.dictationReadiness == .ready else {
+            Log.debug(
+                "[HUDController] Ignoring hands-free activation while "
+                    + "dictation startup is not ready")
+            return
+        }
         guard handsFreeActivationTask == nil,
             handsFreeOwnedSessionID == nil,
             currentSessionID == nil
@@ -988,6 +999,8 @@ final class HUDController {
         case .dictationFailed:
             dismissDictationFailure()
             return true
+        case .dictationPreparing:
+            return false
         case .readingProcessing, .readingSpeaking:
             stopReading()
             return true
@@ -1000,7 +1013,8 @@ final class HUDController {
         case .callNoAgent:
             dismissCallGuidance()
             return true
-        case .minimized, .ready, .listeningHeld, .processingCollapsing, .processingBreathing:
+        case .minimized, .ready, .listeningHeld, .processingCollapsing,
+            .processingBreathing:
             return false
         }
     }
