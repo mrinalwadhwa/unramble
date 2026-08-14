@@ -440,6 +440,34 @@ final class RecordingCoordinatorTests: XCTestCase {
             ])
     }
 
+    func testSessionReadinessPublishesAfterRecordingStarts() async {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<3 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        _ = await coordinator.startRecording(sessionID: sessionID)
+        let firstReady = await coordinator.markSessionReady(sessionID: sessionID)
+        let secondReady = await coordinator.markSessionReady(sessionID: sessionID)
+        XCTAssertTrue(firstReady)
+        XCTAssertFalse(secondReady)
+
+        let updates = await collector.value
+        XCTAssertEqual(updates.count, 3)
+        XCTAssertFalse(updates[1].sessionReady)
+        XCTAssertTrue(updates[2].sessionReady)
+        XCTAssertEqual(updates[2].state, .recording)
+        XCTAssertEqual(updates[2].sessionID, sessionID)
+    }
+
     func testSessionStateStreamPublishesRateLimitFailureForOwningSession() async {
         let coordinator = RecordingCoordinator()
         let sessionID = DictationSessionID()

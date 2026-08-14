@@ -23,6 +23,7 @@ public actor RecordingCoordinator {
     private var _state: RecordingState = .idle
     private var sessionID: DictationSessionID?
     private var failure: RecordingFailure?
+    private var sessionReady = true
     private var idleTransitionClaim: RecordingIdleTransitionClaim?
     private var continuations: [UUID: AsyncStream<RecordingState>.Continuation] = [:]
     private var sessionContinuations:
@@ -59,7 +60,8 @@ public actor RecordingCoordinator {
         let currentUpdate = RecordingStateUpdate(
             state: _state,
             sessionID: sessionID,
-            failure: failure)
+            failure: failure,
+            sessionReady: sessionReady)
         let id = UUID()
         return AsyncStream { continuation in
             continuation.yield(currentUpdate)
@@ -109,7 +111,30 @@ public actor RecordingCoordinator {
         guard idleTransitionClaim == nil else { return false }
         guard _state == .idle else { return false }
         self.sessionID = sessionID
+        sessionReady = false
         transition(to: .recording)
+        return true
+    }
+
+    /// Publish that the active recording has completed capture and backend
+    /// setup. This is a metadata update; the lifecycle state remains
+    /// `.recording`.
+    @discardableResult
+    public func markSessionReady(sessionID: DictationSessionID) -> Bool {
+        guard self.sessionID == sessionID,
+            _state == .recording,
+            !sessionReady
+        else { return false }
+
+        sessionReady = true
+        let update = RecordingStateUpdate(
+            state: _state,
+            sessionID: self.sessionID,
+            failure: failure,
+            sessionReady: true)
+        for (_, continuation) in sessionContinuations {
+            continuation.yield(update)
+        }
         return true
     }
 
@@ -398,13 +423,17 @@ public actor RecordingCoordinator {
     ) {
         _state = newState
         self.failure = newState == .dictationFailed ? failure : nil
+        if newState != .recording {
+            sessionReady = true
+        }
         for (_, continuation) in continuations {
             continuation.yield(newState)
         }
         let update = RecordingStateUpdate(
             state: newState,
             sessionID: sessionID,
-            failure: self.failure)
+            failure: self.failure,
+            sessionReady: sessionReady)
         for (_, continuation) in sessionContinuations {
             continuation.yield(update)
         }

@@ -602,21 +602,22 @@ struct HUDContentView: View {
 
     // MARK: - Dictation Failed
 
-    /// A new dictation is blocked until the startup resources are ready.
+    /// A dictation is waiting for startup or per-session resources to be
+    /// ready.
     private var dictationPreparingContent: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
                 .tint(.white.opacity(0.85))
 
-            Text(viewModel.dictationReadiness.message)
+            Text(viewModel.dictationPreparationMessage)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.85))
                 .lineLimit(1)
         }
         .padding(.horizontal, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(viewModel.dictationReadiness.message)
+        .accessibilityLabel(viewModel.dictationPreparationMessage)
     }
 
     /// Dictation failed — all transcription paths exhausted. Retry or dismiss.

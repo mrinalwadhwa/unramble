@@ -57,7 +57,7 @@ enum HUDVisualState: Equatable {
     /// and ✕ cancel affordance.
     case processingSlow
 
-    /// A new dictation is temporarily unavailable while startup resources are
+    /// A new dictation is waiting for startup or per-session resources to be
     /// prepared. The HUD shows the specific resource still being prepared.
     case dictationPreparing
 

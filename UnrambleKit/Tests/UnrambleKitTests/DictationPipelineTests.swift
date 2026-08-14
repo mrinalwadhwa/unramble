@@ -2079,7 +2079,9 @@ final class DictationPipelineTests: XCTestCase {
         let collector = Task { () -> [RecordingStateUpdate] in
             var iterator = stream.makeAsyncIterator()
             var updates: [RecordingStateUpdate] = []
-            for _ in 0..<4 {
+            // Recording publishes an initial not-ready update and a second
+            // recording update when capture/backend setup finishes.
+            for _ in 0..<5 {
                 guard let update = await iterator.next() else { break }
                 updates.append(update)
             }

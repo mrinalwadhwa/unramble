@@ -123,6 +123,10 @@ final class HUDViewModel: ObservableObject {
     // MARK: - Pipeline references
 
     private var pipelineState: RecordingState = .idle
+    /// Whether the active recording has finished capture and transcription
+    /// setup. A recording can be admitted before this becomes true so the
+    /// pipeline can prepare in the background without losing the press.
+    private var sessionReady: Bool = true
     private(set) var dictationFailure: RecordingFailure?
     private(set) var pipelineSessionID: DictationSessionID?
 
@@ -273,6 +277,7 @@ final class HUDViewModel: ObservableObject {
         micCalloutTask = nil
         stopAudioLevelObservation()
         pipelineState = .idle
+        sessionReady = true
         dictationFailure = nil
         pipelineSessionID = nil
         dictationReadiness = .ready
@@ -340,7 +345,9 @@ final class HUDViewModel: ObservableObject {
     private func handlePipelineState(_ update: RecordingStateUpdate) {
         let state = update.state
         let previous = pipelineState
+        let previousSessionReady = sessionReady
         pipelineState = state
+        sessionReady = update.sessionReady
         dictationFailure = state == .dictationFailed ? update.failure : nil
         pipelineSessionID = state == .idle ? nil : update.sessionID
         let t = CFAbsoluteTimeGetCurrent()
@@ -372,7 +379,12 @@ final class HUDViewModel: ObservableObject {
             recalculate()
 
         case .recording:
-            if previous == .idle {
+            if !sessionReady {
+                stopAudioLevelObservation()
+                recalculate()
+                return
+            }
+            if previous == .idle || !previousSessionReady {
                 // Show mic callout on first recording or after a mic switch.
                 if isFirstRecording || showMicCalloutOnNextRecording {
                     showMicCallout()
@@ -591,6 +603,9 @@ final class HUDViewModel: ObservableObject {
             return .minimized
 
         case .recording:
+            if !sessionReady {
+                return .dictationPreparing
+            }
             if isHandsFree {
                 return .listeningHandsFree
             }
@@ -624,6 +639,15 @@ final class HUDViewModel: ObservableObject {
         case .dictationFailed:
             return dictationFailure == .rateLimited ? .rateLimited : .dictationFailed
         }
+    }
+
+    /// Text shown while either app-wide resources or the active dictation
+    /// session is preparing.
+    var dictationPreparationMessage: String {
+        if pipelineState == .recording, !sessionReady {
+            return "Preparing transcription…"
+        }
+        return dictationReadiness.message
     }
 
     // MARK: - In-app message display

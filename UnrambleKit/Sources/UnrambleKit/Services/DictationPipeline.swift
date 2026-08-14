@@ -1173,13 +1173,18 @@ public actor DictationPipeline: PipelineProviding {
             return nil
         }
 
-        // State is now .recording — return immediately so the HUD can animate.
+        // State is now .recording — return immediately so the HUD can show
+        // that this press was admitted. The session update remains
+        // `sessionReady == false` until audio and the transcription backend
+        // are both prepared, so the HUD does not claim that speech is being
+        // heard during a cold start.
+        //
         // Audio setup runs in a detached task so it does not execute on the
         // pipeline actor's executor. A plain Task inherits the actor context
         // and can block the actor until the first suspension point, which
         // delays the return from activate() by the full AVAudioEngine start
         // time (0.5-0.9s). Detached tasks run independently, letting
-        // activate() return instantly and the HUD expand without delay.
+        // activate() return while the preparation indicator is visible.
         let pipeline = self
         audioSetupTask = Task.detached {
             await pipeline.performAudioSetup(
@@ -1521,6 +1526,13 @@ public actor DictationPipeline: PipelineProviding {
             guard streamingStarted else {
                 Log.debug("[Pipeline] Streaming setup timed out or failed, falling back to batch")
                 isStreamingSession = false
+                let readyAt = CFAbsoluteTimeGetCurrent()
+                if await coordinator.markSessionReady(sessionID: session.id) {
+                    Log.debug(
+                        "[Pipeline] Dictation session ready after "
+                            + String(format: "%.3f", readyAt - t0)
+                            + "s (batch fallback)")
+                }
                 return
             }
             guard ownsSession(session.id) else {
@@ -1539,8 +1551,20 @@ public actor DictationPipeline: PipelineProviding {
                         chunk,
                         sessionID: session.id)
                 })
+            let readyAt = CFAbsoluteTimeGetCurrent()
+            if await coordinator.markSessionReady(sessionID: session.id) {
+                Log.debug(
+                    "[Pipeline] Dictation session ready after "
+                        + String(format: "%.3f", readyAt - t0) + "s")
+            }
         } else {
             isStreamingSession = false
+            let readyAt = CFAbsoluteTimeGetCurrent()
+            if await coordinator.markSessionReady(sessionID: session.id) {
+                Log.debug(
+                    "[Pipeline] Dictation session ready after "
+                        + String(format: "%.3f", readyAt - t0) + "s (batch)")
+            }
         }
     }
 

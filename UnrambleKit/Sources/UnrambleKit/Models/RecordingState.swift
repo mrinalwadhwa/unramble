@@ -24,14 +24,19 @@ public struct RecordingStateUpdate: Sendable, Equatable {
     public let state: RecordingState
     public let sessionID: DictationSessionID?
     public let failure: RecordingFailure?
+    /// Whether a recording session has completed its capture and backend
+    /// setup. Non-recording states are always ready.
+    public let sessionReady: Bool
 
     public init(
         state: RecordingState,
         sessionID: DictationSessionID?,
-        failure: RecordingFailure? = nil
+        failure: RecordingFailure? = nil,
+        sessionReady: Bool? = nil
     ) {
         self.state = state
         self.sessionID = sessionID
         self.failure = state == .dictationFailed ? failure : nil
+        self.sessionReady = sessionReady ?? (state != .recording)
     }
 }
