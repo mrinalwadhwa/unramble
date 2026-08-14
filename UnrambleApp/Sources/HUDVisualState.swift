@@ -72,6 +72,9 @@ enum HUDVisualState: Equatable {
     /// Shows "Lost connection" message with Retry and Dismiss buttons.
     case dictationFailed
 
+    /// Dictation failed because OpenAI rate-limited the API key.
+    case rateLimited
+
     /// Read-session acquisition still running 300ms after the press. The
     /// pill stays at minimized dimensions with a breathing pulse; fast
     /// acquisitions never reach this state.
@@ -120,7 +123,7 @@ enum HUDVisualState: Equatable {
     var acceptsMouseEvents: Bool {
         switch self {
         case .minimized, .ready, .listeningHandsFree, .processingSlow, .noTarget,
-            .sessionExpired, .dictationFailed, .readingSpeaking,
+            .sessionExpired, .dictationFailed, .rateLimited, .readingSpeaking,
             .readingNoContent, .callListening, .callWaiting, .callSpeaking,
             .callNoAgent:
             return true
@@ -141,7 +144,8 @@ enum HUDVisualState: Equatable {
             .readingProcessing:
             return false
         case .listeningHeld, .listeningHandsFree, .processingSlow, .noTarget,
-            .sessionExpired, .dictationFailed, .dictationPreparing, .readingSpeaking,
+            .sessionExpired, .dictationFailed, .rateLimited, .dictationPreparing,
+            .readingSpeaking,
             .readingNoContent, .callListening, .callWaiting, .callSpeaking,
             .callNoAgent:
             return true

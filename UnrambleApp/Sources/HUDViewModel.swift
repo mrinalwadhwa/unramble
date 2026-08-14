@@ -123,6 +123,7 @@ final class HUDViewModel: ObservableObject {
     // MARK: - Pipeline references
 
     private var pipelineState: RecordingState = .idle
+    private(set) var dictationFailure: RecordingFailure?
     private(set) var pipelineSessionID: DictationSessionID?
 
     // MARK: - Read-aloud state
@@ -272,6 +273,7 @@ final class HUDViewModel: ObservableObject {
         micCalloutTask = nil
         stopAudioLevelObservation()
         pipelineState = .idle
+        dictationFailure = nil
         pipelineSessionID = nil
         dictationReadiness = .ready
         readAloudState = .idle
@@ -339,6 +341,7 @@ final class HUDViewModel: ObservableObject {
         let state = update.state
         let previous = pipelineState
         pipelineState = state
+        dictationFailure = state == .dictationFailed ? update.failure : nil
         pipelineSessionID = state == .idle ? nil : update.sessionID
         let t = CFAbsoluteTimeGetCurrent()
         Log.debug("[HUD] State changed: \(previous) → \(state) at \(t)")
@@ -619,7 +622,7 @@ final class HUDViewModel: ObservableObject {
             return .sessionExpired
 
         case .dictationFailed:
-            return .dictationFailed
+            return dictationFailure == .rateLimited ? .rateLimited : .dictationFailed
         }
     }
 

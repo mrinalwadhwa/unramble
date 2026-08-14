@@ -3307,6 +3307,18 @@ public actor DictationPipeline: PipelineProviding {
             guard ownsSession(sessionID) else { return nil }
             await notifySessionExpired(sessionID: sessionID)
             return nil
+        } catch let error as DictationError where error == .rateLimited {
+            Log.debug("[Pipeline] Dictation returned 429, rate limited")
+            retainRecovery(
+                sessionID: sessionID,
+                audio: audioBuffer.data,
+                context: context,
+                language: language)
+            guard ownsSession(sessionID) else { return nil }
+            await resolveDictationFailure(
+                sessionID: sessionID,
+                failure: .rateLimited)
+            return nil
         } catch {
             Log.debug("[Pipeline] Dictation failed: \(error)")
             retainRecovery(
@@ -3360,7 +3372,8 @@ public actor DictationPipeline: PipelineProviding {
     /// retry; a call session quietly resets to idle so the next
     /// activation opens a fresh capture immediately.
     private func resolveDictationFailure(
-        sessionID: DictationSessionID
+        sessionID: DictationSessionID,
+        failure: RecordingFailure? = nil
     ) async {
         // A cancel that raced an in-flight setup already cleared this
         // session and left the pipeline idle. A failure arriving after
@@ -3377,7 +3390,9 @@ public actor DictationPipeline: PipelineProviding {
                 "[Pipeline] call turn failed; resetting for a fresh session")
             await resetOwnedSession(sessionID)
         } else {
-            _ = await coordinator.failDictation(sessionID: sessionID)
+            _ = await coordinator.failDictation(
+                sessionID: sessionID,
+                failure: failure)
         }
     }
 
@@ -3559,6 +3574,15 @@ public actor DictationPipeline: PipelineProviding {
             guard ownsSession(session.id) else { return }
             Log.debug("[Pipeline] Retry returned 401, session expired")
             await notifySessionExpired(sessionID: session.id)
+        } catch let error as DictationError where error == .rateLimited {
+            if retryOperation?.id == operationID {
+                retryOperation = nil
+            }
+            guard ownsSession(session.id) else { return }
+            Log.debug("[Pipeline] Retry returned 429, rate limited")
+            await resolveDictationFailure(
+                sessionID: session.id,
+                failure: .rateLimited)
         } catch {
             if retryOperation?.id == operationID {
                 retryOperation = nil

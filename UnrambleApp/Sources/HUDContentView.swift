@@ -45,7 +45,12 @@ struct HUDContentView: View {
         case .sessionExpired:
             return 200
         case .dictationFailed:
-            return 220
+            return HUDFailurePresentation.dictationFailure(
+                failure: viewModel.dictationFailure,
+                retryAvailable: viewModel.isDictationRetryAvailable
+            ).pillSize.width
+        case .rateLimited:
+            return HUDFailurePresentation.rateLimited.pillSize.width
         case .readingProcessing:
             return 46
         case .readingSpeaking:
@@ -72,6 +77,8 @@ struct HUDContentView: View {
             .dictationFailed, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 32
+        case .rateLimited:
+            return HUDFailurePresentation.rateLimited.pillSize.height
         }
     }
 
@@ -82,7 +89,7 @@ struct HUDContentView: View {
             return 0.3
         case .ready, .listeningHeld, .listeningHandsFree,
             .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
-            .dictationFailed, .readingSpeaking, .readingNoContent,
+            .dictationFailed, .rateLimited, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 0.5
         }
@@ -95,7 +102,7 @@ struct HUDContentView: View {
             return 0.45
         case .ready, .listeningHeld, .listeningHandsFree,
             .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
-            .dictationFailed, .readingSpeaking, .readingNoContent,
+            .dictationFailed, .rateLimited, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 0.7
         }
@@ -129,7 +136,7 @@ struct HUDContentView: View {
             return false
         case .listeningHeld, .listeningHandsFree,
             .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
-            .dictationFailed, .readingSpeaking, .readingNoContent,
+            .dictationFailed, .rateLimited, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return true
         }
@@ -281,6 +288,9 @@ struct HUDContentView: View {
             sessionExpiredContent
                 .transition(.opacity)
         case .dictationFailed:
+            dictationFailedContent
+                .transition(.opacity)
+        case .rateLimited:
             dictationFailedContent
                 .transition(.opacity)
         case .readingSpeaking:
@@ -611,7 +621,10 @@ struct HUDContentView: View {
 
     /// Dictation failed — all transcription paths exhausted. Retry or dismiss.
     private var dictationFailedContent: some View {
-        HStack(spacing: 8) {
+        let presentation = HUDFailurePresentation.dictationFailure(
+            failure: viewModel.dictationFailure,
+            retryAvailable: viewModel.isDictationRetryAvailable)
+        return HStack(spacing: 8) {
             if viewModel.isDictationRetryAvailable {
                 Button(action: { viewModel.onRetryDictation?() }) {
                     Text("Retry")
@@ -625,13 +638,11 @@ struct HUDContentView: View {
                 .accessibilityLabel("Retry transcription")
             }
 
-            Text(
-                viewModel.isDictationRetryAvailable
-                    ? "Lost connection" : "Microphone unavailable"
-            )
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+            Text(presentation.message)
+                .font(Font(HUDFailurePresentation.messageFont))
                 .foregroundColor(.white.opacity(0.7))
-                .lineLimit(1)
+                .lineLimit(presentation.maximumMessageLines)
+                .frame(width: presentation.messageWidth, alignment: .leading)
 
             Button(action: { viewModel.onDismiss?() }) {
                 Image(systemName: "xmark")

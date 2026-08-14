@@ -2067,6 +2067,33 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertFalse(callbackCalled, "onSessionExpired should not fire for non-401 errors")
     }
 
+    func testBatchDictation429PublishesRateLimitFailure() async {
+        let dictation = MockBatchProvider()
+        dictation.stubbedError = DictationError.rateLimited
+        let coordinator = RecordingCoordinator()
+
+        let (pipeline, audio, _, _, _, _) = makePipeline(
+            batchProvider: dictation,
+            coordinator: coordinator)
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<4 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        await activateAndWaitForCapture(pipeline, audioProvider: audio)
+        await pipeline.complete()
+
+        let updates = await collector.value
+        XCTAssertEqual(updates.last?.state, .dictationFailed)
+        XCTAssertEqual(updates.last?.failure, .rateLimited)
+    }
+
     func testCoordinatorExpireSessionTransition() async {
         let coordinator = RecordingCoordinator()
         // expireSession is only valid from .processing.

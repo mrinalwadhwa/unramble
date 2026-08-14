@@ -440,6 +440,91 @@ final class RecordingCoordinatorTests: XCTestCase {
             ])
     }
 
+    func testSessionStateStreamPublishesRateLimitFailureForOwningSession() async {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<4 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        _ = await coordinator.startRecording(sessionID: sessionID)
+        _ = await coordinator.stopRecording(sessionID: sessionID)
+        _ = await coordinator.failDictation(
+            sessionID: sessionID,
+            failure: .rateLimited)
+
+        let updates = await collector.value
+        XCTAssertEqual(
+            updates.last,
+            RecordingStateUpdate(
+                state: .dictationFailed,
+                sessionID: sessionID,
+                failure: .rateLimited))
+    }
+
+    func testFailureMetadataClearsWhenRetryStarts() async {
+        let coordinator = RecordingCoordinator()
+        let sessionID = DictationSessionID()
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<5 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        _ = await coordinator.startRecording(sessionID: sessionID)
+        _ = await coordinator.stopRecording(sessionID: sessionID)
+        _ = await coordinator.failDictation(
+            sessionID: sessionID,
+            failure: .rateLimited)
+        _ = await coordinator.retryDictation(sessionID: sessionID)
+
+        let updates = await collector.value
+        XCTAssertEqual(updates.last?.state, .processing)
+        XCTAssertNil(updates.last?.failure)
+    }
+
+    func testFailureMetadataClearsAfterDismissalAndSessionReplacement() async {
+        let coordinator = RecordingCoordinator()
+        let firstSessionID = DictationSessionID()
+        let replacementSessionID = DictationSessionID()
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<6 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
+
+        _ = await coordinator.startRecording(sessionID: firstSessionID)
+        _ = await coordinator.stopRecording(sessionID: firstSessionID)
+        _ = await coordinator.failDictation(
+            sessionID: firstSessionID,
+            failure: .rateLimited)
+        _ = await coordinator.reset(sessionID: firstSessionID)
+        _ = await coordinator.startRecording(sessionID: replacementSessionID)
+
+        let updates = await collector.value
+        XCTAssertEqual(updates[4].state, .idle)
+        XCTAssertNil(updates[4].failure)
+        XCTAssertEqual(updates[5].state, .recording)
+        XCTAssertNil(updates[5].failure)
+    }
+
     func testStateStreamEmitsCurrentStateThenChanges() async {
         let coordinator = RecordingCoordinator()
 

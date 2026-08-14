@@ -518,7 +518,7 @@ final class HUDController {
         viewModel.onDismiss = { [weak self] in
             guard let self else { return }
             switch self.viewModel.visualState {
-            case .dictationFailed:
+            case .dictationFailed, .rateLimited:
                 self.dismissDictationFailure()
             default:
                 self.dismissNoTarget()
@@ -996,7 +996,7 @@ final class HUDController {
         case .sessionExpired:
             onSessionExpired?()
             return true
-        case .dictationFailed:
+        case .dictationFailed, .rateLimited:
             dismissDictationFailure()
             return true
         case .dictationPreparing:

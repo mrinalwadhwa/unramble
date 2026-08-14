@@ -214,8 +214,15 @@ final class HUDOverlayWindow: NSPanel {
             pillHeight = 32
             padding = 4
         case .dictationFailed:
-            pillWidth = 220
-            pillHeight = 32
+            let presentation = HUDFailurePresentation.dictationFailure(
+                failure: viewModel.dictationFailure,
+                retryAvailable: viewModel.isDictationRetryAvailable)
+            pillWidth = presentation.pillSize.width
+            pillHeight = presentation.pillSize.height
+            padding = 4
+        case .rateLimited:
+            pillWidth = HUDFailurePresentation.rateLimited.pillSize.width
+            pillHeight = HUDFailurePresentation.rateLimited.pillSize.height
             padding = 4
         case .readingSpeaking:
             pillWidth = 170

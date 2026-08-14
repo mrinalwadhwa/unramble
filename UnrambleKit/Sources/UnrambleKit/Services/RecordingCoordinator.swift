@@ -22,6 +22,7 @@ public actor RecordingCoordinator {
 
     private var _state: RecordingState = .idle
     private var sessionID: DictationSessionID?
+    private var failure: RecordingFailure?
     private var idleTransitionClaim: RecordingIdleTransitionClaim?
     private var continuations: [UUID: AsyncStream<RecordingState>.Continuation] = [:]
     private var sessionContinuations:
@@ -57,7 +58,8 @@ public actor RecordingCoordinator {
     public var sessionStateStream: AsyncStream<RecordingStateUpdate> {
         let currentUpdate = RecordingStateUpdate(
             state: _state,
-            sessionID: sessionID)
+            sessionID: sessionID,
+            failure: failure)
         let id = UUID()
         return AsyncStream { continuation in
             continuation.yield(currentUpdate)
@@ -206,17 +208,22 @@ public actor RecordingCoordinator {
     ///
     /// - Returns: `true` if the transition succeeded.
     @discardableResult
-    public func failDictation() -> Bool {
+    public func failDictation(
+        failure: RecordingFailure? = nil
+    ) -> Bool {
         guard let sessionID else { return false }
-        return failDictation(sessionID: sessionID)
+        return failDictation(sessionID: sessionID, failure: failure)
     }
 
     @discardableResult
-    public func failDictation(sessionID: DictationSessionID) -> Bool {
+    public func failDictation(
+        sessionID: DictationSessionID,
+        failure: RecordingFailure? = nil
+    ) -> Bool {
         guard idleTransitionClaim == nil else { return false }
         guard self.sessionID == sessionID else { return false }
         guard _state == .processing else { return false }
-        transition(to: .dictationFailed)
+        transition(to: .dictationFailed, failure: failure)
         return true
     }
 
@@ -385,14 +392,19 @@ public actor RecordingCoordinator {
 
     // MARK: - Internal
 
-    private func transition(to newState: RecordingState) {
+    private func transition(
+        to newState: RecordingState,
+        failure: RecordingFailure? = nil
+    ) {
         _state = newState
+        self.failure = newState == .dictationFailed ? failure : nil
         for (_, continuation) in continuations {
             continuation.yield(newState)
         }
         let update = RecordingStateUpdate(
             state: newState,
-            sessionID: sessionID)
+            sessionID: sessionID,
+            failure: self.failure)
         for (_, continuation) in sessionContinuations {
             continuation.yield(update)
         }
