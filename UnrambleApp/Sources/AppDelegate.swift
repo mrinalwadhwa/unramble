@@ -646,7 +646,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onSessionExpired: { [weak self] in
                     Task { @MainActor in self?.beginSessionRecovery() }
                 },
-                turnSignals: turnSignalHub)
+                turnSignals: turnSignalHub,
+                prewarmRealtime: true)
         }
 
         let isLocal = mode == .local

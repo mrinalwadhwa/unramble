@@ -58,7 +58,7 @@ enum HUDVisualState: Equatable {
     case processingSlow
 
     /// A new dictation is waiting for startup or per-session resources to be
-    /// prepared. The HUD shows the specific resource still being prepared.
+    /// prepared. The HUD shows a compact animated readiness signal.
     case dictationPreparing
 
     /// Injection failed — no focused text field. Shows paste-shortcut hint and ✕ dismiss.
@@ -135,16 +135,16 @@ enum HUDVisualState: Equatable {
 
     /// Whether the pill should show at its expanded width.
     ///
-    /// Minimized and ready use the compact capsule (ready adds a tooltip
-    /// above it). All other states expand the pill to show content
+    /// Minimized, ready, preparation, and background-processing states use the
+    /// compact capsule. All other states expand the pill to show content
     /// (waveform, buttons, or messages).
     var isExpanded: Bool {
         switch self {
         case .minimized, .ready, .processingCollapsing, .processingBreathing,
-            .readingProcessing:
+            .readingProcessing, .dictationPreparing:
             return false
         case .listeningHeld, .listeningHandsFree, .processingSlow, .noTarget,
-            .sessionExpired, .dictationFailed, .rateLimited, .dictationPreparing,
+            .sessionExpired, .dictationFailed, .rateLimited,
             .readingSpeaking,
             .readingNoContent, .callListening, .callWaiting, .callSpeaking,
             .callNoAgent:

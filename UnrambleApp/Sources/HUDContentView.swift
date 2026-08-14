@@ -34,12 +34,10 @@ struct HUDContentView: View {
             return 130
         case .listeningHandsFree:
             return 130
-        case .processingCollapsing, .processingBreathing:
+        case .processingCollapsing, .processingBreathing, .dictationPreparing:
             return 46
         case .processingSlow:
             return 180
-        case .dictationPreparing:
-            return 210
         case .noTarget:
             return 260
         case .sessionExpired:
@@ -70,10 +68,11 @@ struct HUDContentView: View {
             return 8
         case .ready:
             return 10
-        case .processingCollapsing, .processingBreathing, .readingProcessing:
+        case .processingCollapsing, .processingBreathing, .readingProcessing,
+            .dictationPreparing:
             return 8
         case .listeningHeld, .listeningHandsFree,
-            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
+            .processingSlow, .noTarget, .sessionExpired,
             .dictationFailed, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 32
@@ -85,10 +84,10 @@ struct HUDContentView: View {
     private var pillFillOpacity: Double {
         switch viewModel.visualState {
         case .minimized, .processingCollapsing, .processingBreathing,
-            .readingProcessing:
+            .readingProcessing, .dictationPreparing:
             return 0.3
         case .ready, .listeningHeld, .listeningHandsFree,
-            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
+            .processingSlow, .noTarget, .sessionExpired,
             .dictationFailed, .rateLimited, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 0.5
@@ -98,10 +97,10 @@ struct HUDContentView: View {
     private var pillBorderOpacity: Double {
         switch viewModel.visualState {
         case .minimized, .processingCollapsing, .processingBreathing,
-            .readingProcessing:
+            .readingProcessing, .dictationPreparing:
             return 0.45
         case .ready, .listeningHeld, .listeningHandsFree,
-            .processingSlow, .dictationPreparing, .noTarget, .sessionExpired,
+            .processingSlow, .noTarget, .sessionExpired,
             .dictationFailed, .rateLimited, .readingSpeaking, .readingNoContent,
             .callListening, .callWaiting, .callSpeaking, .callNoAgent:
             return 0.7
@@ -128,7 +127,7 @@ struct HUDContentView: View {
             : Color.white
     }
 
-    /// Whether the pill is in a full active state (not minimized/ready).
+    /// Whether the pill contains active content (not minimized/ready).
     private var isActive: Bool {
         switch viewModel.visualState {
         case .minimized, .ready, .processingCollapsing, .processingBreathing,
@@ -600,24 +599,16 @@ struct HUDContentView: View {
         .padding(.horizontal, 12)
     }
 
-    // MARK: - Dictation Failed
+    // MARK: - Dictation Preparation
 
     /// A dictation is waiting for startup or per-session resources to be
-    /// ready.
+    /// ready. The compact pill uses motion instead of a transient text label,
+    /// so readiness never causes a flash or a width jump.
     private var dictationPreparingContent: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(.white.opacity(0.85))
-
-            Text(viewModel.dictationPreparationMessage)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(viewModel.dictationPreparationMessage)
+        PreparingIndicatorView()
+            .frame(width: 28, height: 8)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(viewModel.dictationPreparationMessage)
     }
 
     /// Dictation failed — all transcription paths exhausted. Retry or dismiss.
@@ -886,6 +877,53 @@ struct BreathingPillOverlay: View {
             )
             .onAppear { isAnimating = true }
             .onDisappear { isAnimating = false }
+    }
+}
+
+/// A compact visual readiness signal for startup and per-session preparation.
+///
+/// The moving crest uses the same small-bar vocabulary as the listening HUD,
+/// but it is autonomous rather than driven by microphone audio. That makes it
+/// clear that the app is getting ready without displaying a message that can
+/// flash during a quick transition.
+struct PreparingIndicatorView: View {
+
+    private let barCount = 5
+    private let barWidth: CGFloat = 3
+    private let period: TimeInterval = 1.4
+
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<barCount, id: \.self) { index in
+                    let lift = barLift(at: time, index: index)
+                    RoundedRectangle(cornerRadius: barWidth / 2)
+                        .fill(Color.white.opacity(0.55 + 0.4 * lift))
+                        .frame(
+                            width: barWidth,
+                            height: 2 + (reduceMotion ? 0 : 4 * lift))
+                }
+            }
+            .frame(width: 28, height: 8)
+        }
+    }
+
+    private func barLift(at time: TimeInterval, index: Int) -> CGFloat {
+        if reduceMotion {
+            let pulse = 0.5 + 0.5 * sin(time * 2 * .pi / 2.4)
+            return CGFloat(pulse) * 0.35
+        }
+
+        let phase = time.truncatingRemainder(dividingBy: period) / period
+        let crest = phase * Double(barCount + 2) - 1
+        let distance = abs(crest - Double(index))
+        guard distance < 1.5 else { return 0 }
+        return CGFloat(max(0, 1 - distance / 1.5))
     }
 }
 

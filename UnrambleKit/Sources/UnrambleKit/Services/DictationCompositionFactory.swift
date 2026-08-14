@@ -10,21 +10,27 @@ public struct DictationComposition {
     public let localRuntime: LocalModelRuntime?
 }
 
-/// Build the backend for a dictation mode. Cloud construction is inert (it opens
-/// no connection until the backend is used); local construction resolves the
-/// on-device model directories and wires the MLX engines.
+/// Build the backend for a dictation mode. Cloud construction is inert by
+/// default; the running app can opt into an idle Realtime connection so the
+/// first dictation does not pay the WebSocket handshake. Local construction
+/// resolves the on-device model directories and wires the MLX engines.
 public enum DictationCompositionFactory {
     /// Cloud composition: OpenAI streaming transcription with a batch fallback.
     public static func makeCloud(
         apiKey: String,
         onSessionExpired: (@Sendable () -> Void)?,
-        turnSignals: TurnSignalHub? = nil
+        turnSignals: TurnSignalHub? = nil,
+        prewarmRealtime: Bool = false
     ) -> DictationComposition {
-        DictationComposition(
+        let realtime = OpenAIStreamingProvider(
+            apiKey: apiKey,
+            turnSignals: turnSignals)
+        if prewarmRealtime {
+            realtime.prewarmForNextSession()
+        }
+        return DictationComposition(
             backend: .cloud(
-                realtime: OpenAIStreamingProvider(
-                    apiKey: apiKey,
-                    turnSignals: turnSignals),
+                realtime: realtime,
                 fallback: OpenAIFileTranscriber(apiKey: apiKey)),
             onSessionExpired: onSessionExpired,
             localRuntime: nil)

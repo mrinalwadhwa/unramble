@@ -173,7 +173,7 @@ final class HUDOverlayWindow: NSPanel {
             pillHeight = Self.minimizedCapsuleHeight
             padding = 10
         case .processingCollapsing, .processingBreathing, .readingProcessing,
-            .callWaiting:
+            .dictationPreparing, .callWaiting:
             pillWidth = Self.minimizedCapsuleWidth
             pillHeight = Self.minimizedCapsuleHeight
             padding = 10
@@ -199,10 +199,6 @@ final class HUDOverlayWindow: NSPanel {
             padding = 4
         case .processingSlow:
             pillWidth = 180
-            pillHeight = 32
-            padding = 4
-        case .dictationPreparing:
-            pillWidth = 210
             pillHeight = 32
             padding = 4
         case .noTarget:

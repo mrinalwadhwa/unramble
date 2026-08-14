@@ -6,8 +6,9 @@ import Foundation
 ///
 /// Opens a WebSocket to `wss://api.openai.com/v1/realtime` per dictation
 /// session. To avoid paying the handshake cost on every dictation, a
-/// fresh connection is pre-opened in the background immediately after a
-/// successful session, and adopted by the next `startStreaming` call.
+/// fresh connection is pre-opened in the background after a successful
+/// session, and the production composition can also prewarm one before the
+/// first session. The next `startStreaming` call adopts that connection.
 /// A warm backup typically cuts `startStreaming` from ~300 ms to < 5 ms.
 ///
 /// `startStreaming` is non-blocking: it kicks off the connection and
@@ -271,6 +272,16 @@ public final class OpenAIStreamingProvider: StreamingDictationProviding, @unchec
         self.backupRefreshDelay = backupRefreshDelay
         self.backupRefreshWillDiscard = backupRefreshWillDiscard
         self.backupRefreshDidFinish = backupRefreshDidFinish
+    }
+
+    /// Open the idle connection used by the next dictation session.
+    ///
+    /// This is intentionally opt-in at the composition boundary: opening a
+    /// Realtime connection is useful for the running app, but callers that
+    /// only construct a provider (including tests) should remain inert.
+    func prewarmForNextSession() {
+        guard !apiKeyProvider().isEmpty else { return }
+        warmBackup()
     }
 
     deinit {
