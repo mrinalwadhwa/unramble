@@ -219,6 +219,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingSessionRecoveryPipeline: DictationPipeline?
     private var localModelRuntime: LocalModelRuntime?
     private var localModelPreloadTask: Task<Void, Never>?
+    /// Debug launch flag for exercising the first-use path without a warm
+    /// Realtime connection or a preloaded local STT model.
+    #if DEBUG
+    private let coldStartTestEnabled = ProcessInfo.processInfo.arguments
+        .contains("--cold-start")
+    #else
+    private let coldStartTestEnabled = false
+    #endif
     private var localModelsReady = true
     private var captureTransportReady = false
     private var captureTransportPreparationTask: Task<Void, Never>?
@@ -606,7 +614,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             })
 
     private func setupPipeline(mode: DictationMode) {
-        localModelsReady = mode != .local
+        if coldStartTestEnabled {
+            Log.debug("[AppDelegate] Cold-start test enabled")
+        }
+        localModelsReady = mode != .local || coldStartTestEnabled
         updateDictationReadiness()
         audioProvider.setAudioDeviceProvider(audioDeviceProvider)
         audioProvider.setSoundFeedbackProvider(soundFeedbackProvider)
@@ -634,7 +645,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 })
             localModelRuntime = composition.localRuntime
             if let runtime = composition.localRuntime {
-                startModelPreload(runtime)
+                if coldStartTestEnabled {
+                    Log.debug(
+                        "[AppDelegate] Cold-start test: skipping local model preload")
+                } else {
+                    startModelPreload(runtime)
+                }
             }
             #else
             fatalError("Local mode requires Apple Silicon")
@@ -647,7 +663,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Task { @MainActor in self?.beginSessionRecovery() }
                 },
                 turnSignals: turnSignalHub,
-                prewarmRealtime: true)
+                prewarmRealtime: !coldStartTestEnabled)
         }
 
         let isLocal = mode == .local
