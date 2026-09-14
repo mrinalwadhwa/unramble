@@ -1163,6 +1163,16 @@ final class DictationPipelineTests: XCTestCase {
         let (pipeline, audioProvider, _, _, injector, coordinator) = makePipeline(
             audioProvider: audio,
             batchProvider: dictation)
+        let stream = await coordinator.sessionStateStream
+        let collector = Task { () -> [RecordingStateUpdate] in
+            var iterator = stream.makeAsyncIterator()
+            var updates: [RecordingStateUpdate] = []
+            for _ in 0..<5 {
+                guard let update = await iterator.next() else { break }
+                updates.append(update)
+            }
+            return updates
+        }
 
         let sessionID = await activateAndWaitForCapture(
             pipeline, audioProvider: audioProvider)
@@ -1170,6 +1180,8 @@ final class DictationPipelineTests: XCTestCase {
 
         let failedState = await coordinator.state
         XCTAssertEqual(failedState, .dictationFailed)
+        let updates = await collector.value
+        XCTAssertEqual(updates.last?.failure, .audioCaptureInterrupted)
         XCTAssertEqual(dictation.dictateCallCount, 0)
         XCTAssertEqual(injector.injectionCount, 0)
         guard let sessionID else {

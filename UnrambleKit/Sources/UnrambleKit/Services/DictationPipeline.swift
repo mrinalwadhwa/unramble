@@ -1571,7 +1571,8 @@ public actor DictationPipeline: PipelineProviding {
     private func handleCaptureStopFailure(
         sessionID: DictationSessionID,
         recoveryAudio: AudioBuffer?,
-        streamingProvider: any StreamingDictationProviding
+        streamingProvider: any StreamingDictationProviding,
+        failure: RecordingFailure?
     ) async {
         if let recoveryAudio, !recoveryAudio.data.isEmpty {
             saveCapturedSample(wav: recoveryAudio.data)
@@ -1607,7 +1608,9 @@ public actor DictationPipeline: PipelineProviding {
         isStreamingSession = false
         audioSetupFailed = false
         recordingStartedAt = nil
-        await resolveDictationFailure(sessionID: sessionID)
+        await resolveDictationFailure(
+            sessionID: sessionID,
+            failure: failure)
     }
 
     public func complete() async {
@@ -1768,6 +1771,7 @@ public actor DictationPipeline: PipelineProviding {
         // arrived after the user released the dictation key.
         var releasedAudioBuffer: AudioBuffer?
         var failedCaptureRecovery: AudioBuffer?
+        var captureFailure: RecordingFailure?
         var captureStopFailed: Bool
         if let releaseCaptureStopOperation {
             switch await releaseCaptureStopOperation.task.value {
@@ -1779,6 +1783,8 @@ public actor DictationPipeline: PipelineProviding {
                 releasedAudioBuffer = nil
                 failedCaptureRecovery =
                     (error as? AudioCaptureError)?.recoverableAudioBuffer
+                captureFailure =
+                    (error as? AudioCaptureError)?.recordingFailure
                 captureStopFailed = true
             }
         } else {
@@ -1796,7 +1802,8 @@ public actor DictationPipeline: PipelineProviding {
             await handleCaptureStopFailure(
                 sessionID: session.id,
                 recoveryAudio: failedCaptureRecovery,
-                streamingProvider: streamingProvider)
+                streamingProvider: streamingProvider,
+                failure: captureFailure)
             return
         }
 
@@ -1985,6 +1992,8 @@ public actor DictationPipeline: PipelineProviding {
                 Log.debug("[Pipeline] Failed to drain late capture: \(error)")
                 failedCaptureRecovery =
                     (error as? AudioCaptureError)?.recoverableAudioBuffer
+                captureFailure =
+                    (error as? AudioCaptureError)?.recordingFailure
                 captureStopFailed = true
             }
         }
@@ -1992,7 +2001,8 @@ public actor DictationPipeline: PipelineProviding {
             await handleCaptureStopFailure(
                 sessionID: session.id,
                 recoveryAudio: failedCaptureRecovery,
-                streamingProvider: streamingProvider)
+                streamingProvider: streamingProvider,
+                failure: captureFailure)
             return
         }
 

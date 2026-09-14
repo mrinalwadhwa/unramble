@@ -70,7 +70,7 @@ enum HUDVisualState: Equatable {
     case sessionExpired
 
     /// Dictation failed after all transcription paths were exhausted.
-    /// Shows "Lost connection" message with Retry and Dismiss buttons.
+    /// Shows a failure-specific message with Retry and Dismiss buttons.
     case dictationFailed
 
     /// Dictation failed because OpenAI rate-limited the API key.

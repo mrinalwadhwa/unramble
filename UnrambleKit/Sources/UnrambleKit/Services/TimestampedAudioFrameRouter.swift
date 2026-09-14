@@ -289,6 +289,11 @@ import Foundation
         // recording. Larger or repeated holes still fail closed.
         private static let maximumSingleForwardGap: TimeInterval = 0.020
         private static let maximumCumulativeForwardGap: TimeInterval = 0.040
+        // A device can briefly report a discontinuous host clock while its
+        // sample clock continues without a hole. Trust that sample continuity
+        // only within a few frames; a real sample-time jump still fails closed.
+        private static let maximumSampleTimeDiscontinuityFrames:
+            AVAudioFramePosition = 4
 
         public init(
             limits: Limits = Limits(),
@@ -927,6 +932,10 @@ import Foundation
             let sampleTimeDelta = frame.startSampleTime.flatMap { start in
                 lastDeviceFrameEndSampleTime.map { start - $0 }
             }
+            let sampleClockIsContinuous = sampleTimeDelta.map {
+                $0 >= -Self.maximumSampleTimeDiscontinuityFrames
+                    && $0 <= Self.maximumSampleTimeDiscontinuityFrames
+            } ?? false
 
             // A forward GAP (the next buffer starts after the previous ended)
             // is genuinely missing audio; only a few samples of host-time
@@ -949,7 +958,9 @@ import Foundation
                     tolerated: regression <= regressionTolerance,
                     cumulativeToleratedHostTicks: activeRoute?
                         .toleratedForwardGapHostTime)
-                guard regression > regressionTolerance else { return }
+                guard regression > regressionTolerance,
+                    !sampleClockIsContinuous
+                else { return }
                 let affectedSeconds = AVAudioTime.seconds(
                     forHostTime: regression)
                 let affectedFrames = max(
@@ -995,6 +1006,7 @@ import Foundation
             }
             let gapIsTolerated = gap <= gapTolerance
                 || activeGapCanBeTolerated
+                || sampleClockIsContinuous
             logDeviceTimestampDiscontinuity(
                 "gap", hostTicks: gap,
                 sampleRate: frame.buffer.format.sampleRate,

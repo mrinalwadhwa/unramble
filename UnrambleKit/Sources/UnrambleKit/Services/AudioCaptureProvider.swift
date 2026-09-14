@@ -3104,6 +3104,17 @@ public enum AudioCaptureError: Error, Sendable, CustomStringConvertible {
         return buffer
     }
 
+    /// Failure metadata for the recovery HUD. An incomplete capture is a
+    /// microphone interruption, not a network failure.
+    public var recordingFailure: RecordingFailure? {
+        switch self {
+        case .captureIntegrity, .incompleteCapture:
+            return .audioCaptureInterrupted
+        default:
+            return nil
+        }
+    }
+
     public var description: String {
         switch self {
         case .alreadyRecording:

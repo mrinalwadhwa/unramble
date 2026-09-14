@@ -643,6 +643,39 @@ struct TimestampedAudioFrameRouterTests {
                     affectedFrameCount: 15))
     }
 
+    @Test("A host-time jump with a continuous sample clock preserves the route")
+    func hostTimeJumpWithContinuousSampleClockPreservesActiveRoute() async throws {
+        let probe = SinkProbe()
+        let router = makeRouter(probe: probe)
+        let start = hostTime(seconds: 100)
+        let boundary = AudioCaptureReleaseBoundary(pressHostTime: start)
+        let route = try router.promote(releaseBoundary: boundary)
+
+        router.ingest(
+            try pcmBuffer(values: [0, 1, 2, 3]),
+            timestamp: AVAudioTime(
+                hostTime: start,
+                sampleTime: 0,
+                atRate: 1_000),
+            observedHostTime: addingFrames(4, to: start))
+        #expect(boundary.publish(releaseHostTime: addingFrames(39, to: start)))
+        let wait = Task { await router.waitUntilReleaseObserved(for: route) }
+        #expect(await waitForReleaseWaiter(on: router))
+
+        // The host clock jumps forward, but the sample clock says the next
+        // buffer follows the first one exactly. No samples were lost.
+        router.ingest(
+            try pcmBuffer(values: [10, 11, 12, 13]),
+            timestamp: AVAudioTime(
+                hostTime: addingFrames(36, to: start),
+                sampleTime: 4,
+                atRate: 1_000),
+            observedHostTime: addingFrames(40, to: start))
+
+        #expect(await wait.value)
+        #expect(probe.integrityFailure == nil)
+    }
+
     @Test("The first callback establishes continuity after tap priming")
     func firstCallbackEstablishesTimestampContinuity() async throws {
         let probe = SinkProbe()

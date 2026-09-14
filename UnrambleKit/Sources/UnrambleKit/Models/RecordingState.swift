@@ -15,6 +15,10 @@ public enum RecordingState: Sendable, Equatable {
 public enum RecordingFailure: Sendable, Equatable {
     /// OpenAI rejected the request because the API key reached its rate limit.
     case rateLimited
+
+    /// The microphone produced an incomplete capture, but the retained audio
+    /// can still be transcribed through Retry.
+    case audioCaptureInterrupted
 }
 
 /// A coordinator state observation tagged with the session responsible for it.

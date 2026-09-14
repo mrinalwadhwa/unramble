@@ -22,7 +22,13 @@ struct HUDFailurePresentation: Equatable {
     }()
 
     static let genericRetry = HUDFailurePresentation(
-        message: "Lost connection",
+        message: "Connection lost",
+        pillSize: CGSize(width: 220, height: 32),
+        messageWidth: nil,
+        maximumMessageLines: 1)
+
+    static let audioCaptureInterrupted = HUDFailurePresentation(
+        message: "Audio interrupted",
         pillSize: CGSize(width: 220, height: 32),
         messageWidth: nil,
         maximumMessageLines: 1)
@@ -46,6 +52,8 @@ struct HUDFailurePresentation: Equatable {
         switch failure {
         case .rateLimited:
             return rateLimited
+        case .audioCaptureInterrupted:
+            return audioCaptureInterrupted
         case nil:
             return retryAvailable ? genericRetry : genericNoRetry
         }
