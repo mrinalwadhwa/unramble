@@ -12,6 +12,9 @@ final class PCMChunkPlayback: @unchecked Sendable {
     let player: any PCMChunkPlaying
 
     private let lock = NSLock()
+    // Serialize calls into the player. Completion callbacks only take
+    // `lock`, so a synchronous completion cannot deadlock this lock.
+    private let playerLock = NSLock()
     private var pendingBuffers = 0
     private var finishedScheduling = false
     private var stopped = false
@@ -40,7 +43,23 @@ final class PCMChunkPlayback: @unchecked Sendable {
         self.player = player
     }
 
-    func schedule(samples: [Float]) throws {
+    /// Silence follows the same scheduling, drain, and stop path as speech.
+    func scheduleSilence(
+        duration: TimeInterval,
+        diagnosticLabel: String? = nil
+    ) throws {
+        guard duration > 0 else { return }
+        guard let format = player.format else {
+            throw PCMChunkPlaybackError.bufferAllocationFailed
+        }
+        let frameCount = Int((duration * format.sampleRate).rounded())
+        guard frameCount > 0 else { return }
+        try schedule(
+            samples: [Float](repeating: 0, count: frameCount),
+            diagnosticLabel: diagnosticLabel)
+    }
+
+    func schedule(samples: [Float], diagnosticLabel: String? = nil) throws {
         guard let format = player.format,
             let buffer = AVAudioPCMBuffer(
                 pcmFormat: format,
@@ -54,28 +73,43 @@ final class PCMChunkPlayback: @unchecked Sendable {
                 .update(from: source.baseAddress!, count: samples.count)
         }
 
-        let shouldStart: Bool = lock.withLock {
-            guard !stopped else { return false }
-            pendingBuffers += 1
-            if !started {
-                started = true
-                return true
+        try playerLock.withLock {
+            let shouldStart: Bool? = lock.withLock {
+                guard !stopped else { return nil }
+                pendingBuffers += 1
+                if !started {
+                    started = true
+                    return true
+                }
+                return false
             }
-            return false
-        }
+            guard let shouldStart else { return }
+            if let diagnosticLabel {
+                Log.debug(
+                    "[PCMPause] \(diagnosticLabel) queued frames=\(samples.count) "
+                        + "sampleRate=\(format.sampleRate) "
+                        + "durationMs=\(Double(samples.count) / format.sampleRate * 1000)")
+            }
 
-        // Queue the first buffer before playback starts. Starting an empty
-        // player lets the audio graph run ahead of the buffer and can clip
-        // the opening word from a newly synthesized utterance.
-        player.schedule(buffer: buffer) { [weak self] in
-            self?.bufferFinished()
-        }
-        if shouldStart {
-            do {
-                try player.start()
-            } catch {
-                lock.withLock { pendingBuffers -= 1 }
-                throw error
+            // Queue the first buffer before playback starts. Starting an empty
+            // player lets the audio graph run ahead of the buffer and can clip
+            // the opening word from a newly synthesized utterance.
+            player.schedule(buffer: buffer) { [weak self] in
+                self?.bufferFinished()
+                if let self, let diagnosticLabel {
+                    let stopped = self.lock.withLock { self.stopped }
+                    Log.debug(
+                        "[PCMPause] \(diagnosticLabel) completion stopped=\(stopped) "
+                            + "uptime=\(ProcessInfo.processInfo.systemUptime)")
+                }
+            }
+            if shouldStart {
+                do {
+                    try player.start()
+                } catch {
+                    lock.withLock { pendingBuffers -= 1 }
+                    throw error
+                }
             }
         }
     }
@@ -101,16 +135,19 @@ final class PCMChunkPlayback: @unchecked Sendable {
     /// player's completion handlers may also fire on stop; both paths
     /// resume the waiter at most once.
     func stop() {
-        let (wasStarted, continuation):
-            (Bool, CheckedContinuation<Void, Never>?) = lock.withLock {
-                stopped = true
-                pendingBuffers = 0
-                let waiter = drainContinuation
-                drainContinuation = nil
-                return (started, waiter)
+        let continuation = playerLock.withLock {
+            let (wasStarted, waiter):
+                (Bool, CheckedContinuation<Void, Never>?) = lock.withLock {
+                    stopped = true
+                    pendingBuffers = 0
+                    let waiter = drainContinuation
+                    drainContinuation = nil
+                    return (started, waiter)
+                }
+            if wasStarted {
+                player.stop()
             }
-        if wasStarted {
-            player.stop()
+            return waiter
         }
         continuation?.resume()
     }

@@ -97,7 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contextProvider: AXAppContextProvider(),
             sources: [
                 SelectionContentSource(
-                    selectionReader: AXSelectionReader()),
+                    selectionReader: AXSelectionReader(),
+                    webReader: AXWebContentReader()),
                 CopySelectionContentSource(
                     supportedBundleIDs: ["dev.zed.Zed"],
                     selectionReader: PasteboardCopySelectionReader()),

@@ -26,6 +26,9 @@ public struct CopySelectionContentSource: ContentSourceProviding {
             !selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return nil }
 
+        Log.debug(
+            "[ReadAloudSelection] app=\(context.bundleID) origin=copy "
+                + SpeechDiagnostics.textStructure(selection))
         return ReadableContent(
             segments: [.init(kind: .prose, text: selection)])
     }

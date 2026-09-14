@@ -95,9 +95,7 @@ public final class KokoroSpeechSynthesizer: SpeechSynthesizing,
                 }
             }
 
-            let script = KokoroTextNormalizer.normalize(text)
-            for chunk in KokoroSpeechChunker.chunks(from: script) {
-                try Task.checkCancellation()
+            try await Self.scheduleSpeech(text, into: playback) { chunk in
                 let audio = try await model.generate(
                     text: chunk,
                     voice: voice,
@@ -105,10 +103,7 @@ public final class KokoroSpeechSynthesizer: SpeechSynthesizing,
                     refText: nil,
                     language: nil,
                     generationParameters: GenerateParameters())
-                try Task.checkCancellation()
-                let samples = audio.asArray(Float.self)
-                guard !samples.isEmpty else { continue }
-                try playback.schedule(samples: samples)
+                return audio.asArray(Float.self)
             }
             await playback.drain()
         } catch is CancellationError {
@@ -116,6 +111,51 @@ public final class KokoroSpeechSynthesizer: SpeechSynthesizing,
         } catch {
             Log.debug("[KokoroTTS] Speech failed: \(error)")
         }
+    }
+
+    /// Keep paragraph timing in the audio queue so generation of the next
+    /// chunk can overlap playback, including the pause.
+    static func scheduleSpeech(
+        _ text: String,
+        into playback: PCMChunkPlayback,
+        generate: (String) async throws -> [Float]
+    ) async throws {
+        let script = KokoroTextNormalizer.normalize(text)
+        var hasScheduledAudio = false
+        var pausePending = false
+        let chunks = KokoroSpeechChunker.paragraphChunks(from: script)
+        let diagnosticID = UUID().uuidString
+        Log.debug(
+            "[KokoroTTS] run=\(diagnosticID) normalized "
+                + SpeechDiagnostics.textStructure(script)
+                + " chunks=\(chunks.count) paragraphBreaks=\(chunks.filter(\.pauseAfter).count)")
+        var pauseCount = 0
+        for (index, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
+            let samples = try await generate(chunk.text)
+            try Task.checkCancellation()
+            Log.debug(
+                "[KokoroTTS] run=\(diagnosticID) chunk=\(index + 1) "
+                    + "chars=\(chunk.text.count) frames=\(samples.count) "
+                    + "paragraphEnd=\(chunk.pauseAfter)")
+            if !samples.isEmpty {
+                if pausePending {
+                    pauseCount += 1
+                    try playback.scheduleSilence(
+                        duration: 0.3,
+                        diagnosticLabel: "run=\(diagnosticID) pause=\(pauseCount) beforeChunk=\(index + 1)")
+                }
+                try playback.schedule(samples: samples)
+                hasScheduledAudio = true
+                pausePending = false
+            }
+            // A boundary belongs to the text even when its final chunk
+            // produces no audio. Queue silence only once more speech exists.
+            if chunk.pauseAfter && hasScheduledAudio {
+                pausePending = true
+            }
+        }
+        Log.debug("[KokoroTTS] run=\(diagnosticID) schedulingFinished pauses=\(pauseCount)")
     }
 
     private func loadedModel() async throws -> KokoroModel {

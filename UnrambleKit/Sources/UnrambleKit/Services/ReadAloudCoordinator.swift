@@ -147,6 +147,10 @@ public actor ReadAloudCoordinator {
             }
             if let content = content ?? nil, !content.isEmpty {
                 acquired = content
+                Log.debug(
+                    "[ReadAloud] session=\(generation) app=\(context.bundleID) "
+                        + "source=\(String(describing: type(of: source))) "
+                        + "segments=\(content.segments.count)")
                 break
             }
         }
@@ -167,7 +171,11 @@ public actor ReadAloudCoordinator {
         }
 
         transitionIfCurrent(generation: generation, to: .speaking)
-        await synthesizer.speak(scriptBuilder.script(for: acquired))
+        let script = scriptBuilder.script(for: acquired)
+        Log.debug(
+            "[ReadAloud] session=\(generation) script "
+                + SpeechDiagnostics.textStructure(script))
+        await synthesizer.speak(script)
         finishSession(generation: generation, in: .idle)
     }
 

@@ -5,15 +5,57 @@ import Foundation
 /// Kokoro caps one pass at 510 phoneme tokens, and one pass produces one
 /// uninterruptible stretch of generation, so chunks also bound how long
 /// the first audio takes and how promptly a stop lands. Chunks break at
-/// sentence boundaries, packing whole sentences up to the limit; a single
-/// overlong sentence splits at word boundaries.
+/// sentence boundaries within each paragraph, packing whole sentences up
+/// to the limit; a single overlong sentence splits at word boundaries.
 enum KokoroSpeechChunker {
+
+    struct Chunk: Equatable, Sendable {
+        let text: String
+        let pauseAfter: Bool
+    }
 
     /// A conservative character budget per pass: phoneme tokens roughly
     /// track characters, so this stays well under the model's cap while
     /// keeping chunks long enough for natural phrasing across a sentence.
     static let defaultMaximumLength = 350
 
+    static func paragraphChunks(
+        from text: String,
+        maximumLength: Int = defaultMaximumLength
+    ) -> [Chunk] {
+        // Keep soft line wraps within a paragraph. A blank line ends it;
+        // repeated blank lines never create empty spoken paragraphs.
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        var paragraphs: [String] = []
+        var current: [String] = []
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                if !current.isEmpty {
+                    paragraphs.append(current.joined(separator: "\n"))
+                    current = []
+                }
+            } else {
+                current.append(line)
+            }
+        }
+        if !current.isEmpty {
+            paragraphs.append(current.joined(separator: "\n"))
+        }
+
+        return paragraphs.enumerated().flatMap { paragraphIndex, paragraph in
+            let parts = chunks(from: paragraph, maximumLength: maximumLength)
+            return parts.enumerated().map { index, text in
+                Chunk(
+                    text: text,
+                    pauseAfter: index == parts.count - 1
+                        && paragraphIndex < paragraphs.count - 1)
+            }
+        }
+    }
+
+    /// Sentence packing shared with the cloud voice, which handles its own phrasing.
     static func chunks(
         from text: String,
         maximumLength: Int = defaultMaximumLength
